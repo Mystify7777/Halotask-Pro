@@ -9,3 +9,4 @@
 [2026-04-19] - Frontend - DashboardPage split into reusable components/hooks to stop oversized page growth
 [2026-04-19] - Frontend - TaskList split into TaskCard and TaskEditForm for maintainable component boundaries
 [2026-04-19] - Frontend - Task sorting system added with modular sorting hook and filter dropdown
+[2026-04-19] - Frontend - Bulk actions system added (clear completed, selection mode, select all visible, mark complete, delete with confirmation)

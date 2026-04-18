@@ -3,8 +3,10 @@ import { AxiosError } from 'axios';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
+import BulkActionsBar from '../components/dashboard/BulkActionsBar';
 import { TaskEditState } from '../components/dashboard/types';
 import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
+import { useTaskSelection } from '../hooks/useTaskSelection';
 import { TaskSortOption, useTaskSorting } from '../hooks/useTaskSorting';
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import { taskService } from '../services/taskService';
@@ -20,6 +22,7 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [activeActionTaskId, setActiveActionTaskId] = useState<string | null>(null);
 
   const [title, setTitle] = useState('');
@@ -41,6 +44,8 @@ export default function DashboardPage() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
 
+  const { selectedIds, toggleSelect, clearSelection, selectAll, retainOnly } = useTaskSelection();
+
   const createTagSuggestions = useTagSuggestions(tasks, createTagInput, createTags);
   const editTagSuggestions = useTagSuggestions(tasks, editState?.tagInput ?? '', editState?.tags ?? []);
 
@@ -53,6 +58,15 @@ export default function DashboardPage() {
   });
 
   const sortedTasks = useTaskSorting(filteredTasks, sortBy);
+
+  const visibleTaskIds = sortedTasks.map((task) => task._id);
+
+  useEffect(() => {
+    retainOnly(visibleTaskIds);
+  }, [retainOnly, visibleTaskIds]);
+
+  const selectedVisibleIds = selectedIds.filter((id) => visibleTaskIds.includes(id));
+  const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleIds.length === visibleTaskIds.length;
 
   const loadTasks = async () => {
     try {
@@ -196,6 +210,97 @@ export default function DashboardPage() {
     }
   };
 
+  const handleClearCompleted = async () => {
+    setStatusError(null);
+    setStatusInfo(null);
+
+    const completedIds = tasks.filter((task) => task.completed).map((task) => task._id);
+
+    if (completedIds.length === 0) {
+      setStatusInfo('No completed tasks to clear.');
+      return;
+    }
+
+    try {
+      setBulkActionLoading(true);
+      await Promise.all(completedIds.map((taskId) => taskService.deleteTask(taskId)));
+      setTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
+      clearSelection();
+      setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'}.`);
+    } catch (requestError) {
+      const axiosError = requestError as AxiosError<{ message?: string }>;
+      setStatusError(axiosError.response?.data?.message ?? 'Unable to clear completed tasks');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const handleMarkSelectedComplete = async () => {
+    setStatusError(null);
+    setStatusInfo(null);
+
+    if (selectedVisibleIds.length === 0) {
+      return;
+    }
+
+    const selectedTasks = sortedTasks.filter((task) => selectedVisibleIds.includes(task._id));
+    const incompleteTasks = selectedTasks.filter((task) => !task.completed);
+
+    if (incompleteTasks.length === 0) {
+      setStatusInfo('Selected tasks are already completed.');
+      return;
+    }
+
+    try {
+      setBulkActionLoading(true);
+
+      const updated = await Promise.all(
+        incompleteTasks.map(async (task) => {
+          const response = await taskService.updateTask(task._id, { completed: true });
+          return response.task;
+        }),
+      );
+
+      const updatedById = new Map(updated.map((task) => [task._id, task]));
+      setTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
+      clearSelection();
+      setStatusInfo(`Marked ${updated.length} task${updated.length === 1 ? '' : 's'} complete.`);
+    } catch (requestError) {
+      const axiosError = requestError as AxiosError<{ message?: string }>;
+      setStatusError(axiosError.response?.data?.message ?? 'Unable to mark selected tasks complete');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    setStatusError(null);
+    setStatusInfo(null);
+
+    if (selectedVisibleIds.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ${selectedVisibleIds.length} selected tasks?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setBulkActionLoading(true);
+      await Promise.all(selectedVisibleIds.map((taskId) => taskService.deleteTask(taskId)));
+      setTasks((current) => current.filter((task) => !selectedVisibleIds.includes(task._id)));
+      clearSelection();
+      setStatusInfo(`Deleted ${selectedVisibleIds.length} selected task${selectedVisibleIds.length === 1 ? '' : 's'}.`);
+    } catch (requestError) {
+      const axiosError = requestError as AxiosError<{ message?: string }>;
+      setStatusError(axiosError.response?.data?.message ?? 'Unable to delete selected tasks');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
   const handleStartEditing = (task: Task) => {
     setEditingTaskId(task._id);
     setEditState({
@@ -286,6 +391,24 @@ export default function DashboardPage() {
           onClearTagFilter={() => setTagFilter(null)}
         />
 
+        <div className="inline-actions-row">
+          <button type="button" className="ghost-btn" onClick={handleClearCompleted} disabled={bulkActionLoading}>
+            Clear Completed
+          </button>
+        </div>
+
+        {selectedVisibleIds.length > 0 && (
+          <BulkActionsBar
+            selectedCount={selectedVisibleIds.length}
+            allVisibleSelected={allVisibleSelected}
+            loading={bulkActionLoading}
+            onSelectAllVisible={() => selectAll(visibleTaskIds)}
+            onClearSelection={clearSelection}
+            onMarkSelectedComplete={handleMarkSelectedComplete}
+            onDeleteSelected={handleDeleteSelected}
+          />
+        )}
+
         {statusError && <p className="form-error">{statusError}</p>}
         {statusInfo && <p className="form-success">{statusInfo}</p>}
 
@@ -293,6 +416,8 @@ export default function DashboardPage() {
           tasks={sortedTasks}
           loadingTasks={loadingTasks}
           activeActionTaskId={activeActionTaskId}
+          selectedIds={selectedVisibleIds}
+          bulkActionLoading={bulkActionLoading}
           editingTaskId={editingTaskId}
           editState={editState}
           editTagSuggestions={editTagSuggestions}
@@ -303,6 +428,7 @@ export default function DashboardPage() {
           onSaveTaskEdit={handleSaveTaskEdit}
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}
+          onToggleSelect={toggleSelect}
           onToggleTagFilter={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
           onAddEditTag={addEditTag}
           onRemoveEditTag={removeEditTag}

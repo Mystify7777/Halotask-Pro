@@ -11,6 +11,8 @@ type TaskListProps = {
   tasks: Task[];
   loadingTasks: boolean;
   activeActionTaskId: string | null;
+  selectedIds: string[];
+  bulkActionLoading: boolean;
   editingTaskId: string | null;
   editState: TaskEditState | null;
   editTagSuggestions: string[];
@@ -21,6 +23,7 @@ type TaskListProps = {
   onSaveTaskEdit: (taskId: string) => void;
   onToggleTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
+  onToggleSelect: (taskId: string) => void;
   onToggleTagFilter: (tag: string) => void;
   onAddEditTag: (tag: string) => AddTagResult;
   onRemoveEditTag: (tag: string) => void;
@@ -30,6 +33,8 @@ export default function TaskList({
   tasks,
   loadingTasks,
   activeActionTaskId,
+  selectedIds,
+  bulkActionLoading,
   editingTaskId,
   editState,
   editTagSuggestions,
@@ -40,6 +45,7 @@ export default function TaskList({
   onSaveTaskEdit,
   onToggleTask,
   onDeleteTask,
+  onToggleSelect,
   onToggleTagFilter,
   onAddEditTag,
   onRemoveEditTag,
@@ -73,10 +79,13 @@ export default function TaskList({
               task={task}
               activeActionTaskId={activeActionTaskId}
               tagFilter={tagFilter}
+              isSelected={selectedIds.includes(task._id)}
+              bulkActionLoading={bulkActionLoading}
               onToggleTask={onToggleTask}
               onDeleteTask={onDeleteTask}
               onStartEditing={onStartEditing}
               onToggleTagFilter={onToggleTagFilter}
+              onToggleSelect={onToggleSelect}
             />
           )}
         </li>

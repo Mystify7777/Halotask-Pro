@@ -329,6 +329,28 @@ button:disabled {
   margin-top: 0.55rem;
 }
 
+.inline-actions-row {
+  margin-top: 0.55rem;
+}
+
+.bulk-actions-bar {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem;
+  border: 1px solid #cfdceb;
+  border-radius: 10px;
+  background: #f7fbff;
+}
+
+.bulk-count {
+  font-size: 0.85rem;
+  color: #27496b;
+  font-weight: 600;
+}
+
 .active-filter-chip {
   display: inline-flex;
   align-items: center;
@@ -423,6 +445,14 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+}
+
+.select-task-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #4e6580;
 }
 
 .edit-panel {
