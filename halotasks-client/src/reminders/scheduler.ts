@@ -1,5 +1,6 @@
 import { Task } from '../types/task';
 import { getSmartStartWindows, getTasksDueInNextHour, getTasksOverdueNow } from './deadlineLogic';
+import { isWithinQuietHours, ReminderSettings } from './settings';
 
 type ReminderType = 'due-soon' | 'overdue' | 'work-session-soon' | 'start-now';
 
@@ -10,12 +11,14 @@ type ReminderEvent = {
 
 type ReminderSchedulerOptions = {
   getTasks: () => Task[];
+  getSettings: () => ReminderSettings;
   onReminder: (event: ReminderEvent) => void;
   intervalMs?: number;
 };
 
 export const createReminderScheduler = ({
   getTasks,
+  getSettings,
   onReminder,
   intervalMs = 60_000,
 }: ReminderSchedulerOptions) => {
@@ -39,21 +42,32 @@ export const createReminderScheduler = ({
 
   const runNow = () => {
     const tasks = getTasks();
+    const settings = getSettings();
     const nowTime = Date.now();
 
-    const dueSoon = getTasksDueInNextHour(tasks, nowTime, 60);
+    if (!settings.enabled) {
+      return;
+    }
+
+    if (isWithinQuietHours(new Date(nowTime), settings)) {
+      return;
+    }
+
+    const dueSoon = settings.dueSoonEnabled ? getTasksDueInNextHour(tasks, nowTime, 60) : [];
     const overdue = getTasksOverdueNow(tasks, nowTime);
-    const smartStartWindows = getSmartStartWindows(tasks, nowTime, 60);
+    const smartStartWindows = getSmartStartWindows(tasks, nowTime, settings.bufferMinutes);
 
     dueSoon.forEach((task) => dispatchIfNeeded(task, 'due-soon'));
-    overdue.forEach((task) => dispatchIfNeeded(task, 'overdue'));
+    if (settings.overdueEnabled) {
+      overdue.forEach((task) => dispatchIfNeeded(task, 'overdue'));
+    }
 
     smartStartWindows.forEach(({ task, dueTime, latestStartTime, notifyAtTime }) => {
-      if (nowTime >= notifyAtTime && nowTime < latestStartTime) {
+      if (settings.workSessionSoonEnabled && nowTime >= notifyAtTime && nowTime < latestStartTime) {
         dispatchIfNeeded(task, 'work-session-soon');
       }
 
-      if (nowTime >= latestStartTime && nowTime < dueTime) {
+      if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < dueTime) {
         dispatchIfNeeded(task, 'start-now');
       }
     });

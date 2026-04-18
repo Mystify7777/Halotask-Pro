@@ -14,6 +14,7 @@ import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimest
 import { useNetworkStatus } from '../offline/network';
 import { processSyncQueue } from '../offline/queueProcessor';
 import { enqueueSyncAction, getSyncQueue } from '../offline/syncQueue';
+import ReminderSettings from '../components/dashboard/ReminderSettings';
 import { sendReminderNotification } from '../reminders/notification';
 import {
   getNotificationPermissionStatus,
@@ -21,6 +22,7 @@ import {
   requestNotificationPermission,
 } from '../reminders/permissions';
 import { createReminderScheduler } from '../reminders/scheduler';
+import { getReminderSettings, ReminderSettings as ReminderSettingsType, saveReminderSettings } from '../reminders/settings';
 import { taskService } from '../services/taskService';
 import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
@@ -67,11 +69,14 @@ export default function DashboardPage() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
     getNotificationPermissionStatus(),
   );
+  const [reminderSettings, setReminderSettings] = useState<ReminderSettingsType>(getReminderSettings());
+  const [isReminderSettingsOpen, setIsReminderSettingsOpen] = useState(false);
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
 
   const tasksRef = useRef<Task[]>([]);
+  const reminderSettingsRef = useRef<ReminderSettingsType>(reminderSettings);
   const reminderSchedulerRef = useRef<ReturnType<typeof createReminderScheduler> | null>(null);
 
   const { isOnline } = useNetworkStatus();
@@ -100,6 +105,12 @@ export default function DashboardPage() {
   }, [tasks]);
 
   useEffect(() => {
+    reminderSettingsRef.current = reminderSettings;
+    saveReminderSettings(reminderSettings);
+    reminderSchedulerRef.current?.runNow();
+  }, [reminderSettings]);
+
+  useEffect(() => {
     if (!remindersSupported) {
       return;
     }
@@ -107,6 +118,7 @@ export default function DashboardPage() {
     if (!reminderSchedulerRef.current) {
       reminderSchedulerRef.current = createReminderScheduler({
         getTasks: () => tasksRef.current,
+        getSettings: () => reminderSettingsRef.current,
         onReminder: ({ task, type }) => {
           sendReminderNotification(task, type);
         },
@@ -135,6 +147,11 @@ export default function DashboardPage() {
     } else if (permission === 'denied') {
       setStatusError('Notifications are blocked. Enable browser notifications for reminder alerts.');
     }
+  };
+
+  const handleReminderSettingsChange = (next: ReminderSettingsType) => {
+    setReminderSettings(next);
+    setStatusInfo('Reminder settings updated.');
   };
 
   useEffect(() => {
@@ -868,6 +885,12 @@ export default function DashboardPage() {
               ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               : ''}
           </p>
+          <ReminderSettings
+            isOpen={isReminderSettingsOpen}
+            settings={reminderSettings}
+            onToggleOpen={() => setIsReminderSettingsOpen((current) => !current)}
+            onSettingsChange={handleReminderSettingsChange}
+          />
           {remindersSupported && notificationPermission === 'default' && (
             <button
               type="button"

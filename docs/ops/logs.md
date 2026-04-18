@@ -17,3 +17,4 @@
 [2026-04-19] - Frontend - Manual retry sync control added for errors-pending queue state with pending count visibility
 [2026-04-19] - Frontend - Reminder Engine Phase 1 added with due-soon/overdue browser notifications and session duplicate prevention
 [2026-04-19] - Frontend - Reminder Engine Phase 2 added with smart start-time alerts based on due date, estimated work, and default buffer
+[2026-04-19] - Frontend - Reminder settings panel added with local persistence, buffer control, type toggles, and quiet hours

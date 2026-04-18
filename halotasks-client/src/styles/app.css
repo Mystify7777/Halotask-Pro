@@ -352,6 +352,49 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.reminder-settings-wrap {
+  position: relative;
+}
+
+.reminder-settings-btn {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.reminder-settings-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 5;
+  width: min(96vw, 360px);
+  background: #ffffff;
+  border: 1px solid #d5e2ef;
+  border-radius: 12px;
+  box-shadow: 0 10px 26px rgba(19, 34, 56, 0.14);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.settings-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.inline-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: #2b435d;
+}
+
+.quiet-hours-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
 .reminder-permission-note {
   font-size: 0.78rem;
   color: #7c4a12;
