@@ -1,112 +1,18 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { AxiosError } from 'axios';
+import TaskCreateForm from '../components/dashboard/TaskCreateForm';
+import TaskFilters from '../components/dashboard/TaskFilters';
+import TaskList from '../components/dashboard/TaskList';
+import { TaskEditState } from '../components/dashboard/types';
+import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
+import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import { taskService } from '../services/taskService';
 import { Priority, Task } from '../types/task';
+import { formatDateForInput } from '../utils/dateHelpers';
+import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 
-type FilterMode = 'all' | 'active' | 'completed';
-
-type TaskEditState = {
-  title: string;
-  priority: Priority;
-  tags: string[];
-  tagInput: string;
-  dueDate: string;
-  estimatedMinutes: string;
-};
-
-const SUGGESTED_TAGS = ['work', 'study', 'health', 'personal', 'urgent', 'finance'] as const;
-const MAX_TAGS = 5;
-const MAX_TAG_LENGTH = 20;
-
-const toTitleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-
-const normalizeTag = (value: string) => value.trim().toLowerCase().slice(0, MAX_TAG_LENGTH);
-
-const sanitizeTags = (tags: string[]) => {
-  const unique = new Set<string>();
-
-  for (const tag of tags) {
-    const normalized = normalizeTag(tag);
-
-    if (!normalized) {
-      continue;
-    }
-
-    unique.add(normalized);
-
-    if (unique.size >= MAX_TAGS) {
-      break;
-    }
-  }
-
-  return Array.from(unique);
-};
-
-const tryAddTag = (currentTags: string[], rawValue: string) => {
-  const normalized = normalizeTag(rawValue);
-
-  if (!normalized) {
-    return {
-      tags: currentTags,
-      message: null as string | null,
-    };
-  }
-
-  if (currentTags.includes(normalized)) {
-    return {
-      tags: currentTags,
-      message: null as string | null,
-    };
-  }
-
-  if (currentTags.length >= MAX_TAGS) {
-    return {
-      tags: currentTags,
-      message: `Maximum ${MAX_TAGS} tags allowed per task.`,
-    };
-  }
-
-  return {
-    tags: [...currentTags, normalized],
-    message: null as string | null,
-  };
-};
-
-const formatDateForInput = (value?: string) => {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  return date.toISOString().split('T')[0];
-};
-
-const getDateBadgeClass = (value?: string) => {
-  if (!value) {
-    return 'date-muted';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'date-muted';
-  }
-
-  const due = new Date(date.toDateString()).getTime();
-  const today = new Date(new Date().toDateString()).getTime();
-
-  if (due < today) {
-    return 'date-overdue';
-  }
-
-  if (due === today) {
-    return 'date-today';
-  }
-
-  return 'date-muted';
+type AddTagResult = {
+  message: string | null;
 };
 
 export default function DashboardPage() {
@@ -114,24 +20,35 @@ export default function DashboardPage() {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [creatingTask, setCreatingTask] = useState(false);
   const [activeActionTaskId, setActiveActionTaskId] = useState<string | null>(null);
+
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [dueDate, setDueDate] = useState('');
   const [createTags, setCreateTags] = useState<string[]>([]);
   const [createTagInput, setCreateTagInput] = useState('');
-  const [createTagSuggestionsOpen, setCreateTagSuggestionsOpen] = useState(false);
-  const [createTagSuggestionIndex, setCreateTagSuggestionIndex] = useState(-1);
   const [estimatedMinutes, setEstimatedMinutes] = useState('');
+
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
-  const [editTagSuggestionsOpen, setEditTagSuggestionsOpen] = useState(false);
-  const [editTagSuggestionIndex, setEditTagSuggestionIndex] = useState(-1);
+
+  const createTagSuggestions = useTagSuggestions(tasks, createTagInput, createTags);
+  const editTagSuggestions = useTagSuggestions(tasks, editState?.tagInput ?? '', editState?.tags ?? []);
+
+  const filteredTasks = useTaskFilters({
+    tasks,
+    search,
+    filterMode,
+    priorityFilter,
+    tagFilter,
+  });
 
   const loadTasks = async () => {
     try {
@@ -151,124 +68,7 @@ export default function DashboardPage() {
     void loadTasks();
   }, []);
 
-  const filteredTasks = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    return tasks.filter((task) => {
-      if (filterMode === 'active' && task.completed) {
-        return false;
-      }
-
-      if (filterMode === 'completed' && !task.completed) {
-        return false;
-      }
-
-      if (priorityFilter !== 'all' && task.priority !== priorityFilter) {
-        return false;
-      }
-
-      if (tagFilter) {
-        const hasTag = task.tags.some((tag) => normalizeTag(tag) === tagFilter);
-        if (!hasTag) {
-          return false;
-        }
-      }
-
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return (
-        task.title.toLowerCase().includes(normalizedSearch) ||
-        task.description.toLowerCase().includes(normalizedSearch)
-      );
-    });
-  }, [tasks, filterMode, priorityFilter, search, tagFilter]);
-
-  const dynamicTagUsage = useMemo(() => {
-    const usage = new Map<string, number>();
-
-    for (const task of tasks) {
-      for (const rawTag of task.tags) {
-        const normalized = normalizeTag(rawTag);
-        if (!normalized) {
-          continue;
-        }
-
-        usage.set(normalized, (usage.get(normalized) ?? 0) + 1);
-      }
-    }
-
-    return usage;
-  }, [tasks]);
-
-  const buildTagSuggestions = (inputValue: string, selectedTags: string[]) => {
-    const normalizedInput = normalizeTag(inputValue);
-
-    return Array.from(dynamicTagUsage.entries())
-      .filter(([tag]) => {
-        if (selectedTags.includes(tag)) {
-          return false;
-        }
-
-        if (!normalizedInput) {
-          return true;
-        }
-
-        return tag.includes(normalizedInput);
-      })
-      .sort((a, b) => {
-        if (b[1] !== a[1]) {
-          return b[1] - a[1];
-        }
-
-        return a[0].localeCompare(b[0]);
-      })
-      .slice(0, 5)
-      .map(([tag]) => tag);
-  };
-
-  const createTagSuggestions = useMemo(
-    () => buildTagSuggestions(createTagInput, createTags),
-    [createTagInput, createTags, dynamicTagUsage],
-  );
-
-  const editTagSuggestions = useMemo(
-    () => buildTagSuggestions(editState?.tagInput ?? '', editState?.tags ?? []),
-    [editState, dynamicTagUsage],
-  );
-
-  useEffect(() => {
-    if (!createTagSuggestions.length) {
-      setCreateTagSuggestionIndex(-1);
-      return;
-    }
-
-    setCreateTagSuggestionIndex((current) => {
-      if (current < 0) {
-        return 0;
-      }
-
-      return Math.min(current, createTagSuggestions.length - 1);
-    });
-  }, [createTagSuggestions]);
-
-  useEffect(() => {
-    if (!editTagSuggestions.length) {
-      setEditTagSuggestionIndex(-1);
-      return;
-    }
-
-    setEditTagSuggestionIndex((current) => {
-      if (current < 0) {
-        return 0;
-      }
-
-      return Math.min(current, editTagSuggestions.length - 1);
-    });
-  }, [editTagSuggestions]);
-
-  const commitCreateTag = (rawTag: string) => {
+  const addCreateTag = (rawTag: string): AddTagResult => {
     const result = tryAddTag(createTags, rawTag);
     setCreateTags(result.tags);
 
@@ -276,21 +76,16 @@ export default function DashboardPage() {
       setStatusError(result.message);
     }
 
-    return result;
+    return { message: result.message };
   };
 
-  const selectCreateSuggestion = (tag: string) => {
-    const result = commitCreateTag(tag);
-    if (!result.message) {
-      setCreateTagInput('');
-    }
-
-    setCreateTagSuggestionsOpen(false);
+  const removeCreateTag = (tag: string) => {
+    setCreateTags((current) => current.filter((item) => item !== tag));
   };
 
-  const commitEditTag = (rawTag: string) => {
+  const addEditTag = (rawTag: string): AddTagResult => {
     if (!editState) {
-      return;
+      return { message: null };
     }
 
     const result = tryAddTag(editState.tags, rawTag);
@@ -308,189 +103,8 @@ export default function DashboardPage() {
     if (result.message) {
       setStatusError(result.message);
     }
-  };
 
-  const selectEditSuggestion = (tag: string) => {
-    commitEditTag(tag);
-    setEditTagSuggestionsOpen(false);
-  };
-
-  const handleCreateTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      if (!createTagSuggestions.length) {
-        return;
-      }
-
-      setCreateTagSuggestionsOpen(true);
-      setCreateTagSuggestionIndex((current) => {
-        const next = current + 1;
-        return next >= createTagSuggestions.length ? 0 : next;
-      });
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (!createTagSuggestions.length) {
-        return;
-      }
-
-      setCreateTagSuggestionsOpen(true);
-      setCreateTagSuggestionIndex((current) => {
-        const base = current < 0 ? 0 : current;
-        const next = base - 1;
-        return next < 0 ? createTagSuggestions.length - 1 : next;
-      });
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      setCreateTagSuggestionsOpen(false);
-      return;
-    }
-
-    if (event.key === 'Backspace' && !createTagInput.trim() && createTags.length > 0) {
-      event.preventDefault();
-      removeCreateTag(createTags[createTags.length - 1]);
-      return;
-    }
-
-    if (event.key !== 'Enter' && event.key !== ',') {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.key === 'Enter' && createTagSuggestionsOpen && createTagSuggestionIndex >= 0) {
-      const suggestion = createTagSuggestions[createTagSuggestionIndex];
-      if (suggestion) {
-        selectCreateSuggestion(suggestion);
-      }
-      return;
-    }
-
-    const result = commitCreateTag(createTagInput);
-    if (!result.message) {
-      setCreateTagInput('');
-    }
-
-    setCreateTagSuggestionsOpen(false);
-  };
-
-  const handleEditTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      if (!editTagSuggestions.length) {
-        return;
-      }
-
-      setEditTagSuggestionsOpen(true);
-      setEditTagSuggestionIndex((current) => {
-        const next = current + 1;
-        return next >= editTagSuggestions.length ? 0 : next;
-      });
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (!editTagSuggestions.length) {
-        return;
-      }
-
-      setEditTagSuggestionsOpen(true);
-      setEditTagSuggestionIndex((current) => {
-        const base = current < 0 ? 0 : current;
-        const next = base - 1;
-        return next < 0 ? editTagSuggestions.length - 1 : next;
-      });
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      setEditTagSuggestionsOpen(false);
-      return;
-    }
-
-    if (event.key === 'Backspace' && !editState?.tagInput.trim() && (editState?.tags.length ?? 0) > 0) {
-      event.preventDefault();
-      const lastTag = editState ? editState.tags[editState.tags.length - 1] : undefined;
-      if (lastTag) {
-        removeEditTag(lastTag);
-      }
-      return;
-    }
-
-    if (event.key !== 'Enter' && event.key !== ',') {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.key === 'Enter' && editTagSuggestionsOpen && editTagSuggestionIndex >= 0) {
-      const suggestion = editTagSuggestions[editTagSuggestionIndex];
-      if (suggestion) {
-        selectEditSuggestion(suggestion);
-      }
-      return;
-    }
-
-    commitEditTag(editState?.tagInput ?? '');
-    setEditTagSuggestionsOpen(false);
-  };
-
-  const toggleCreateSuggestedTag = (tag: string) => {
-    setStatusError(null);
-
-    if (createTags.includes(tag)) {
-      setCreateTags((current) => current.filter((item) => item !== tag));
-      return;
-    }
-
-    const result = tryAddTag(createTags, tag);
-    setCreateTags(result.tags);
-    if (result.message) {
-      setStatusError(result.message);
-    }
-  };
-
-  const toggleEditSuggestedTag = (tag: string) => {
-    if (!editState) {
-      return;
-    }
-
-    setStatusError(null);
-
-    if (editState.tags.includes(tag)) {
-      setEditState((current) =>
-        current
-          ? {
-              ...current,
-              tags: current.tags.filter((item) => item !== tag),
-            }
-          : current,
-      );
-      return;
-    }
-
-    const result = tryAddTag(editState.tags, tag);
-    setEditState((current) =>
-      current
-        ? {
-            ...current,
-            tags: result.tags,
-          }
-        : current,
-    );
-
-    if (result.message) {
-      setStatusError(result.message);
-    }
-  };
-
-  const removeCreateTag = (tag: string) => {
-    setCreateTags((current) => current.filter((item) => item !== tag));
+    return { message: result.message };
   };
 
   const removeEditTag = (tag: string) => {
@@ -504,11 +118,6 @@ export default function DashboardPage() {
     );
   };
 
-  const toggleTagFilter = (tag: string) => {
-    const normalized = normalizeTag(tag);
-    setTagFilter((current) => (current === normalized ? null : normalized));
-  };
-
   const handleCreateTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatusError(null);
@@ -520,7 +129,6 @@ export default function DashboardPage() {
 
     try {
       setCreatingTask(true);
-
       const parsedEstimatedMinutes = Number(estimatedMinutes);
 
       const response = await taskService.createTask({
@@ -540,7 +148,6 @@ export default function DashboardPage() {
       setDueDate('');
       setCreateTags([]);
       setCreateTagInput('');
-      setCreateTagSuggestionsOpen(false);
       setEstimatedMinutes('');
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
@@ -585,7 +192,7 @@ export default function DashboardPage() {
     }
   };
 
-  const startEditingTask = (task: Task) => {
+  const handleStartEditing = (task: Task) => {
     setEditingTaskId(task._id);
     setEditState({
       title: task.title,
@@ -597,10 +204,9 @@ export default function DashboardPage() {
     });
   };
 
-  const cancelEditingTask = () => {
+  const handleCancelEditing = () => {
     setEditingTaskId(null);
     setEditState(null);
-    setEditTagSuggestionsOpen(false);
   };
 
   const handleSaveTaskEdit = async (taskId: string) => {
@@ -613,7 +219,6 @@ export default function DashboardPage() {
 
     try {
       setActiveActionTaskId(taskId);
-
       const parsedEstimatedMinutes = Number(editState.estimatedMinutes);
 
       const response = await taskService.updateTask(taskId, {
@@ -628,7 +233,7 @@ export default function DashboardPage() {
       });
 
       setTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
-      cancelEditingTask();
+      handleCancelEditing();
       setStatusInfo('Task updated successfully.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -643,342 +248,59 @@ export default function DashboardPage() {
       <div className="panel">
         <h2>Task Panel</h2>
         <p>Fast capture first, polish later.</p>
-        <form className="task-create-form" onSubmit={handleCreateTask}>
-          <input
-            type="text"
-            placeholder="Add a task title"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            required
-          />
-          <select value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
-            aria-label="Due date"
-          />
-          <div className="tag-input-block">
-            <div className="chip-row">
-              {SUGGESTED_TAGS.map((tag) => (
-                <button
-                  key={`create-suggested-${tag}`}
-                  type="button"
-                  className={createTags.includes(tag) ? 'tag-chip selected' : 'tag-chip'}
-                  onClick={() => toggleCreateSuggestedTag(tag)}
-                >
-                  {toTitleCase(tag)}
-                </button>
-              ))}
-            </div>
-
-            <div className="chip-row selected-row">
-              {createTags.map((tag) => (
-                <span key={`create-selected-${tag}`} className="selected-chip">
-                  {tag}
-                  <button type="button" onClick={() => removeCreateTag(tag)} aria-label={`Remove ${tag}`}>
-                    x
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            <p className="tag-helper-text">{createTags.length}/{MAX_TAGS} tags used</p>
-
-            <input
-              type="text"
-              value={createTagInput}
-              onChange={(event) => {
-                setCreateTagInput(event.target.value);
-                setCreateTagSuggestionsOpen(true);
-              }}
-              onFocus={() => {
-                if (createTagSuggestions.length > 0) {
-                  setCreateTagSuggestionsOpen(true);
-                }
-              }}
-              onKeyDown={handleCreateTagInputKeyDown}
-              onBlur={() => setCreateTagSuggestionsOpen(false)}
-              placeholder="Type tag then Enter or comma"
-            />
-
-            {createTagSuggestionsOpen && createTagSuggestions.length > 0 && (
-              <div className="tag-suggestion-dropdown">
-                {createTagSuggestions.map((tag, index) => (
-                  <button
-                    key={`create-suggestion-${tag}`}
-                    type="button"
-                    className={index === createTagSuggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => selectCreateSuggestion(tag)}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <input
-            type="number"
-            min={0}
-            value={estimatedMinutes}
-            onChange={(event) => setEstimatedMinutes(event.target.value)}
-            placeholder="Estimated minutes"
-          />
-          <button type="submit" disabled={creatingTask}>
-            {creatingTask ? 'Saving...' : 'Add Task'}
-          </button>
-        </form>
+        <TaskCreateForm
+          title={title}
+          priority={priority}
+          dueDate={dueDate}
+          estimatedMinutes={estimatedMinutes}
+          creatingTask={creatingTask}
+          tags={createTags}
+          tagInput={createTagInput}
+          tagSuggestions={createTagSuggestions}
+          onSubmit={handleCreateTask}
+          onTitleChange={setTitle}
+          onPriorityChange={setPriority}
+          onDueDateChange={setDueDate}
+          onEstimatedMinutesChange={setEstimatedMinutes}
+          onTagInputChange={setCreateTagInput}
+          onAddTag={addCreateTag}
+          onRemoveTag={removeCreateTag}
+        />
       </div>
 
       <div className="panel">
-        <div className="filter-row">
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search tasks"
-          />
-          <select value={filterMode} onChange={(event) => setFilterMode(event.target.value as FilterMode)}>
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="completed">Completed</option>
-          </select>
-          <select
-            value={priorityFilter}
-            onChange={(event) => setPriorityFilter(event.target.value as 'all' | Priority)}
-          >
-            <option value="all">All Priorities</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-
-        {tagFilter && (
-          <div className="active-filter-row">
-            <span className="active-filter-chip">Filtering by tag: {tagFilter}</span>
-            <button type="button" className="ghost-btn" onClick={() => setTagFilter(null)}>
-              Clear
-            </button>
-          </div>
-        )}
+        <TaskFilters
+          search={search}
+          filterMode={filterMode}
+          priorityFilter={priorityFilter}
+          tagFilter={tagFilter}
+          onSearchChange={setSearch}
+          onFilterModeChange={setFilterMode}
+          onPriorityFilterChange={setPriorityFilter}
+          onClearTagFilter={() => setTagFilter(null)}
+        />
 
         {statusError && <p className="form-error">{statusError}</p>}
         {statusInfo && <p className="form-success">{statusInfo}</p>}
 
-        {loadingTasks ? (
-          <p>Loading tasks...</p>
-        ) : filteredTasks.length === 0 ? (
-          <p>No tasks match the current filters.</p>
-        ) : (
-          <ul className="task-list">
-            {filteredTasks.map((task) => (
-              <li key={task._id} className={task.completed ? 'task-item complete' : 'task-item'}>
-                {editingTaskId === task._id && editState ? (
-                  <div className="edit-panel">
-                    <input
-                      type="text"
-                      value={editState.title}
-                      onChange={(event) =>
-                        setEditState((current) =>
-                          current
-                            ? {
-                                ...current,
-                                title: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    <select
-                      value={editState.priority}
-                      onChange={(event) =>
-                        setEditState((current) =>
-                          current
-                            ? {
-                                ...current,
-                                priority: event.target.value as Priority,
-                              }
-                            : current,
-                        )
-                      }
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                    <input
-                      type="date"
-                      value={editState.dueDate}
-                      onChange={(event) =>
-                        setEditState((current) =>
-                          current
-                            ? {
-                                ...current,
-                                dueDate: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    <div className="tag-input-block">
-                      <div className="chip-row">
-                        {SUGGESTED_TAGS.map((tag) => (
-                          <button
-                            key={`edit-suggested-${task._id}-${tag}`}
-                            type="button"
-                            className={editState.tags.includes(tag) ? 'tag-chip selected' : 'tag-chip'}
-                            onClick={() => toggleEditSuggestedTag(tag)}
-                          >
-                            {toTitleCase(tag)}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="chip-row selected-row">
-                        {editState.tags.map((tag) => (
-                          <span key={`edit-selected-${task._id}-${tag}`} className="selected-chip">
-                            {tag}
-                            <button type="button" onClick={() => removeEditTag(tag)} aria-label={`Remove ${tag}`}>
-                              x
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-
-                      <p className="tag-helper-text">{editState.tags.length}/{MAX_TAGS} tags used</p>
-
-                      <input
-                        type="text"
-                        value={editState.tagInput}
-                        onChange={(event) =>
-                          setEditState((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  tagInput: event.target.value,
-                                }
-                              : current,
-                          )
-                        }
-                        onFocus={() => {
-                          if (editTagSuggestions.length > 0) {
-                            setEditTagSuggestionsOpen(true);
-                          }
-                        }}
-                        onKeyDown={handleEditTagInputKeyDown}
-                        onBlur={() => setEditTagSuggestionsOpen(false)}
-                        placeholder="Type tag then Enter or comma"
-                      />
-
-                      {editTagSuggestionsOpen && editTagSuggestions.length > 0 && (
-                        <div className="tag-suggestion-dropdown">
-                          {editTagSuggestions.map((tag, index) => (
-                            <button
-                              key={`edit-suggestion-${task._id}-${tag}`}
-                              type="button"
-                              className={index === editTagSuggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => selectEditSuggestion(tag)}
-                            >
-                              {tag}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      type="number"
-                      min={0}
-                      value={editState.estimatedMinutes}
-                      onChange={(event) =>
-                        setEditState((current) =>
-                          current
-                            ? {
-                                ...current,
-                                estimatedMinutes: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                      placeholder="Estimated minutes"
-                    />
-                    <div className="task-actions">
-                      <button
-                        onClick={() => handleSaveTaskEdit(task._id)}
-                        disabled={activeActionTaskId === task._id}
-                      >
-                        {activeActionTaskId === task._id ? 'Saving...' : 'Save'}
-                      </button>
-                      <button className="ghost-btn" onClick={cancelEditingTask} type="button">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={task.completed}
-                        onChange={() => handleToggleTask(task)}
-                        disabled={activeActionTaskId === task._id}
-                      />
-                      <span>
-                        <strong>{task.title}</strong>
-                        <small>Priority: {task.priority}</small>
-                        <small className={getDateBadgeClass(task.dueDate)}>
-                          {task.dueDate ? `Due: ${formatDateForInput(task.dueDate)}` : 'No due date'}
-                        </small>
-                        {task.tags.length > 0 && (
-                          <span className="task-tag-row">
-                            {task.tags.map((tag) => {
-                              const normalizedTag = normalizeTag(tag);
-
-                              return (
-                                <button
-                                  key={`${task._id}-tag-${normalizedTag}`}
-                                  type="button"
-                                  className={
-                                    tagFilter === normalizedTag
-                                      ? 'tag-chip active-filter'
-                                      : 'tag-chip task-tag-chip'
-                                  }
-                                  onClick={() => toggleTagFilter(normalizedTag)}
-                                >
-                                  {normalizedTag}
-                                </button>
-                              );
-                            })}
-                          </span>
-                        )}
-                        {task.estimatedMinutes > 0 && <small>Est: {task.estimatedMinutes} min</small>}
-                      </span>
-                    </label>
-                    <div className="task-actions">
-                      <button className="ghost-btn" onClick={() => startEditingTask(task)} type="button">
-                        Edit
-                      </button>
-                      <button
-                        className="danger-btn"
-                        onClick={() => handleDeleteTask(task._id)}
-                        disabled={activeActionTaskId === task._id}
-                        type="button"
-                      >
-                        {activeActionTaskId === task._id ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        <TaskList
+          tasks={filteredTasks}
+          loadingTasks={loadingTasks}
+          activeActionTaskId={activeActionTaskId}
+          editingTaskId={editingTaskId}
+          editState={editState}
+          editTagSuggestions={editTagSuggestions}
+          tagFilter={tagFilter}
+          onEditStateChange={setEditState}
+          onStartEditing={handleStartEditing}
+          onCancelEditing={handleCancelEditing}
+          onSaveTaskEdit={handleSaveTaskEdit}
+          onToggleTask={handleToggleTask}
+          onDeleteTask={handleDeleteTask}
+          onToggleTagFilter={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
+          onAddEditTag={addEditTag}
+          onRemoveEditTag={removeEditTag}
+        />
       </div>
     </section>
   );
