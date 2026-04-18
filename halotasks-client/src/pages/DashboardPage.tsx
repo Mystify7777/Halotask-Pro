@@ -40,6 +40,7 @@ export default function DashboardPage() {
 
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+  const [, setBulkFailedTaskIds] = useState<string[]>([]);
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
@@ -213,6 +214,7 @@ export default function DashboardPage() {
   const handleClearCompleted = async () => {
     setStatusError(null);
     setStatusInfo(null);
+    setBulkFailedTaskIds([]);
 
     const completedIds = tasks.filter((task) => task.completed).map((task) => task._id);
 
@@ -223,13 +225,34 @@ export default function DashboardPage() {
 
     try {
       setBulkActionLoading(true);
-      await Promise.all(completedIds.map((taskId) => taskService.deleteTask(taskId)));
-      setTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
-      clearSelection();
-      setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'}.`);
-    } catch (requestError) {
-      const axiosError = requestError as AxiosError<{ message?: string }>;
-      setStatusError(axiosError.response?.data?.message ?? 'Unable to clear completed tasks');
+      const results = await Promise.allSettled(completedIds.map((taskId) => taskService.deleteTask(taskId)));
+
+      const deletedIds: string[] = [];
+      const failedIds: string[] = [];
+
+      results.forEach((result, index) => {
+        const taskId = completedIds[index];
+
+        if (result.status === 'fulfilled') {
+          deletedIds.push(taskId);
+        } else {
+          failedIds.push(taskId);
+        }
+      });
+
+      if (deletedIds.length > 0) {
+        setTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+      }
+
+      setBulkFailedTaskIds(failedIds);
+
+      if (deletedIds.length > 0) {
+        setStatusInfo(`Cleared ${deletedIds.length} completed task${deletedIds.length === 1 ? '' : 's'}.`);
+      }
+
+      if (failedIds.length > 0) {
+        setStatusError(`${failedIds.length} completed task${failedIds.length === 1 ? '' : 's'} failed to clear.`);
+      }
     } finally {
       setBulkActionLoading(false);
     }
@@ -238,6 +261,7 @@ export default function DashboardPage() {
   const handleMarkSelectedComplete = async () => {
     setStatusError(null);
     setStatusInfo(null);
+    setBulkFailedTaskIds([]);
 
     if (selectedVisibleIds.length === 0) {
       return;
@@ -253,21 +277,43 @@ export default function DashboardPage() {
 
     try {
       setBulkActionLoading(true);
-
-      const updated = await Promise.all(
-        incompleteTasks.map(async (task) => {
-          const response = await taskService.updateTask(task._id, { completed: true });
-          return response.task;
-        }),
+      const results = await Promise.allSettled(
+        incompleteTasks.map((task) => taskService.updateTask(task._id, { completed: true })),
       );
 
-      const updatedById = new Map(updated.map((task) => [task._id, task]));
-      setTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
-      clearSelection();
-      setStatusInfo(`Marked ${updated.length} task${updated.length === 1 ? '' : 's'} complete.`);
-    } catch (requestError) {
-      const axiosError = requestError as AxiosError<{ message?: string }>;
-      setStatusError(axiosError.response?.data?.message ?? 'Unable to mark selected tasks complete');
+      const updatedTasks: Task[] = [];
+      const failedIds: string[] = [];
+
+      results.forEach((result, index) => {
+        const sourceTask = incompleteTasks[index];
+
+        if (result.status === 'fulfilled') {
+          updatedTasks.push(result.value.task);
+        } else {
+          failedIds.push(sourceTask._id);
+        }
+      });
+
+      if (updatedTasks.length > 0) {
+        const updatedById = new Map(updatedTasks.map((task) => [task._id, task]));
+        setTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
+      }
+
+      setBulkFailedTaskIds(failedIds);
+
+      if (failedIds.length > 0) {
+        selectAll(failedIds);
+      } else {
+        clearSelection();
+      }
+
+      if (updatedTasks.length > 0) {
+        setStatusInfo(`Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete.`);
+      }
+
+      if (failedIds.length > 0) {
+        setStatusError(`${failedIds.length} task${failedIds.length === 1 ? '' : 's'} failed to update.`);
+      }
     } finally {
       setBulkActionLoading(false);
     }
@@ -276,6 +322,7 @@ export default function DashboardPage() {
   const handleDeleteSelected = async () => {
     setStatusError(null);
     setStatusInfo(null);
+    setBulkFailedTaskIds([]);
 
     if (selectedVisibleIds.length === 0) {
       return;
@@ -289,13 +336,40 @@ export default function DashboardPage() {
 
     try {
       setBulkActionLoading(true);
-      await Promise.all(selectedVisibleIds.map((taskId) => taskService.deleteTask(taskId)));
-      setTasks((current) => current.filter((task) => !selectedVisibleIds.includes(task._id)));
-      clearSelection();
-      setStatusInfo(`Deleted ${selectedVisibleIds.length} selected task${selectedVisibleIds.length === 1 ? '' : 's'}.`);
-    } catch (requestError) {
-      const axiosError = requestError as AxiosError<{ message?: string }>;
-      setStatusError(axiosError.response?.data?.message ?? 'Unable to delete selected tasks');
+      const results = await Promise.allSettled(selectedVisibleIds.map((taskId) => taskService.deleteTask(taskId)));
+
+      const deletedIds: string[] = [];
+      const failedIds: string[] = [];
+
+      results.forEach((result, index) => {
+        const taskId = selectedVisibleIds[index];
+
+        if (result.status === 'fulfilled') {
+          deletedIds.push(taskId);
+        } else {
+          failedIds.push(taskId);
+        }
+      });
+
+      if (deletedIds.length > 0) {
+        setTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+      }
+
+      setBulkFailedTaskIds(failedIds);
+
+      if (failedIds.length > 0) {
+        selectAll(failedIds);
+      } else {
+        clearSelection();
+      }
+
+      if (deletedIds.length > 0) {
+        setStatusInfo(`Deleted ${deletedIds.length} task${deletedIds.length === 1 ? '' : 's'}.`);
+      }
+
+      if (failedIds.length > 0) {
+        setStatusError(`${failedIds.length} task${failedIds.length === 1 ? '' : 's'} failed to delete.`);
+      }
     } finally {
       setBulkActionLoading(false);
     }
