@@ -1,7 +1,7 @@
 import { Task } from '../types/task';
-import { getTasksDueInNextHour, getTasksOverdueNow } from './deadlineLogic';
+import { getSmartStartWindows, getTasksDueInNextHour, getTasksOverdueNow } from './deadlineLogic';
 
-type ReminderType = 'due-soon' | 'overdue';
+type ReminderType = 'due-soon' | 'overdue' | 'work-session-soon' | 'start-now';
 
 type ReminderEvent = {
   task: Task;
@@ -43,9 +43,20 @@ export const createReminderScheduler = ({
 
     const dueSoon = getTasksDueInNextHour(tasks, nowTime, 60);
     const overdue = getTasksOverdueNow(tasks, nowTime);
+    const smartStartWindows = getSmartStartWindows(tasks, nowTime, 60);
 
     dueSoon.forEach((task) => dispatchIfNeeded(task, 'due-soon'));
     overdue.forEach((task) => dispatchIfNeeded(task, 'overdue'));
+
+    smartStartWindows.forEach(({ task, dueTime, latestStartTime, notifyAtTime }) => {
+      if (nowTime >= notifyAtTime && nowTime < latestStartTime) {
+        dispatchIfNeeded(task, 'work-session-soon');
+      }
+
+      if (nowTime >= latestStartTime && nowTime < dueTime) {
+        dispatchIfNeeded(task, 'start-now');
+      }
+    });
   };
 
   const start = () => {
