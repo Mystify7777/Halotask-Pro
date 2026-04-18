@@ -7,3 +7,4 @@
 [2026-04-19] - Frontend - Routing, auth flow, dashboard shell, and task CRUD/filter UI implemented
 [2026-04-19] - Frontend - Inline task editing, due date/tag fields, and auth redirect guards added
 [2026-04-19] - Frontend - DashboardPage split into reusable components/hooks to stop oversized page growth
+[2026-04-19] - Frontend - TaskList split into TaskCard and TaskEditForm for maintainable component boundaries
