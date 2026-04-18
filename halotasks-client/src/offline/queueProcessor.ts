@@ -2,7 +2,7 @@ import { taskService } from '../services/taskService';
 import { TaskCreatePayload, Task } from '../types/task';
 import { getSyncQueue, setSyncQueue, SyncQueueRecord } from './syncQueue';
 
-type TaskUpdatePayload = Partial<TaskCreatePayload> & {
+type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
   completed?: boolean;
   dueDate?: string | null;
 };
@@ -70,7 +70,7 @@ export const processSyncQueue = async ({
 
         const payload = (entry.payload ?? {}) as TaskUpdatePayload;
         const response = await taskService.updateTask(resolvedTaskId, payload);
-        onTaskUpdated(sourceTaskId, response.task);
+        onTaskUpdated(resolvedTaskId, response.task);
 
         processed += 1;
         continue;
@@ -91,7 +91,7 @@ export const processSyncQueue = async ({
         }
 
         await taskService.deleteTask(resolvedTaskId);
-        onTaskDeleted(sourceTaskId);
+        onTaskDeleted(resolvedTaskId);
 
         processed += 1;
       }

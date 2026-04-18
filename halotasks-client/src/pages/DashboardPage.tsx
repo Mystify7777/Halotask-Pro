@@ -12,8 +12,10 @@ import { TaskSortOption, useTaskSorting } from '../hooks/useTaskSorting';
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
 import { useNetworkStatus } from '../offline/network';
+import { processSyncQueue } from '../offline/queueProcessor';
+import { enqueueSyncAction, getSyncQueue } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
-import { Priority, Task } from '../types/task';
+import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 
@@ -21,7 +23,12 @@ type AddTagResult = {
   message: string | null;
 };
 
-type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline';
+type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline' | 'errors-pending';
+
+type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
+  completed?: boolean;
+  dueDate?: string | null;
+};
 
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -86,12 +93,70 @@ export default function DashboardPage() {
     });
   };
 
+  const createOfflineTask = (payload: TaskCreatePayload): Task => {
+    const now = new Date().toISOString();
+
+    return {
+      _id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      userId: 'local-user',
+      title: payload.title,
+      description: payload.description ?? '',
+      completed: false,
+      priority: payload.priority,
+      tags: payload.tags ?? [],
+      dueDate: payload.dueDate,
+      estimatedMinutes: payload.estimatedMinutes ?? 0,
+      reminderSent: false,
+      createdAt: now,
+      updatedAt: now,
+      pendingSync: true,
+    };
+  };
+
+  const processPendingQueue = async () => {
+    const queued = await getSyncQueue();
+
+    if (queued.length === 0) {
+      return {
+        remaining: 0,
+      };
+    }
+
+    setSyncStatus('syncing');
+
+    const result = await processSyncQueue({
+      onTaskCreated: (localTaskId, serverTask) => {
+        persistTasks((current) =>
+          current.map((task) => (task._id === localTaskId ? { ...serverTask, pendingSync: false } : task)),
+        );
+      },
+      onTaskUpdated: (taskId, serverTask) => {
+        persistTasks((current) =>
+          current.map((task) => (task._id === taskId ? { ...serverTask, pendingSync: false } : task)),
+        );
+      },
+      onTaskDeleted: (taskId) => {
+        persistTasks((current) => current.filter((task) => task._id !== taskId));
+      },
+    });
+
+    if (result.remaining > 0) {
+      setSyncStatus('errors-pending');
+      setStatusError(`${result.remaining} queued action${result.remaining === 1 ? '' : 's'} still pending sync.`);
+    } else {
+      setSyncStatus('synced');
+    }
+
+    return result;
+  };
+
   const fetchFreshTasks = async () => {
     setSyncStatus('syncing');
 
     const response = await taskService.getTasks();
-    setTasks(response.tasks);
-    await setCachedTasks(response.tasks);
+    const freshTasks = response.tasks.map((task) => ({ ...task, pendingSync: false }));
+    setTasks(freshTasks);
+    await setCachedTasks(freshTasks);
 
     const syncedAt = new Date().toISOString();
     await setLastSyncTimestamp(syncedAt);
@@ -118,6 +183,14 @@ export default function DashboardPage() {
 
     try {
       setStatusError(null);
+
+      const queueResult = await processPendingQueue();
+
+      if (queueResult.remaining > 0) {
+        setLoadingTasks(false);
+        return;
+      }
+
       await fetchFreshTasks();
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -199,8 +272,7 @@ export default function DashboardPage() {
     try {
       setCreatingTask(true);
       const parsedEstimatedMinutes = Number(estimatedMinutes);
-
-      const response = await taskService.createTask({
+      const payload: TaskCreatePayload = {
         title: title.trim(),
         priority,
         tags: sanitizeTags(createTags),
@@ -209,9 +281,32 @@ export default function DashboardPage() {
           estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
             ? parsedEstimatedMinutes
             : undefined,
-      });
+      };
 
-      persistTasks((current) => [response.task, ...current]);
+      if (!isOnline) {
+        const offlineTask = createOfflineTask(payload);
+        persistTasks((current) => [offlineTask, ...current]);
+
+        await enqueueSyncAction({
+          type: 'create',
+          taskId: offlineTask._id,
+          payload,
+        });
+
+        setSyncStatus('offline');
+        setStatusInfo('Task saved offline. Pending sync.');
+        setTitle('');
+        setPriority('medium');
+        setDueDate('');
+        setCreateTags([]);
+        setCreateTagInput('');
+        setEstimatedMinutes('');
+        return;
+      }
+
+      const response = await taskService.createTask(payload);
+
+      persistTasks((current) => [{ ...response.task, pendingSync: false }, ...current]);
       setTitle('');
       setPriority('medium');
       setDueDate('');
@@ -231,9 +326,36 @@ export default function DashboardPage() {
     setStatusError(null);
     setStatusInfo(null);
 
+    const nextCompleted = !task.completed;
+
+    if (!isOnline) {
+      persistTasks((current) =>
+        current.map((item) =>
+          item._id === task._id
+            ? {
+                ...item,
+                completed: nextCompleted,
+                updatedAt: new Date().toISOString(),
+                pendingSync: true,
+              }
+            : item,
+        ),
+      );
+
+      await enqueueSyncAction({
+        type: 'update',
+        taskId: task._id,
+        payload: { completed: nextCompleted },
+      });
+
+      setSyncStatus('offline');
+      setStatusInfo('Task updated offline. Pending sync.');
+      return;
+    }
+
     try {
       setActiveActionTaskId(task._id);
-      const response = await taskService.updateTask(task._id, { completed: !task.completed });
+      const response = await taskService.updateTask(task._id, { completed: nextCompleted });
       persistTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
       setStatusInfo('Task completion updated.');
     } catch (requestError) {
@@ -247,6 +369,19 @@ export default function DashboardPage() {
   const handleDeleteTask = async (taskId: string) => {
     setStatusError(null);
     setStatusInfo(null);
+
+    if (!isOnline) {
+      persistTasks((current) => current.filter((task) => task._id !== taskId));
+
+      await enqueueSyncAction({
+        type: 'delete',
+        taskId,
+      });
+
+      setSyncStatus('offline');
+      setStatusInfo('Task deleted offline. Pending sync.');
+      return;
+    }
 
     try {
       setActiveActionTaskId(taskId);
@@ -270,6 +405,22 @@ export default function DashboardPage() {
 
     if (completedIds.length === 0) {
       setStatusInfo('No completed tasks to clear.');
+      return;
+    }
+
+    if (!isOnline) {
+      persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
+      await Promise.all(
+        completedIds.map((taskId) =>
+          enqueueSyncAction({
+            type: 'delete',
+            taskId,
+          }),
+        ),
+      );
+      clearSelection();
+      setSyncStatus('offline');
+      setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'} offline.`);
       return;
     }
 
@@ -322,6 +473,38 @@ export default function DashboardPage() {
 
     if (incompleteTasks.length === 0) {
       setStatusInfo('Selected tasks are already completed.');
+      return;
+    }
+
+    if (!isOnline) {
+      const incompleteIds = incompleteTasks.map((task) => task._id);
+
+      persistTasks((current) =>
+        current.map((task) =>
+          incompleteIds.includes(task._id)
+            ? {
+                ...task,
+                completed: true,
+                updatedAt: new Date().toISOString(),
+                pendingSync: true,
+              }
+            : task,
+        ),
+      );
+
+      await Promise.all(
+        incompleteIds.map((taskId) =>
+          enqueueSyncAction({
+            type: 'update',
+            taskId,
+            payload: { completed: true },
+          }),
+        ),
+      );
+
+      clearSelection();
+      setSyncStatus('offline');
+      setStatusInfo(`Marked ${incompleteIds.length} task${incompleteIds.length === 1 ? '' : 's'} complete offline.`);
       return;
     }
 
@@ -381,6 +564,22 @@ export default function DashboardPage() {
     const confirmed = window.confirm(`Delete ${selectedVisibleIds.length} selected tasks?`);
 
     if (!confirmed) {
+      return;
+    }
+
+    if (!isOnline) {
+      persistTasks((current) => current.filter((task) => !selectedVisibleIds.includes(task._id)));
+      await Promise.all(
+        selectedVisibleIds.map((taskId) =>
+          enqueueSyncAction({
+            type: 'delete',
+            taskId,
+          }),
+        ),
+      );
+      clearSelection();
+      setSyncStatus('offline');
+      setStatusInfo(`Deleted ${selectedVisibleIds.length} task${selectedVisibleIds.length === 1 ? '' : 's'} offline.`);
       return;
     }
 
@@ -450,20 +649,51 @@ export default function DashboardPage() {
     setStatusError(null);
     setStatusInfo(null);
 
+    const parsedEstimatedMinutes = Number(editState.estimatedMinutes);
+    const payload: TaskUpdatePayload = {
+      title: editState.title.trim(),
+      priority: editState.priority,
+      tags: sanitizeTags(editState.tags),
+      dueDate: editState.dueDate || null,
+      estimatedMinutes:
+        editState.estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
+          ? parsedEstimatedMinutes
+          : 0,
+    };
+
+    if (!isOnline) {
+      persistTasks((current) =>
+        current.map((item) =>
+          item._id === taskId
+            ? {
+                ...item,
+                title: payload.title ?? item.title,
+                priority: payload.priority ?? item.priority,
+                tags: payload.tags ?? item.tags,
+                dueDate: payload.dueDate ?? undefined,
+                estimatedMinutes: payload.estimatedMinutes ?? item.estimatedMinutes,
+                updatedAt: new Date().toISOString(),
+                pendingSync: true,
+              }
+            : item,
+        ),
+      );
+
+      await enqueueSyncAction({
+        type: 'update',
+        taskId,
+        payload,
+      });
+
+      handleCancelEditing();
+      setSyncStatus('offline');
+      setStatusInfo('Task edit saved offline. Pending sync.');
+      return;
+    }
+
     try {
       setActiveActionTaskId(taskId);
-      const parsedEstimatedMinutes = Number(editState.estimatedMinutes);
-
-      const response = await taskService.updateTask(taskId, {
-        title: editState.title.trim(),
-        priority: editState.priority,
-        tags: sanitizeTags(editState.tags),
-        dueDate: editState.dueDate || null,
-        estimatedMinutes:
-          editState.estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
-            ? parsedEstimatedMinutes
-            : 0,
-      });
+      const response = await taskService.updateTask(taskId, payload);
 
       persistTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
       handleCancelEditing();
@@ -516,7 +746,16 @@ export default function DashboardPage() {
         />
 
         <p className={`sync-status ${syncStatus}`}>
-          Status: {syncStatus === 'offline' ? 'Offline' : syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'cached' ? 'Cached' : 'Synced'}
+          Status:{' '}
+          {syncStatus === 'offline'
+            ? 'Offline'
+            : syncStatus === 'syncing'
+              ? 'Syncing'
+              : syncStatus === 'cached'
+                ? 'Cached'
+                : syncStatus === 'errors-pending'
+                  ? 'Errors Pending'
+                  : 'Synced'}
           {lastSyncAt ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
         </p>
 

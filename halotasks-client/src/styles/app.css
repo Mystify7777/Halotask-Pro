@@ -355,6 +355,10 @@ button:disabled {
   color: #b45309;
 }
 
+.sync-status.errors-pending {
+  color: #b11f1f;
+}
+
 .bulk-actions-bar {
   margin-top: 0.55rem;
   display: flex;
@@ -508,6 +512,11 @@ button:disabled {
 .task-item.complete strong {
   text-decoration: line-through;
   color: #577089;
+}
+
+.task-pending-sync {
+  color: #8b5a12;
+  font-weight: 600;
 }
 
 .danger-btn {

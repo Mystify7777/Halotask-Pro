@@ -38,6 +38,7 @@ export default function TaskCard({
         />
         <span>
           <strong>{task.title}</strong>
+          {task.pendingSync && <small className="task-pending-sync">Pending Sync</small>}
           <small>Priority: {task.priority}</small>
           <small className={getDateBadgeClass(task.dueDate)}>
             {task.dueDate ? `Due: ${formatDateForInput(task.dueDate)}` : 'No due date'}
