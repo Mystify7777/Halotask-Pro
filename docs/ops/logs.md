@@ -14,3 +14,4 @@
 [2026-04-19] - Frontend - Tier 1 Smart Sections added (overdue, due today, upcoming, completed today, estimated workload)
 [2026-04-19] - Frontend - Offline foundations Phase A added with IndexedDB cache-first loading and sync status indicator
 [2026-04-19] - Frontend - Offline Phase B write queue added with optimistic local updates, reconnect replay, and pending sync indicators
+[2026-04-19] - Frontend - Manual retry sync control added for errors-pending queue state with pending count visibility

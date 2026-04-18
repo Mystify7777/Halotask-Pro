@@ -55,6 +55,8 @@ export default function DashboardPage() {
   const [, setBulkFailedTaskIds] = useState<string[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [retryingSync, setRetryingSync] = useState(false);
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
@@ -93,6 +95,12 @@ export default function DashboardPage() {
     });
   };
 
+  const refreshPendingQueueCount = async () => {
+    const queued = await getSyncQueue();
+    setPendingQueueCount(queued.length);
+    return queued.length;
+  };
+
   const createOfflineTask = (payload: TaskCreatePayload): Task => {
     const now = new Date().toISOString();
 
@@ -115,6 +123,7 @@ export default function DashboardPage() {
 
   const processPendingQueue = async () => {
     const queued = await getSyncQueue();
+    setPendingQueueCount(queued.length);
 
     if (queued.length === 0) {
       return {
@@ -141,9 +150,11 @@ export default function DashboardPage() {
     });
 
     if (result.remaining > 0) {
+      setPendingQueueCount(result.remaining);
       setSyncStatus('errors-pending');
       setStatusError(`${result.remaining} queued action${result.remaining === 1 ? '' : 's'} still pending sync.`);
     } else {
+      setPendingQueueCount(0);
       setSyncStatus('synced');
     }
 
@@ -176,6 +187,7 @@ export default function DashboardPage() {
     }
 
     if (!isOnline) {
+      await refreshPendingQueueCount();
       setSyncStatus('offline');
       setLoadingTasks(false);
       return;
@@ -209,6 +221,37 @@ export default function DashboardPage() {
     setLoadingTasks(true);
     void loadTasks();
   }, [isOnline]);
+
+  const handleRetrySync = async () => {
+    if (!isOnline) {
+      setSyncStatus('offline');
+      setStatusError('You are offline. Reconnect to retry pending sync actions.');
+      return;
+    }
+
+    setStatusError(null);
+    setStatusInfo(null);
+    setRetryingSync(true);
+    setSyncStatus('syncing');
+
+    try {
+      const queueResult = await processPendingQueue();
+
+      if (queueResult.remaining > 0) {
+        setRetryingSync(false);
+        return;
+      }
+
+      await fetchFreshTasks();
+      setStatusInfo('Pending sync actions completed successfully.');
+    } catch {
+      const remaining = await refreshPendingQueueCount();
+      setSyncStatus(remaining > 0 ? 'errors-pending' : 'cached');
+      setStatusError('Retry sync failed. Pending actions were kept for another retry.');
+    } finally {
+      setRetryingSync(false);
+    }
+  };
 
   const addCreateTag = (rawTag: string): AddTagResult => {
     const result = tryAddTag(createTags, rawTag);
@@ -292,6 +335,7 @@ export default function DashboardPage() {
           taskId: offlineTask._id,
           payload,
         });
+        await refreshPendingQueueCount();
 
         setSyncStatus('offline');
         setStatusInfo('Task saved offline. Pending sync.');
@@ -347,6 +391,7 @@ export default function DashboardPage() {
         taskId: task._id,
         payload: { completed: nextCompleted },
       });
+      await refreshPendingQueueCount();
 
       setSyncStatus('offline');
       setStatusInfo('Task updated offline. Pending sync.');
@@ -377,6 +422,7 @@ export default function DashboardPage() {
         type: 'delete',
         taskId,
       });
+      await refreshPendingQueueCount();
 
       setSyncStatus('offline');
       setStatusInfo('Task deleted offline. Pending sync.');
@@ -418,6 +464,7 @@ export default function DashboardPage() {
           }),
         ),
       );
+      await refreshPendingQueueCount();
       clearSelection();
       setSyncStatus('offline');
       setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'} offline.`);
@@ -501,6 +548,7 @@ export default function DashboardPage() {
           }),
         ),
       );
+      await refreshPendingQueueCount();
 
       clearSelection();
       setSyncStatus('offline');
@@ -577,6 +625,7 @@ export default function DashboardPage() {
           }),
         ),
       );
+      await refreshPendingQueueCount();
       clearSelection();
       setSyncStatus('offline');
       setStatusInfo(`Deleted ${selectedVisibleIds.length} task${selectedVisibleIds.length === 1 ? '' : 's'} offline.`);
@@ -684,6 +733,7 @@ export default function DashboardPage() {
         taskId,
         payload,
       });
+      await refreshPendingQueueCount();
 
       handleCancelEditing();
       setSyncStatus('offline');
@@ -745,19 +795,33 @@ export default function DashboardPage() {
           onClearTagFilter={() => setTagFilter(null)}
         />
 
-        <p className={`sync-status ${syncStatus}`}>
-          Status:{' '}
-          {syncStatus === 'offline'
-            ? 'Offline'
-            : syncStatus === 'syncing'
-              ? 'Syncing'
-              : syncStatus === 'cached'
-                ? 'Cached'
-                : syncStatus === 'errors-pending'
-                  ? 'Errors Pending'
-                  : 'Synced'}
-          {lastSyncAt ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-        </p>
+        <div className="sync-status-row">
+          <p className={`sync-status ${syncStatus}`}>
+            Status:{' '}
+            {syncStatus === 'offline'
+              ? 'Offline'
+              : syncStatus === 'syncing'
+                ? 'Syncing'
+                : syncStatus === 'cached'
+                  ? 'Cached'
+                  : syncStatus === 'errors-pending'
+                    ? `Errors Pending (${pendingQueueCount})`
+                    : 'Synced'}
+            {lastSyncAt
+              ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : ''}
+          </p>
+          {(syncStatus === 'errors-pending' || retryingSync) && (
+            <button
+              type="button"
+              className="ghost-btn retry-sync-btn"
+              onClick={handleRetrySync}
+              disabled={syncStatus === 'syncing' || retryingSync || loadingTasks}
+            >
+              Retry Sync
+            </button>
+          )}
+        </div>
 
         <div className="inline-actions-row">
           <button type="button" className="ghost-btn" onClick={handleClearCompleted} disabled={bulkActionLoading}>
