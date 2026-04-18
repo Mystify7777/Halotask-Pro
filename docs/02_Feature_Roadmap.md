@@ -1,3 +1,5 @@
+# Legacy file. Canonical version moved to docs/product/02_Feature_Roadmap.md.
+
 # Feature Roadmap
 
 ## Phase 1 - MVP

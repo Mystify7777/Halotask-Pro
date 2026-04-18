@@ -1,3 +1,5 @@
+# Legacy file. Canonical version moved to docs/product/05_MVP_Scope.md.
+
 # MVP Scope (Build First)
 
 ## Must Have

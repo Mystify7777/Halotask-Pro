@@ -1,3 +1,5 @@
+# Legacy file. Canonical version moved to docs/product/01_Product_Vision.md.
+
 # HaloTasks v2 - Product Vision
 
 ## One-Line Summary

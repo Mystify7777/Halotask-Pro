@@ -1,3 +1,5 @@
+# Legacy file. Canonical version moved to docs/product/03_System_Architecture.md.
+
 # System Architecture
 
 ## Frontend

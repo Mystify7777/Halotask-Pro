@@ -1,3 +1,5 @@
+# Legacy file. Canonical version moved to docs/product/04_Database_Schema.md.
+
 # Database Schema
 
 ## User
