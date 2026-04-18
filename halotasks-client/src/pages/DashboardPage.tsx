@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { AxiosError } from 'axios';
 import { taskService } from '../services/taskService';
 import { Priority, Task } from '../types/task';
@@ -8,9 +8,68 @@ type FilterMode = 'all' | 'active' | 'completed';
 type TaskEditState = {
   title: string;
   priority: Priority;
-  tagsText: string;
+  tags: string[];
+  tagInput: string;
   dueDate: string;
   estimatedMinutes: string;
+};
+
+const SUGGESTED_TAGS = ['work', 'study', 'health', 'personal', 'urgent', 'finance'] as const;
+const MAX_TAGS = 5;
+const MAX_TAG_LENGTH = 20;
+
+const toTitleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+const normalizeTag = (value: string) => value.trim().toLowerCase().slice(0, MAX_TAG_LENGTH);
+
+const sanitizeTags = (tags: string[]) => {
+  const unique = new Set<string>();
+
+  for (const tag of tags) {
+    const normalized = normalizeTag(tag);
+
+    if (!normalized) {
+      continue;
+    }
+
+    unique.add(normalized);
+
+    if (unique.size >= MAX_TAGS) {
+      break;
+    }
+  }
+
+  return Array.from(unique);
+};
+
+const tryAddTag = (currentTags: string[], rawValue: string) => {
+  const normalized = normalizeTag(rawValue);
+
+  if (!normalized) {
+    return {
+      tags: currentTags,
+      message: null as string | null,
+    };
+  }
+
+  if (currentTags.includes(normalized)) {
+    return {
+      tags: currentTags,
+      message: null as string | null,
+    };
+  }
+
+  if (currentTags.length >= MAX_TAGS) {
+    return {
+      tags: currentTags,
+      message: `Maximum ${MAX_TAGS} tags allowed per task.`,
+    };
+  }
+
+  return {
+    tags: [...currentTags, normalized],
+    message: null as string | null,
+  };
 };
 
 const formatDateForInput = (value?: string) => {
@@ -58,11 +117,13 @@ export default function DashboardPage() {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [dueDate, setDueDate] = useState('');
-  const [tagsText, setTagsText] = useState('');
+  const [createTags, setCreateTags] = useState<string[]>([]);
+  const [createTagInput, setCreateTagInput] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState('');
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -102,6 +163,13 @@ export default function DashboardPage() {
         return false;
       }
 
+      if (tagFilter) {
+        const hasTag = task.tags.some((tag) => normalizeTag(tag) === tagFilter);
+        if (!hasTag) {
+          return false;
+        }
+      }
+
       if (!normalizedSearch) {
         return true;
       }
@@ -111,7 +179,130 @@ export default function DashboardPage() {
         task.description.toLowerCase().includes(normalizedSearch)
       );
     });
-  }, [tasks, filterMode, priorityFilter, search]);
+  }, [tasks, filterMode, priorityFilter, search, tagFilter]);
+
+  const commitCreateTag = (rawTag: string) => {
+    const result = tryAddTag(createTags, rawTag);
+    setCreateTags(result.tags);
+
+    if (result.message) {
+      setStatusError(result.message);
+    }
+
+    return result;
+  };
+
+  const commitEditTag = (rawTag: string) => {
+    if (!editState) {
+      return;
+    }
+
+    const result = tryAddTag(editState.tags, rawTag);
+
+    setEditState((current) =>
+      current
+        ? {
+            ...current,
+            tags: result.tags,
+            tagInput: '',
+          }
+        : current,
+    );
+
+    if (result.message) {
+      setStatusError(result.message);
+    }
+  };
+
+  const handleCreateTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' && event.key !== ',') {
+      return;
+    }
+
+    event.preventDefault();
+    const result = commitCreateTag(createTagInput);
+    if (!result.message) {
+      setCreateTagInput('');
+    }
+  };
+
+  const handleEditTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' && event.key !== ',') {
+      return;
+    }
+
+    event.preventDefault();
+    commitEditTag(editState?.tagInput ?? '');
+  };
+
+  const toggleCreateSuggestedTag = (tag: string) => {
+    setStatusError(null);
+
+    if (createTags.includes(tag)) {
+      setCreateTags((current) => current.filter((item) => item !== tag));
+      return;
+    }
+
+    const result = tryAddTag(createTags, tag);
+    setCreateTags(result.tags);
+    if (result.message) {
+      setStatusError(result.message);
+    }
+  };
+
+  const toggleEditSuggestedTag = (tag: string) => {
+    if (!editState) {
+      return;
+    }
+
+    setStatusError(null);
+
+    if (editState.tags.includes(tag)) {
+      setEditState((current) =>
+        current
+          ? {
+              ...current,
+              tags: current.tags.filter((item) => item !== tag),
+            }
+          : current,
+      );
+      return;
+    }
+
+    const result = tryAddTag(editState.tags, tag);
+    setEditState((current) =>
+      current
+        ? {
+            ...current,
+            tags: result.tags,
+          }
+        : current,
+    );
+
+    if (result.message) {
+      setStatusError(result.message);
+    }
+  };
+
+  const removeCreateTag = (tag: string) => {
+    setCreateTags((current) => current.filter((item) => item !== tag));
+  };
+
+  const removeEditTag = (tag: string) => {
+    setEditState((current) =>
+      current
+        ? {
+            ...current,
+            tags: current.tags.filter((item) => item !== tag),
+          }
+        : current,
+    );
+  };
+
+  const toggleTagFilter = (tag: string) => {
+    const normalized = normalizeTag(tag);
+    setTagFilter((current) => (current === normalized ? null : normalized));
+  };
 
   const handleCreateTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -125,17 +316,12 @@ export default function DashboardPage() {
     try {
       setCreatingTask(true);
 
-      const parsedTags = tagsText
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-
       const parsedEstimatedMinutes = Number(estimatedMinutes);
 
       const response = await taskService.createTask({
         title: title.trim(),
         priority,
-        tags: parsedTags,
+        tags: sanitizeTags(createTags),
         dueDate: dueDate || undefined,
         estimatedMinutes:
           estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
@@ -147,7 +333,8 @@ export default function DashboardPage() {
       setTitle('');
       setPriority('medium');
       setDueDate('');
-      setTagsText('');
+      setCreateTags([]);
+      setCreateTagInput('');
       setEstimatedMinutes('');
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
@@ -197,7 +384,8 @@ export default function DashboardPage() {
     setEditState({
       title: task.title,
       priority: task.priority,
-      tagsText: task.tags.join(', '),
+      tags: sanitizeTags(task.tags),
+      tagInput: '',
       dueDate: formatDateForInput(task.dueDate),
       estimatedMinutes: task.estimatedMinutes > 0 ? String(task.estimatedMinutes) : '',
     });
@@ -219,17 +407,12 @@ export default function DashboardPage() {
     try {
       setActiveActionTaskId(taskId);
 
-      const parsedTags = editState.tagsText
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-
       const parsedEstimatedMinutes = Number(editState.estimatedMinutes);
 
       const response = await taskService.updateTask(taskId, {
         title: editState.title.trim(),
         priority: editState.priority,
-        tags: parsedTags,
+        tags: sanitizeTags(editState.tags),
         dueDate: editState.dueDate || null,
         estimatedMinutes:
           editState.estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
@@ -272,12 +455,45 @@ export default function DashboardPage() {
             onChange={(event) => setDueDate(event.target.value)}
             aria-label="Due date"
           />
-          <input
-            type="text"
-            value={tagsText}
-            onChange={(event) => setTagsText(event.target.value)}
-            placeholder="Tags: study, work"
-          />
+          <div className="tag-input-block">
+            <div className="chip-row">
+              {SUGGESTED_TAGS.map((tag) => (
+                <button
+                  key={`create-suggested-${tag}`}
+                  type="button"
+                  className={createTags.includes(tag) ? 'tag-chip selected' : 'tag-chip'}
+                  onClick={() => toggleCreateSuggestedTag(tag)}
+                >
+                  {toTitleCase(tag)}
+                </button>
+              ))}
+            </div>
+
+            <div className="chip-row selected-row">
+              {createTags.map((tag) => (
+                <span key={`create-selected-${tag}`} className="selected-chip">
+                  {tag}
+                  <button type="button" onClick={() => removeCreateTag(tag)} aria-label={`Remove ${tag}`}>
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            <input
+              type="text"
+              value={createTagInput}
+              onChange={(event) => setCreateTagInput(event.target.value)}
+              onKeyDown={handleCreateTagInputKeyDown}
+              onBlur={() => {
+                const result = commitCreateTag(createTagInput);
+                if (!result.message) {
+                  setCreateTagInput('');
+                }
+              }}
+              placeholder="Type tag then Enter or comma"
+            />
+          </div>
           <input
             type="number"
             min={0}
@@ -314,6 +530,15 @@ export default function DashboardPage() {
             <option value="high">High</option>
           </select>
         </div>
+
+        {tagFilter && (
+          <div className="active-filter-row">
+            <span className="active-filter-chip">Filtering by tag: {tagFilter}</span>
+            <button type="button" className="ghost-btn" onClick={() => setTagFilter(null)}>
+              Clear
+            </button>
+          </div>
+        )}
 
         {statusError && <p className="form-error">{statusError}</p>}
         {statusInfo && <p className="form-success">{statusInfo}</p>}
@@ -373,21 +598,49 @@ export default function DashboardPage() {
                         )
                       }
                     />
-                    <input
-                      type="text"
-                      value={editState.tagsText}
-                      onChange={(event) =>
-                        setEditState((current) =>
-                          current
-                            ? {
-                                ...current,
-                                tagsText: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                      placeholder="study, work, urgent"
-                    />
+                    <div className="tag-input-block">
+                      <div className="chip-row">
+                        {SUGGESTED_TAGS.map((tag) => (
+                          <button
+                            key={`edit-suggested-${task._id}-${tag}`}
+                            type="button"
+                            className={editState.tags.includes(tag) ? 'tag-chip selected' : 'tag-chip'}
+                            onClick={() => toggleEditSuggestedTag(tag)}
+                          >
+                            {toTitleCase(tag)}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="chip-row selected-row">
+                        {editState.tags.map((tag) => (
+                          <span key={`edit-selected-${task._id}-${tag}`} className="selected-chip">
+                            {tag}
+                            <button type="button" onClick={() => removeEditTag(tag)} aria-label={`Remove ${tag}`}>
+                              x
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+
+                      <input
+                        type="text"
+                        value={editState.tagInput}
+                        onChange={(event) =>
+                          setEditState((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  tagInput: event.target.value,
+                                }
+                              : current,
+                          )
+                        }
+                        onKeyDown={handleEditTagInputKeyDown}
+                        onBlur={() => commitEditTag(editState.tagInput)}
+                        placeholder="Type tag then Enter or comma"
+                      />
+                    </div>
                     <input
                       type="number"
                       min={0}
@@ -431,7 +684,28 @@ export default function DashboardPage() {
                         <small className={getDateBadgeClass(task.dueDate)}>
                           {task.dueDate ? `Due: ${formatDateForInput(task.dueDate)}` : 'No due date'}
                         </small>
-                        {task.tags.length > 0 && <small>Tags: {task.tags.join(', ')}</small>}
+                        {task.tags.length > 0 && (
+                          <span className="task-tag-row">
+                            {task.tags.map((tag) => {
+                              const normalizedTag = normalizeTag(tag);
+
+                              return (
+                                <button
+                                  key={`${task._id}-tag-${normalizedTag}`}
+                                  type="button"
+                                  className={
+                                    tagFilter === normalizedTag
+                                      ? 'tag-chip active-filter'
+                                      : 'tag-chip task-tag-chip'
+                                  }
+                                  onClick={() => toggleTagFilter(normalizedTag)}
+                                >
+                                  {normalizedTag}
+                                </button>
+                              );
+                            })}
+                          </span>
+                        )}
                         {task.estimatedMinutes > 0 && <small>Est: {task.estimatedMinutes} min</small>}
                       </span>
                     </label>

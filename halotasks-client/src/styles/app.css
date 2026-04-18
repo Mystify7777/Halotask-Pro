@@ -231,8 +231,107 @@ button:disabled {
 .task-create-form,
 .filter-row {
   display: grid;
-  grid-template-columns: 1.2fr 140px 150px 1fr 180px auto;
+  grid-template-columns: 1.2fr 140px 150px 1.2fr 180px auto;
   gap: 0.6rem;
+}
+
+.tag-input-block {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.selected-row {
+  min-height: 1.8rem;
+}
+
+.tag-chip {
+  border: 1px solid #c9d8e8;
+  background: #f4f8fc;
+  color: #1f3a56;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.tag-chip:hover {
+  border-color: #8fb3d9;
+  background: #e9f2fb;
+}
+
+.tag-chip.selected {
+  border-color: #0f4db2;
+  background: #e5efff;
+  color: #0b3d90;
+}
+
+.selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #9bb8d8;
+  background: #eef5fd;
+  color: #123253;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.selected-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.selected-chip button:hover {
+  background: rgba(15, 77, 178, 0.12);
+}
+
+.task-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
+.task-tag-chip {
+  cursor: pointer;
+}
+
+.active-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #0f4db2;
+  background: #e5efff;
+  color: #0f4db2;
+  font-size: 0.82rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.tag-chip.active-filter {
+  border-color: #0f4db2;
+  background: #0f4db2;
+  color: #ffffff;
 }
 
 .task-list {
@@ -290,7 +389,7 @@ button:disabled {
 .edit-panel {
   width: 100%;
   display: grid;
-  grid-template-columns: 1.2fr 140px 150px 1fr 180px auto;
+  grid-template-columns: 1.2fr 140px 150px 1.2fr 180px auto;
   gap: 0.55rem;
   align-items: center;
 }
