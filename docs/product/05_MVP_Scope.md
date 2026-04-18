@@ -1,20 +1,28 @@
 # MVP Scope (Build First)
 
-## Must Have
+## Must Have (Completed)
 - Auth
 - CRUD tasks
-- Due dates
-- Priority
-- Search
+- Due dates and priorities
+- Tags and estimated duration
+- Search/filter/sort
+- Bulk actions
 - Mobile responsive UI
+- Route/API verification
 
-## Should Have
-- Offline cache
-- Sync across devices
-- Notifications
+## Should Have (Completed)
+- Offline cache-first loading
+- Offline write queue with reconnect replay
+- Retry sync and pending states
+- Browser reminders
+- Smart start-time reminders
+- Reminder settings controls
+
+## Next Build Block
+- Growth Tree Phase 1 (logic + dashboard widget)
 
 ## Later
-- Tree system
-- Analytics
-- Shared lists
-- AI features
+- Email reminder fallback
+- Analytics dashboard
+- Shared lists/collaboration
+- AI planning features

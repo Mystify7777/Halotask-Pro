@@ -49,11 +49,36 @@ Response:
 
 All task routes require `Authorization: Bearer <jwt>`.
 
+Task object shape:
+```json
+{
+  "_id": "...",
+  "userId": "...",
+  "title": "Study DSA",
+  "description": "Solve problems",
+  "completed": false,
+  "priority": "high",
+  "tags": ["study"],
+  "dueDate": "2026-04-21T00:00:00.000Z",
+  "estimatedMinutes": 90,
+  "reminderSent": false,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
 ### GET /api/tasks
 Response shape:
 ```json
 {
-  "tasks": []
+  "tasks": [
+    {
+      "_id": "...",
+      "title": "Study DSA",
+      "completed": false,
+      "priority": "high"
+    }
+  ]
 }
 ```
 
@@ -66,19 +91,25 @@ Request body:
   "completed": false,
   "priority": "high",
   "tags": ["study"],
-  "dueDate": "2026-04-21"
+  "dueDate": "2026-04-21",
+  "estimatedMinutes": 90,
+  "reminderSent": false
 }
 ```
 
-Task response shape:
+Response:
 ```json
 {
-  "_id": "...",
-  "title": "Study DSA",
-  "completed": false,
-  "priority": "high",
-  "tags": ["study"],
-  "dueDate": "2026-04-21"
+  "task": {
+    "_id": "...",
+    "title": "Study DSA",
+    "completed": false,
+    "priority": "high",
+    "tags": ["study"],
+    "dueDate": "2026-04-21T00:00:00.000Z",
+    "estimatedMinutes": 90,
+    "reminderSent": false
+  }
 }
 ```
 
@@ -86,8 +117,24 @@ Task response shape:
 Request body:
 ```json
 {
+  "title": "Study DSA - Rev 2",
+  "description": "Solve medium and hard problems",
   "completed": true,
-  "priority": "medium"
+  "priority": "medium",
+  "tags": ["study", "dsa"],
+  "dueDate": "2026-04-22",
+  "estimatedMinutes": 120,
+  "reminderSent": false
+}
+```
+
+Response:
+```json
+{
+  "task": {
+    "_id": "...",
+    "completed": true
+  }
 }
 ```
 
@@ -98,3 +145,11 @@ Response:
   "message": "Task deleted"
 }
 ```
+
+## Error Patterns
+
+Common errors:
+- `400` validation errors (missing required fields)
+- `401` invalid/missing auth
+- `404` task not found or not owned by requester
+- `409` duplicate auth registration email
