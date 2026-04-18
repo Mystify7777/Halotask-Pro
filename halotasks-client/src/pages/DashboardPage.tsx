@@ -5,6 +5,7 @@ import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import { TaskEditState } from '../components/dashboard/types';
 import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
+import { TaskSortOption, useTaskSorting } from '../hooks/useTaskSorting';
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import { taskService } from '../services/taskService';
 import { Priority, Task } from '../types/task';
@@ -31,6 +32,7 @@ export default function DashboardPage() {
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
+  const [sortBy, setSortBy] = useState<TaskSortOption>('dueSoonest');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -49,6 +51,8 @@ export default function DashboardPage() {
     priorityFilter,
     tagFilter,
   });
+
+  const sortedTasks = useTaskSorting(filteredTasks, sortBy);
 
   const loadTasks = async () => {
     try {
@@ -273,10 +277,12 @@ export default function DashboardPage() {
           search={search}
           filterMode={filterMode}
           priorityFilter={priorityFilter}
+          sortBy={sortBy}
           tagFilter={tagFilter}
           onSearchChange={setSearch}
           onFilterModeChange={setFilterMode}
           onPriorityFilterChange={setPriorityFilter}
+          onSortByChange={setSortBy}
           onClearTagFilter={() => setTagFilter(null)}
         />
 
@@ -284,7 +290,7 @@ export default function DashboardPage() {
         {statusInfo && <p className="form-success">{statusInfo}</p>}
 
         <TaskList
-          tasks={filteredTasks}
+          tasks={sortedTasks}
           loadingTasks={loadingTasks}
           activeActionTaskId={activeActionTaskId}
           editingTaskId={editingTaskId}

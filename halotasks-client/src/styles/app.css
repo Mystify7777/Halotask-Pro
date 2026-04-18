@@ -228,10 +228,15 @@ button:disabled {
   color: #5a6d82;
 }
 
-.task-create-form,
-.filter-row {
+.task-create-form {
   display: grid;
   grid-template-columns: 1.2fr 140px 150px 1.2fr 180px auto;
+  gap: 0.6rem;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: 1.2fr 160px 170px 220px;
   gap: 0.6rem;
 }
 
