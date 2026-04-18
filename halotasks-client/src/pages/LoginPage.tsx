@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore';
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const token = useAuthStore((state) => state.token);
   const setAuth = useAuthStore((state) => state.setAuth);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,6 +15,12 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
+
+  useEffect(() => {
+    if (token) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [token, navigate]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

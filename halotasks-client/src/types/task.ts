@@ -25,6 +25,7 @@ export type TaskCreatePayload = {
   priority: Priority;
   tags?: string[];
   dueDate?: string;
+  estimatedMinutes?: number;
 };
 
 export type TaskResponse = {

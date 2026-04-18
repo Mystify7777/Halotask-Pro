@@ -96,6 +96,12 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.form-success {
+  margin: 0;
+  color: #166534;
+  font-size: 0.9rem;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 1rem;
@@ -225,7 +231,7 @@ button:disabled {
 .task-create-form,
 .filter-row {
   display: grid;
-  grid-template-columns: 1fr 180px auto;
+  grid-template-columns: 1.2fr 140px 150px 1fr 180px auto;
   gap: 0.6rem;
 }
 
@@ -249,8 +255,13 @@ button:disabled {
 
 .task-item label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.65rem;
+}
+
+.task-item label span {
+  display: grid;
+  gap: 0.15rem;
 }
 
 .task-item strong {
@@ -270,13 +281,49 @@ button:disabled {
   background: #a42a2a;
 }
 
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.edit-panel {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1.2fr 140px 150px 1fr 180px auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.date-overdue {
+  color: #b91c1c;
+}
+
+.date-today {
+  color: #b45309;
+}
+
+.date-muted {
+  color: #5f7388;
+}
+
 @media (max-width: 900px) {
   .main-grid {
     grid-template-columns: 1fr;
   }
 
   .task-create-form,
-  .filter-row {
+  .filter-row,
+  .edit-panel {
     grid-template-columns: 1fr;
+  }
+
+  .task-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .task-actions {
+    justify-content: flex-end;
   }
 }
