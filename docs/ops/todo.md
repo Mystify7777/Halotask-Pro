@@ -1,10 +1,10 @@
 # HaloTasks TODO
 
 ## Phase 1
-- [ ] Login/Register pages
-- [ ] Dashboard shell
-- [ ] Task CRUD UI
-- [ ] Search / filter
+- [x] Login/Register pages
+- [x] Dashboard shell
+- [x] Task CRUD UI
+- [x] Search / filter
 
 ## Phase 2
 - [ ] Offline mode
