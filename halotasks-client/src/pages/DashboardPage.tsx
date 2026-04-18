@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskFilters from '../components/dashboard/TaskFilters';
@@ -14,6 +14,13 @@ import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimest
 import { useNetworkStatus } from '../offline/network';
 import { processSyncQueue } from '../offline/queueProcessor';
 import { enqueueSyncAction, getSyncQueue } from '../offline/syncQueue';
+import { sendReminderNotification } from '../reminders/notification';
+import {
+  getNotificationPermissionStatus,
+  isNotificationSupported,
+  requestNotificationPermission,
+} from '../reminders/permissions';
+import { createReminderScheduler } from '../reminders/scheduler';
 import { taskService } from '../services/taskService';
 import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
@@ -57,11 +64,19 @@ export default function DashboardPage() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
   const [retryingSync, setRetryingSync] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    getNotificationPermissionStatus(),
+  );
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
 
+  const tasksRef = useRef<Task[]>([]);
+  const reminderSchedulerRef = useRef<ReturnType<typeof createReminderScheduler> | null>(null);
+
   const { isOnline } = useNetworkStatus();
+
+  const remindersSupported = isNotificationSupported();
 
   const { selectedIds, toggleSelect, clearSelection, selectAll, retainOnly } = useTaskSelection();
 
@@ -79,6 +94,48 @@ export default function DashboardPage() {
   const sortedTasks = useTaskSorting(filteredTasks, sortBy);
 
   const visibleTaskIds = sortedTasks.map((task) => task._id);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
+    if (!remindersSupported) {
+      return;
+    }
+
+    if (!reminderSchedulerRef.current) {
+      reminderSchedulerRef.current = createReminderScheduler({
+        getTasks: () => tasksRef.current,
+        onReminder: ({ task, type }) => {
+          sendReminderNotification(task, type);
+        },
+        intervalMs: 60_000,
+      });
+    }
+
+    if (notificationPermission === 'granted') {
+      reminderSchedulerRef.current.start();
+    } else {
+      reminderSchedulerRef.current.stop();
+    }
+
+    return () => {
+      reminderSchedulerRef.current?.stop();
+    };
+  }, [notificationPermission, remindersSupported]);
+
+  const handleEnableReminders = async () => {
+    const permission = await requestNotificationPermission();
+    setNotificationPermission(permission);
+
+    if (permission === 'granted') {
+      setStatusInfo('Reminder notifications enabled.');
+      setStatusError(null);
+    } else if (permission === 'denied') {
+      setStatusError('Notifications are blocked. Enable browser notifications for reminder alerts.');
+    }
+  };
 
   useEffect(() => {
     retainOnly(visibleTaskIds);
@@ -811,6 +868,19 @@ export default function DashboardPage() {
               ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               : ''}
           </p>
+          {remindersSupported && notificationPermission === 'default' && (
+            <button
+              type="button"
+              className="ghost-btn retry-sync-btn"
+              onClick={handleEnableReminders}
+              disabled={syncStatus === 'syncing' || loadingTasks}
+            >
+              Enable Reminders
+            </button>
+          )}
+          {remindersSupported && notificationPermission === 'denied' && (
+            <span className="reminder-permission-note">Reminders blocked by browser settings.</span>
+          )}
           {(syncStatus === 'errors-pending' || retryingSync) && (
             <button
               type="button"

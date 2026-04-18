@@ -352,6 +352,11 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.reminder-permission-note {
+  font-size: 0.78rem;
+  color: #7c4a12;
+}
+
 .sync-status.cached {
   color: #285880;
 }
