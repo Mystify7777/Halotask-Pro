@@ -69,7 +69,7 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
     const task = await Task.findOneAndUpdate(
       { _id: req.params.id, userId: req.user?.id },
       update,
-      { new: true },
+      { returnDocument: 'after' },
     );
 
     if (!task) {
