@@ -403,6 +403,57 @@ button:disabled {
   gap: 0.55rem;
 }
 
+.smart-sections {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.insight-card {
+  border: 1px solid #d5e2ef;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 0.55rem 0.6rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.insight-card small {
+  font-size: 0.76rem;
+  color: #5b7086;
+}
+
+.insight-card strong {
+  font-size: 1.05rem;
+  color: #193552;
+}
+
+.insight-card.overdue {
+  border-color: #efc7c7;
+  background: #fff5f5;
+}
+
+.insight-card.due-today {
+  border-color: #f3d6b0;
+  background: #fff8ee;
+}
+
+.insight-card.upcoming {
+  border-color: #c8daef;
+  background: #f2f8ff;
+}
+
+.insight-card.completed {
+  border-color: #c9e5cf;
+  background: #f3fbf5;
+}
+
+.insight-card.workload {
+  border-color: #d8d5ef;
+  background: #f7f6ff;
+}
+
 .task-item {
   display: flex;
   align-items: center;
@@ -493,5 +544,9 @@ button:disabled {
 
   .task-actions {
     justify-content: flex-end;
+  }
+
+  .smart-sections {
+    grid-template-columns: 1fr;
   }
 }

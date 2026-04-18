@@ -11,3 +11,4 @@
 [2026-04-19] - Frontend - Task sorting system added with modular sorting hook and filter dropdown
 [2026-04-19] - Frontend - Bulk actions system added (clear completed, selection mode, select all visible, mark complete, delete with confirmation)
 [2026-04-19] - Frontend - Bulk actions reliability upgraded with Promise.allSettled partial-failure handling and retry-friendly selection retention
+[2026-04-19] - Frontend - Tier 1 Smart Sections added (overdue, due today, upcoming, completed today, estimated workload)

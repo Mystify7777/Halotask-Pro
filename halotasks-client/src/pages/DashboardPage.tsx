@@ -4,6 +4,7 @@ import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import BulkActionsBar from '../components/dashboard/BulkActionsBar';
+import SmartSections from '../components/dashboard/SmartSections';
 import { TaskEditState } from '../components/dashboard/types';
 import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
 import { useTaskSelection } from '../hooks/useTaskSelection';
@@ -485,6 +486,8 @@ export default function DashboardPage() {
 
         {statusError && <p className="form-error">{statusError}</p>}
         {statusInfo && <p className="form-success">{statusInfo}</p>}
+
+        <SmartSections tasks={tasks} />
 
         <TaskList
           tasks={sortedTasks}
