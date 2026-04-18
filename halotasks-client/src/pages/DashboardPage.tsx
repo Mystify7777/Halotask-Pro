@@ -119,6 +119,8 @@ export default function DashboardPage() {
   const [dueDate, setDueDate] = useState('');
   const [createTags, setCreateTags] = useState<string[]>([]);
   const [createTagInput, setCreateTagInput] = useState('');
+  const [createTagSuggestionsOpen, setCreateTagSuggestionsOpen] = useState(false);
+  const [createTagSuggestionIndex, setCreateTagSuggestionIndex] = useState(-1);
   const [estimatedMinutes, setEstimatedMinutes] = useState('');
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -128,6 +130,8 @@ export default function DashboardPage() {
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
+  const [editTagSuggestionsOpen, setEditTagSuggestionsOpen] = useState(false);
+  const [editTagSuggestionIndex, setEditTagSuggestionIndex] = useState(-1);
 
   const loadTasks = async () => {
     try {
@@ -181,6 +185,89 @@ export default function DashboardPage() {
     });
   }, [tasks, filterMode, priorityFilter, search, tagFilter]);
 
+  const dynamicTagUsage = useMemo(() => {
+    const usage = new Map<string, number>();
+
+    for (const task of tasks) {
+      for (const rawTag of task.tags) {
+        const normalized = normalizeTag(rawTag);
+        if (!normalized) {
+          continue;
+        }
+
+        usage.set(normalized, (usage.get(normalized) ?? 0) + 1);
+      }
+    }
+
+    return usage;
+  }, [tasks]);
+
+  const buildTagSuggestions = (inputValue: string, selectedTags: string[]) => {
+    const normalizedInput = normalizeTag(inputValue);
+
+    return Array.from(dynamicTagUsage.entries())
+      .filter(([tag]) => {
+        if (selectedTags.includes(tag)) {
+          return false;
+        }
+
+        if (!normalizedInput) {
+          return true;
+        }
+
+        return tag.includes(normalizedInput);
+      })
+      .sort((a, b) => {
+        if (b[1] !== a[1]) {
+          return b[1] - a[1];
+        }
+
+        return a[0].localeCompare(b[0]);
+      })
+      .slice(0, 5)
+      .map(([tag]) => tag);
+  };
+
+  const createTagSuggestions = useMemo(
+    () => buildTagSuggestions(createTagInput, createTags),
+    [createTagInput, createTags, dynamicTagUsage],
+  );
+
+  const editTagSuggestions = useMemo(
+    () => buildTagSuggestions(editState?.tagInput ?? '', editState?.tags ?? []),
+    [editState, dynamicTagUsage],
+  );
+
+  useEffect(() => {
+    if (!createTagSuggestions.length) {
+      setCreateTagSuggestionIndex(-1);
+      return;
+    }
+
+    setCreateTagSuggestionIndex((current) => {
+      if (current < 0) {
+        return 0;
+      }
+
+      return Math.min(current, createTagSuggestions.length - 1);
+    });
+  }, [createTagSuggestions]);
+
+  useEffect(() => {
+    if (!editTagSuggestions.length) {
+      setEditTagSuggestionIndex(-1);
+      return;
+    }
+
+    setEditTagSuggestionIndex((current) => {
+      if (current < 0) {
+        return 0;
+      }
+
+      return Math.min(current, editTagSuggestions.length - 1);
+    });
+  }, [editTagSuggestions]);
+
   const commitCreateTag = (rawTag: string) => {
     const result = tryAddTag(createTags, rawTag);
     setCreateTags(result.tags);
@@ -190,6 +277,15 @@ export default function DashboardPage() {
     }
 
     return result;
+  };
+
+  const selectCreateSuggestion = (tag: string) => {
+    const result = commitCreateTag(tag);
+    if (!result.message) {
+      setCreateTagInput('');
+    }
+
+    setCreateTagSuggestionsOpen(false);
   };
 
   const commitEditTag = (rawTag: string) => {
@@ -214,25 +310,134 @@ export default function DashboardPage() {
     }
   };
 
+  const selectEditSuggestion = (tag: string) => {
+    commitEditTag(tag);
+    setEditTagSuggestionsOpen(false);
+  };
+
   const handleCreateTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!createTagSuggestions.length) {
+        return;
+      }
+
+      setCreateTagSuggestionsOpen(true);
+      setCreateTagSuggestionIndex((current) => {
+        const next = current + 1;
+        return next >= createTagSuggestions.length ? 0 : next;
+      });
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!createTagSuggestions.length) {
+        return;
+      }
+
+      setCreateTagSuggestionsOpen(true);
+      setCreateTagSuggestionIndex((current) => {
+        const base = current < 0 ? 0 : current;
+        const next = base - 1;
+        return next < 0 ? createTagSuggestions.length - 1 : next;
+      });
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      setCreateTagSuggestionsOpen(false);
+      return;
+    }
+
+    if (event.key === 'Backspace' && !createTagInput.trim() && createTags.length > 0) {
+      event.preventDefault();
+      removeCreateTag(createTags[createTags.length - 1]);
+      return;
+    }
+
     if (event.key !== 'Enter' && event.key !== ',') {
       return;
     }
 
     event.preventDefault();
+
+    if (event.key === 'Enter' && createTagSuggestionsOpen && createTagSuggestionIndex >= 0) {
+      const suggestion = createTagSuggestions[createTagSuggestionIndex];
+      if (suggestion) {
+        selectCreateSuggestion(suggestion);
+      }
+      return;
+    }
+
     const result = commitCreateTag(createTagInput);
     if (!result.message) {
       setCreateTagInput('');
     }
+
+    setCreateTagSuggestionsOpen(false);
   };
 
   const handleEditTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!editTagSuggestions.length) {
+        return;
+      }
+
+      setEditTagSuggestionsOpen(true);
+      setEditTagSuggestionIndex((current) => {
+        const next = current + 1;
+        return next >= editTagSuggestions.length ? 0 : next;
+      });
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!editTagSuggestions.length) {
+        return;
+      }
+
+      setEditTagSuggestionsOpen(true);
+      setEditTagSuggestionIndex((current) => {
+        const base = current < 0 ? 0 : current;
+        const next = base - 1;
+        return next < 0 ? editTagSuggestions.length - 1 : next;
+      });
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      setEditTagSuggestionsOpen(false);
+      return;
+    }
+
+    if (event.key === 'Backspace' && !editState?.tagInput.trim() && (editState?.tags.length ?? 0) > 0) {
+      event.preventDefault();
+      const lastTag = editState ? editState.tags[editState.tags.length - 1] : undefined;
+      if (lastTag) {
+        removeEditTag(lastTag);
+      }
+      return;
+    }
+
     if (event.key !== 'Enter' && event.key !== ',') {
       return;
     }
 
     event.preventDefault();
+
+    if (event.key === 'Enter' && editTagSuggestionsOpen && editTagSuggestionIndex >= 0) {
+      const suggestion = editTagSuggestions[editTagSuggestionIndex];
+      if (suggestion) {
+        selectEditSuggestion(suggestion);
+      }
+      return;
+    }
+
     commitEditTag(editState?.tagInput ?? '');
+    setEditTagSuggestionsOpen(false);
   };
 
   const toggleCreateSuggestedTag = (tag: string) => {
@@ -335,6 +540,7 @@ export default function DashboardPage() {
       setDueDate('');
       setCreateTags([]);
       setCreateTagInput('');
+      setCreateTagSuggestionsOpen(false);
       setEstimatedMinutes('');
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
@@ -394,6 +600,7 @@ export default function DashboardPage() {
   const cancelEditingTask = () => {
     setEditingTaskId(null);
     setEditState(null);
+    setEditTagSuggestionsOpen(false);
   };
 
   const handleSaveTaskEdit = async (taskId: string) => {
@@ -480,19 +687,40 @@ export default function DashboardPage() {
               ))}
             </div>
 
+            <p className="tag-helper-text">{createTags.length}/{MAX_TAGS} tags used</p>
+
             <input
               type="text"
               value={createTagInput}
-              onChange={(event) => setCreateTagInput(event.target.value)}
-              onKeyDown={handleCreateTagInputKeyDown}
-              onBlur={() => {
-                const result = commitCreateTag(createTagInput);
-                if (!result.message) {
-                  setCreateTagInput('');
+              onChange={(event) => {
+                setCreateTagInput(event.target.value);
+                setCreateTagSuggestionsOpen(true);
+              }}
+              onFocus={() => {
+                if (createTagSuggestions.length > 0) {
+                  setCreateTagSuggestionsOpen(true);
                 }
               }}
+              onKeyDown={handleCreateTagInputKeyDown}
+              onBlur={() => setCreateTagSuggestionsOpen(false)}
               placeholder="Type tag then Enter or comma"
             />
+
+            {createTagSuggestionsOpen && createTagSuggestions.length > 0 && (
+              <div className="tag-suggestion-dropdown">
+                {createTagSuggestions.map((tag, index) => (
+                  <button
+                    key={`create-suggestion-${tag}`}
+                    type="button"
+                    className={index === createTagSuggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectCreateSuggestion(tag)}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <input
             type="number"
@@ -623,6 +851,8 @@ export default function DashboardPage() {
                         ))}
                       </div>
 
+                      <p className="tag-helper-text">{editState.tags.length}/{MAX_TAGS} tags used</p>
+
                       <input
                         type="text"
                         value={editState.tagInput}
@@ -636,10 +866,31 @@ export default function DashboardPage() {
                               : current,
                           )
                         }
+                        onFocus={() => {
+                          if (editTagSuggestions.length > 0) {
+                            setEditTagSuggestionsOpen(true);
+                          }
+                        }}
                         onKeyDown={handleEditTagInputKeyDown}
-                        onBlur={() => commitEditTag(editState.tagInput)}
+                        onBlur={() => setEditTagSuggestionsOpen(false)}
                         placeholder="Type tag then Enter or comma"
                       />
+
+                      {editTagSuggestionsOpen && editTagSuggestions.length > 0 && (
+                        <div className="tag-suggestion-dropdown">
+                          {editTagSuggestions.map((tag, index) => (
+                            <button
+                              key={`edit-suggestion-${task._id}-${tag}`}
+                              type="button"
+                              className={index === editTagSuggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => selectEditSuggestion(tag)}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <input
                       type="number"

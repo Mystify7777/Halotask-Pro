@@ -238,6 +238,7 @@ button:disabled {
 .tag-input-block {
   display: grid;
   gap: 0.45rem;
+  position: relative;
 }
 
 .chip-row {
@@ -248,6 +249,12 @@ button:disabled {
 
 .selected-row {
   min-height: 1.8rem;
+}
+
+.tag-helper-text {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #5f7388;
 }
 
 .tag-chip {
@@ -332,6 +339,33 @@ button:disabled {
   border-color: #0f4db2;
   background: #0f4db2;
   color: #ffffff;
+}
+
+.tag-suggestion-dropdown {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid #c9d8e8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(19, 34, 56, 0.12);
+  padding: 0.3rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.suggestion-item {
+  border: 0;
+  background: transparent;
+  color: #1f3a56;
+  border-radius: 8px;
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+}
+
+.suggestion-item:hover,
+.suggestion-item.active {
+  background: #e9f2fb;
+  color: #0b3d90;
 }
 
 .task-list {
