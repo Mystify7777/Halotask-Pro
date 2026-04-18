@@ -10,6 +10,8 @@ import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
 import { useTaskSelection } from '../hooks/useTaskSelection';
 import { TaskSortOption, useTaskSorting } from '../hooks/useTaskSorting';
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
+import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
+import { useNetworkStatus } from '../offline/network';
 import { taskService } from '../services/taskService';
 import { Priority, Task } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
@@ -18,6 +20,8 @@ import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 type AddTagResult = {
   message: string | null;
 };
+
+type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline';
 
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -42,9 +46,13 @@ export default function DashboardPage() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [, setBulkFailedTaskIds] = useState<string[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
+
+  const { isOnline } = useNetworkStatus();
 
   const { selectedIds, toggleSelect, clearSelection, selectAll, retainOnly } = useTaskSelection();
 
@@ -70,23 +78,64 @@ export default function DashboardPage() {
   const selectedVisibleIds = selectedIds.filter((id) => visibleTaskIds.includes(id));
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleIds.length === visibleTaskIds.length;
 
+  const persistTasks = (updater: (current: Task[]) => Task[]) => {
+    setTasks((current) => {
+      const next = updater(current);
+      void setCachedTasks(next);
+      return next;
+    });
+  };
+
+  const fetchFreshTasks = async () => {
+    setSyncStatus('syncing');
+
+    const response = await taskService.getTasks();
+    setTasks(response.tasks);
+    await setCachedTasks(response.tasks);
+
+    const syncedAt = new Date().toISOString();
+    await setLastSyncTimestamp(syncedAt);
+    setLastSyncAt(syncedAt);
+    setSyncStatus('synced');
+  };
+
   const loadTasks = async () => {
+    const cachedTasks = await getCachedTasks();
+    const cachedSyncTime = await getLastSyncTimestamp();
+    setLastSyncAt(cachedSyncTime);
+
+    if (cachedTasks.length > 0) {
+      setTasks(cachedTasks);
+      setSyncStatus('cached');
+      setLoadingTasks(false);
+    }
+
+    if (!isOnline) {
+      setSyncStatus('offline');
+      setLoadingTasks(false);
+      return;
+    }
+
     try {
-      setLoadingTasks(true);
       setStatusError(null);
-      const response = await taskService.getTasks();
-      setTasks(response.tasks);
+      await fetchFreshTasks();
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
-      setStatusError(axiosError.response?.data?.message ?? 'Unable to load tasks');
+      if (cachedTasks.length > 0) {
+        setStatusError('Unable to sync latest tasks. Showing cached data.');
+        setSyncStatus('cached');
+      } else {
+        setStatusError(axiosError.response?.data?.message ?? 'Unable to load tasks');
+      }
     } finally {
       setLoadingTasks(false);
     }
   };
 
   useEffect(() => {
+    setLoadingTasks(true);
     void loadTasks();
-  }, []);
+  }, [isOnline]);
 
   const addCreateTag = (rawTag: string): AddTagResult => {
     const result = tryAddTag(createTags, rawTag);
@@ -162,7 +211,7 @@ export default function DashboardPage() {
             : undefined,
       });
 
-      setTasks((current) => [response.task, ...current]);
+      persistTasks((current) => [response.task, ...current]);
       setTitle('');
       setPriority('medium');
       setDueDate('');
@@ -185,7 +234,7 @@ export default function DashboardPage() {
     try {
       setActiveActionTaskId(task._id);
       const response = await taskService.updateTask(task._id, { completed: !task.completed });
-      setTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
+      persistTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
       setStatusInfo('Task completion updated.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -202,7 +251,7 @@ export default function DashboardPage() {
     try {
       setActiveActionTaskId(taskId);
       await taskService.deleteTask(taskId);
-      setTasks((current) => current.filter((task) => task._id !== taskId));
+      persistTasks((current) => current.filter((task) => task._id !== taskId));
       setStatusInfo('Task deleted successfully.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -242,7 +291,7 @@ export default function DashboardPage() {
       });
 
       if (deletedIds.length > 0) {
-        setTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
       }
 
       setBulkFailedTaskIds(failedIds);
@@ -297,7 +346,7 @@ export default function DashboardPage() {
 
       if (updatedTasks.length > 0) {
         const updatedById = new Map(updatedTasks.map((task) => [task._id, task]));
-        setTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
+        persistTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
       }
 
       setBulkFailedTaskIds(failedIds);
@@ -353,7 +402,7 @@ export default function DashboardPage() {
       });
 
       if (deletedIds.length > 0) {
-        setTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
       }
 
       setBulkFailedTaskIds(failedIds);
@@ -416,7 +465,7 @@ export default function DashboardPage() {
             : 0,
       });
 
-      setTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
+      persistTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
       handleCancelEditing();
       setStatusInfo('Task updated successfully.');
     } catch (requestError) {
@@ -465,6 +514,11 @@ export default function DashboardPage() {
           onSortByChange={setSortBy}
           onClearTagFilter={() => setTagFilter(null)}
         />
+
+        <p className={`sync-status ${syncStatus}`}>
+          Status: {syncStatus === 'offline' ? 'Offline' : syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'cached' ? 'Cached' : 'Synced'}
+          {lastSyncAt ? ` • Last sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+        </p>
 
         <div className="inline-actions-row">
           <button type="button" className="ghost-btn" onClick={handleClearCompleted} disabled={bulkActionLoading}>

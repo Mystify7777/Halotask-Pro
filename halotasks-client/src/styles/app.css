@@ -333,6 +333,28 @@ button:disabled {
   margin-top: 0.55rem;
 }
 
+.sync-status {
+  margin: 0.55rem 0 0;
+  font-size: 0.82rem;
+  color: #5f7388;
+}
+
+.sync-status.cached {
+  color: #285880;
+}
+
+.sync-status.syncing {
+  color: #8b5a12;
+}
+
+.sync-status.synced {
+  color: #1f6f3f;
+}
+
+.sync-status.offline {
+  color: #b45309;
+}
+
 .bulk-actions-bar {
   margin-top: 0.55rem;
   display: flex;

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { clearCachedAuthUser, setCachedAuthUser } from '../offline/cache';
 import { AuthResponse, AuthUser } from '../types/auth';
 
 type AuthState = {
@@ -32,6 +33,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   setAuth: (payload) => {
     localStorage.setItem(TOKEN_KEY, payload.token);
     localStorage.setItem(USER_KEY, JSON.stringify(payload.user));
+    void setCachedAuthUser(payload.user);
 
     set({
       token: payload.token,
@@ -41,6 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearAuth: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    void clearCachedAuthUser();
 
     set({
       token: null,
