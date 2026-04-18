@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HaloTasks — Modern To-Do</title>
+
+  <!-- Link to the stylesheet -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="app-header">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>HaloTasks</h1>
+      </div>
+      <p class="subtitle">Smart, fast, and delightful tasks.</p>
+    </header>
+
+    <main class="main">
+      <section class="task-creator" aria-label="Create task">
+        <input id="newTaskInput" class="task-input" type="text" placeholder="Add a new task — press Enter or click Add" aria-label="New task" maxlength="200" />
+        <button id="addTaskBtn" class="btn primary" aria-label="Add task">Add</button>
+      </section>
+
+      <section class="controls" aria-label="Task filters and actions">
+        <div class="filters" role="tablist" aria-label="Filter tasks">
+          <button class="filter-btn active" data-filter="all" role="tab">All</button>
+          <button class="filter-btn" data-filter="active" role="tab">Active</button>
+          <button class="filter-btn" data-filter="completed" role="tab">Completed</button>
+        </div>
+        <button id="clearCompleted" class="btn ghost">Clear completed</button>
+      </section>
+
+      <section class="list-wrap" aria-live="polite" aria-atomic="false">
+        <ul id="taskList" class="task-list" aria-label="Tasks"></ul>
+      </section>
+
+      <footer class="footer">
+        <div id="counter" class="counter">0 tasks</div>
+        <div class="hint">Tip: Double-click a task to edit — press Enter to save, Esc to cancel.</div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Application script -->
+  <script src="script.js" defer></script>
+</body>
+</html>
