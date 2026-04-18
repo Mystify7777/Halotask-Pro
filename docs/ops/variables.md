@@ -1,0 +1,17 @@
+# Variables
+
+Priority:
+LOW
+MEDIUM
+HIGH
+
+Tree Health:
+HEALTHY
+WILTING
+DEAD
+
+Sync Status:
+LOCAL
+PENDING
+SYNCED
+FAILED
