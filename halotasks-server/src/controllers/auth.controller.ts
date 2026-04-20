@@ -2,12 +2,17 @@ import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import { Resend } from 'resend';
 import User from '../models/User.model';
 
 const RESET_TOKEN_TTL_MINUTES = Number(process.env.RESET_TOKEN_TTL_MINUTES ?? 20);
 const FORGOT_WINDOW_MS = 15 * 60 * 1000;
 const FORGOT_MAX_ATTEMPTS = 5;
 const neutralForgotMessage = 'If an account exists for this email, a reset link has been sent.';
+const resetEmailSubject = 'Reset your HaloTaskPro password';
+
+const resendApiKey = process.env.RESEND_API_KEY;
+const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
 
 const forgotAttempts = new Map<string, { count: number; windowStart: number }>();
 
@@ -38,8 +43,68 @@ const buildResetTokenPair = () => {
 };
 
 const getResetUrl = (rawToken: string) => {
-  const clientOrigin = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
-  return `${clientOrigin}/reset-password/${rawToken}`;
+  const appBaseUrl = process.env.APP_BASE_URL ?? process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+  const normalizedBaseUrl = appBaseUrl.endsWith('/') ? appBaseUrl.slice(0, -1) : appBaseUrl;
+  return `${normalizedBaseUrl}/reset-password/${rawToken}`;
+};
+
+const maskEmail = (email: string) => {
+  const [local, domain] = email.split('@');
+
+  if (!local || !domain) {
+    return '[invalid-email]';
+  }
+
+  if (local.length <= 2) {
+    return `**@${domain}`;
+  }
+
+  return `${local.slice(0, 2)}***@${domain}`;
+};
+
+const buildResetEmailText = (resetUrl: string) =>
+  [
+    'We received a request to reset your password.',
+    '',
+    `Use the link below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
+    '',
+    resetUrl,
+    '',
+    "If you didn't request this, you can ignore this email.",
+  ].join('\n');
+
+const buildResetEmailHtml = (resetUrl: string) => `
+  <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+    <p>We received a request to reset your password.</p>
+    <p>Use the link below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>
+    <p>
+      <a href="${resetUrl}" style="display: inline-block; padding: 10px 16px; background: #0f4db2; color: #ffffff; text-decoration: none; border-radius: 6px;">
+        Reset Password
+      </a>
+    </p>
+    <p>If you didn\'t request this, you can ignore this email.</p>
+  </div>
+`;
+
+const sendResetPasswordEmail = async (toEmail: string, resetUrl: string) => {
+  const fromAddress = process.env.EMAIL_FROM;
+
+  if (!resendClient || !fromAddress) {
+    console.warn('[Auth] Password reset email transport is not configured.');
+    return;
+  }
+
+  try {
+    await resendClient.emails.send({
+      from: fromAddress,
+      to: toEmail,
+      subject: resetEmailSubject,
+      text: buildResetEmailText(resetUrl),
+      html: buildResetEmailHtml(resetUrl),
+    });
+  } catch (error) {
+    console.error(`[Auth] Failed to send password reset email for ${maskEmail(toEmail)}.`);
+  }
 };
 
 const canAttemptForgotPassword = (key: string) => {
@@ -157,7 +222,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       await user.save();
 
       const resetUrl = getResetUrl(rawToken);
-      console.info(`[Auth] Password reset requested for ${normalizedEmail}. Reset URL: ${resetUrl}`);
+      await sendResetPasswordEmail(normalizedEmail, resetUrl);
     }
 
     return res.json({ message: neutralForgotMessage });
