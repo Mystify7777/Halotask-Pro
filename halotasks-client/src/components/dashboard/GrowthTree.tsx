@@ -1,4 +1,4 @@
-import { getStageEmoji, getStageDescription, getTodayDate, daysBetween } from '../../growth/treeLogic';
+import { getStageEmoji, getStageDescription, getStageProgressForXp, getTodayDate, daysBetween } from '../../growth/treeLogic';
 import type { TreeState, TreeHealth } from '../../growth/treeTypes';
 import styles from './GrowthTree.module.css';
 
@@ -34,6 +34,11 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
   // Calculate days since last activity
   const daysSinceActive = daysBetween(state.lastActiveDate, getTodayDate());
   const streakStatus = daysSinceActive === 0 ? 'Active Today' : `${daysSinceActive}d since last`;
+  const stageProgress = getStageProgressForXp(state.xp);
+  const progressLabel = stageProgress.nextStage
+    ? `${getStageDescription(stageProgress.currentStage)} -> ${getStageDescription(stageProgress.nextStage)} (${stageProgress.nextThreshold} XP)`
+    : `${getStageDescription(stageProgress.currentStage)} (Max stage)`;
+  const progressPercentDisplay = `${stageProgress.progressPercent.toFixed(1)}%`;
 
   return (
     <div className={styles.container}>
@@ -80,8 +85,13 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
             <span className={styles.xpLabel}>Experience</span>
             <span className={styles.xpValue}>{state.xp} XP</span>
           </div>
+          <div className={styles.statRow}>
+            <span className={styles.statLabel}>Path</span>
+            <span className={styles.statValue}>{progressLabel}</span>
+            <span className={styles.statHint}>{progressPercentDisplay}</span>
+          </div>
           <div className={styles.xpBar}>
-            <div className={styles.xpFill} style={{ width: `${Math.min(state.xp / 25, 100)}%` }} />
+            <div className={styles.xpFill} style={{ width: `${stageProgress.progressPercent}%` }} />
           </div>
         </div>
       </div>

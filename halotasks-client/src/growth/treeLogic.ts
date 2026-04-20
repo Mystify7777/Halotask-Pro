@@ -21,6 +21,14 @@ const STAGE_THRESHOLDS: Record<TreeStage, number> = {
 
 const STAGE_ORDER: TreeStage[] = ['seed', 'sprout', 'young', 'mature', 'lush'];
 
+export type StageProgress = {
+  currentStage: TreeStage;
+  nextStage: TreeStage | null;
+  currentThreshold: number;
+  nextThreshold: number;
+  progressPercent: number;
+};
+
 /**
  * Get current date as YYYY-MM-DD
  */
@@ -51,6 +59,53 @@ export const getStageForXp = (xp: number): TreeStage => {
     }
   }
   return 'seed';
+};
+
+/**
+ * Get stage-relative progress details for a given XP value.
+ *
+ * Progress is calculated within the current stage range:
+ * (xp - currentThreshold) / (nextThreshold - currentThreshold)
+ */
+export const getStageProgressForXp = (xp: number): StageProgress => {
+  const currentStage = getStageForXp(xp);
+  const currentIndex = STAGE_ORDER.indexOf(currentStage);
+  const nextStage = currentIndex < STAGE_ORDER.length - 1 ? STAGE_ORDER[currentIndex + 1] : null;
+  const currentThreshold = STAGE_THRESHOLDS[currentStage];
+
+  if (!nextStage) {
+    return {
+      currentStage,
+      nextStage: null,
+      currentThreshold,
+      nextThreshold: currentThreshold,
+      progressPercent: 100,
+    };
+  }
+
+  const nextThreshold = STAGE_THRESHOLDS[nextStage];
+  const stageSpan = nextThreshold - currentThreshold;
+
+  if (stageSpan <= 0) {
+    return {
+      currentStage,
+      nextStage,
+      currentThreshold,
+      nextThreshold,
+      progressPercent: 100,
+    };
+  }
+
+  const rawPercent = ((xp - currentThreshold) / stageSpan) * 100;
+  const progressPercent = Math.max(0, Math.min(rawPercent, 100));
+
+  return {
+    currentStage,
+    nextStage,
+    currentThreshold,
+    nextThreshold,
+    progressPercent,
+  };
 };
 
 /**
