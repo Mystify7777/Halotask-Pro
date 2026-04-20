@@ -203,6 +203,20 @@ button:disabled {
   font-size: 0.92rem;
 }
 
+.auth-cta-stack {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+}
+
+.auth-ghost-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  padding: 0.58rem 0.85rem;
+}
+
 .form-error {
   margin: 0;
   color: #b11f1f;

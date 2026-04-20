@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { clearCachedAuthUser, setCachedAuthUser } from '../offline/cache';
 import { AuthResponse, AuthUser } from '../types/auth';
+import { markKnownUser } from '../utils/authSession';
 
 type AuthState = {
   token: string | null;
@@ -33,6 +34,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   setAuth: (payload) => {
     localStorage.setItem(TOKEN_KEY, payload.token);
     localStorage.setItem(USER_KEY, JSON.stringify(payload.user));
+    markKnownUser();
     void setCachedAuthUser(payload.user);
 
     set({

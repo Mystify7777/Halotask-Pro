@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
+import { isSessionTokenValid } from '../utils/authSession';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (token) {
+    if (isSessionTokenValid(token)) {
       navigate('/dashboard', { replace: true });
     }
   }, [token, navigate]);
@@ -39,26 +40,9 @@ export default function RegisterPage() {
 
   return (
     <section className="auth-page">
-      <div className="auth-shell">
-        <article className="auth-showcase" aria-label="HaloTaskPro registration benefits">
-          <p className="auth-eyebrow">Your Productive System</p>
-          <h1 className="auth-hero-title">Build a reliable routine with less friction.</h1>
-          <p className="auth-hero-copy">
-            HaloTaskPro keeps task execution resilient and motivating: offline continuity, reminder intelligence,
-            progress psychology, and fast control surfaces for daily planning.
-          </p>
-
-          <div className="cta-band" role="note" aria-label="Sign in call to action">
-            <p>Already have an account?</p>
-            <Link className="cta-link" to="/login">
-              Sign In
-            </Link>
-          </div>
-        </article>
-
-        <div className="auth-card">
-          <h2>Create Workspace</h2>
-          <p>Start organizing with HaloTaskPro.</p>
+      <div className="auth-card">
+        <h2>Create Workspace</h2>
+        <p>Start organizing with HaloTaskPro.</p>
 
           <form onSubmit={handleSubmit} className="auth-form">
             <label>
@@ -102,10 +86,9 @@ export default function RegisterPage() {
             </button>
           </form>
 
-          <p className="auth-link">
-            Already registered? <Link to="/login">Sign in</Link>
-          </p>
-        </div>
+        <p className="auth-link">
+          Already registered? <Link to="/login">Sign in</Link>
+        </p>
       </div>
     </section>
   );
