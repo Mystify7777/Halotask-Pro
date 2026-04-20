@@ -56,4 +56,73 @@ Operational docs:
 API reference:
 - docs/06_API_Contract.md
 
+Deployment:
+- docs/DEPLOYMENT.md - Full production deployment guide
+
 Legacy root-level product docs in docs/ remain for compatibility and redirect to docs/product/.
+
+## Quick Start
+
+### Local Development
+
+**Backend:**
+
+```bash
+cd halotasks-server
+cp .env.example .env
+# Edit .env with your MongoDB Atlas URI and JWT secret
+npm install
+npm run dev
+```
+
+**Frontend:**
+
+```bash
+cd halotasks-client
+cp .env.example .env
+# Keep VITE_API_BASE_URL as http://localhost:5000 for local dev
+npm install
+npm run dev
+```
+
+### Production Build
+
+**Backend:**
+
+```bash
+cd halotasks-server
+npm run build
+# Output: dist/ directory
+```
+
+**Frontend:**
+
+```bash
+cd halotasks-client
+npm run build
+# Output: dist/ directory (static files)
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for full production deployment instructions.
+
+## Environment Variables
+
+### Backend (.env)
+
+```
+PORT=5000
+MONGO_URI=your-mongodb-atlas-uri
+JWT_SECRET=your-jwt-secret
+CLIENT_ORIGIN=your-frontend-domain
+APP_BASE_URL=your-app-domain
+RESEND_API_KEY=your-resend-api-key
+EMAIL_FROM=noreply@yourdomain.com
+RESET_TOKEN_TTL_MINUTES=20
+MONGO_DNS_SERVERS=8.8.8.8,1.1.1.1
+```
+
+### Frontend (.env)
+
+```
+VITE_API_BASE_URL=your-backend-api-url
+```
