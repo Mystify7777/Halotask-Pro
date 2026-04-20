@@ -203,6 +203,26 @@ button:disabled {
   font-size: 0.92rem;
 }
 
+.auth-secondary-link {
+  margin-top: 0.85rem;
+  color: #5f7287;
+}
+
+.auth-inline-link {
+  margin: 0;
+  font-size: 0.86rem;
+  text-align: right;
+}
+
+.auth-inline-link a {
+  color: #0f4db2;
+  text-decoration: none;
+}
+
+.auth-inline-link a:hover {
+  text-decoration: underline;
+}
+
 .auth-cta-stack {
   display: grid;
   gap: 0.6rem;

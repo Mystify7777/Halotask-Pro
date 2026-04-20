@@ -1,7 +1,15 @@
 import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.model';
+
+const RESET_TOKEN_TTL_MINUTES = Number(process.env.RESET_TOKEN_TTL_MINUTES ?? 20);
+const FORGOT_WINDOW_MS = 15 * 60 * 1000;
+const FORGOT_MAX_ATTEMPTS = 5;
+const neutralForgotMessage = 'If an account exists for this email, a reset link has been sent.';
+
+const forgotAttempts = new Map<string, { count: number; windowStart: number }>();
 
 const createAuthToken = (userId: string, email: string, name: string) => {
   const jwtSecret = process.env.JWT_SECRET;
@@ -18,6 +26,39 @@ const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: 
   name: user.name,
   email: user.email,
 });
+
+const buildResetTokenPair = () => {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+  return {
+    rawToken,
+    hashedToken,
+  };
+};
+
+const getResetUrl = (rawToken: string) => {
+  const clientOrigin = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+  return `${clientOrigin}/reset-password/${rawToken}`;
+};
+
+const canAttemptForgotPassword = (key: string) => {
+  const now = Date.now();
+  const existing = forgotAttempts.get(key);
+
+  if (!existing || now - existing.windowStart > FORGOT_WINDOW_MS) {
+    forgotAttempts.set(key, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (existing.count >= FORGOT_MAX_ATTEMPTS) {
+    return false;
+  }
+
+  existing.count += 1;
+  forgotAttempts.set(key, existing);
+  return true;
+};
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -86,6 +127,77 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
       token,
       user: sanitizeUser(user),
     });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = req.body as { email?: string };
+
+    if (!email) {
+      return res.status(400).json({ message: 'email is required' });
+    }
+
+    const limiterKey = req.ip || 'unknown';
+    if (!canAttemptForgotPassword(limiterKey)) {
+      return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (user) {
+      const { rawToken, hashedToken } = buildResetTokenPair();
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+      user.resetPasswordTokenHash = hashedToken;
+      user.resetPasswordExpiresAt = expiresAt;
+      await user.save();
+
+      const resetUrl = getResetUrl(rawToken);
+      console.info(`[Auth] Password reset requested for ${normalizedEmail}. Reset URL: ${resetUrl}`);
+    }
+
+    return res.json({ message: neutralForgotMessage });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token, password } = req.body as {
+      token?: string;
+      password?: string;
+    };
+
+    if (!token || !password) {
+      return res.status(400).json({ message: 'token and password are required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'password must be at least 6 characters long' });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordTokenHash: hashedToken,
+      resetPasswordExpiresAt: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Reset token is invalid or expired' });
+    }
+
+    user.passwordHash = await bcrypt.hash(password, 10);
+    user.resetPasswordTokenHash = undefined;
+    user.resetPasswordExpiresAt = undefined;
+    await user.save();
+
+    return res.json({ message: 'Password updated. Please log in.' });
   } catch (error) {
     return next(error);
   }

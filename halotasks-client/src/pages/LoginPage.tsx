@@ -44,7 +44,7 @@ export default function LoginPage() {
     <section className="auth-page">
       <div className="auth-card">
         <h2>Welcome Back</h2>
-        <p>Sign in to continue your focused workflow.</p>
+        <p>Welcome back. Sign in to continue your focused workflow.</p>
 
           <form onSubmit={handleSubmit} className="auth-form">
             <label>
@@ -68,6 +68,10 @@ export default function LoginPage() {
                 autoComplete="current-password"
               />
             </label>
+
+            <p className="auth-inline-link">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
 
             {error && <p className="form-error">{error}</p>}
 
