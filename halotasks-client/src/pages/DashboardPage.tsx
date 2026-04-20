@@ -5,6 +5,7 @@ import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import BulkActionsBar from '../components/dashboard/BulkActionsBar';
 import SmartSections from '../components/dashboard/SmartSections';
+import GrowthTree from '../components/dashboard/GrowthTree';
 import { TaskEditState } from '../components/dashboard/types';
 import { useTaskFilters, FilterMode } from '../hooks/useTaskFilters';
 import { useTaskSelection } from '../hooks/useTaskSelection';
@@ -27,6 +28,9 @@ import { taskService } from '../services/taskService';
 import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
+import { awardXpForCompletion } from '../growth/treeLogic';
+import { getTreeState, setTreeState } from '../growth/treeStorage';
+import type { TreeState } from '../growth/treeTypes';
 
 type AddTagResult = {
   message: string | null;
@@ -45,6 +49,7 @@ export default function DashboardPage() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [activeActionTaskId, setActiveActionTaskId] = useState<string | null>(null);
+  const [treeState, setTreeStateLocal] = useState<TreeState | null>(null);
 
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -157,6 +162,21 @@ export default function DashboardPage() {
   useEffect(() => {
     retainOnly(visibleTaskIds);
   }, [retainOnly, visibleTaskIds]);
+
+  useEffect(() => {
+    const initialTreeState = getTreeState();
+    setTreeStateLocal(initialTreeState);
+    setTreeState(initialTreeState);
+  }, []);
+
+  const processGrowthForCompletion = (taskId: string) => {
+    setTreeStateLocal((current) => {
+      const baseState = current ?? getTreeState();
+      const { state: nextState } = awardXpForCompletion(baseState, taskId, true);
+      setTreeState(nextState);
+      return nextState;
+    });
+  };
 
   const selectedVisibleIds = selectedIds.filter((id) => visibleTaskIds.includes(id));
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleIds.length === visibleTaskIds.length;
@@ -467,6 +487,10 @@ export default function DashboardPage() {
       });
       await refreshPendingQueueCount();
 
+      if (nextCompleted && !task.completed) {
+        processGrowthForCompletion(task._id);
+      }
+
       setSyncStatus('offline');
       setStatusInfo('Task updated offline. Pending sync.');
       return;
@@ -476,6 +500,11 @@ export default function DashboardPage() {
       setActiveActionTaskId(task._id);
       const response = await taskService.updateTask(task._id, { completed: nextCompleted });
       persistTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
+
+      if (nextCompleted && !task.completed) {
+        processGrowthForCompletion(task._id);
+      }
+
       setStatusInfo('Task completion updated.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -624,6 +653,10 @@ export default function DashboardPage() {
       );
       await refreshPendingQueueCount();
 
+      incompleteIds.forEach((taskId) => {
+        processGrowthForCompletion(taskId);
+      });
+
       clearSelection();
       setSyncStatus('offline');
       setStatusInfo(`Marked ${incompleteIds.length} task${incompleteIds.length === 1 ? '' : 's'} complete offline.`);
@@ -652,6 +685,10 @@ export default function DashboardPage() {
       if (updatedTasks.length > 0) {
         const updatedById = new Map(updatedTasks.map((task) => [task._id, task]));
         persistTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
+
+        updatedTasks.forEach((task) => {
+          processGrowthForCompletion(task._id);
+        });
       }
 
       setBulkFailedTaskIds(failedIds);
@@ -853,6 +890,10 @@ export default function DashboardPage() {
           onAddTag={addCreateTag}
           onRemoveTag={removeCreateTag}
         />
+      </div>
+
+      <div className="panel">
+        {treeState && <GrowthTree state={treeState} />}
       </div>
 
       <div className="panel">
