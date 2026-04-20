@@ -264,7 +264,7 @@ export function useDashboardTasks({
       }
 
       syncBridgeRef.current.setSyncStatus('offline');
-      setStatusInfo('Task updated offline. Pending sync.');
+      setStatusInfo(nextCompleted && !task.completed ? 'Task updated offline. Pending sync. +10 XP' : 'Task updated offline. Pending sync.');
       return;
     }
 
@@ -277,7 +277,7 @@ export function useDashboardTasks({
         processGrowthForCompletion(task._id);
       }
 
-      setStatusInfo('Task completion updated.');
+      setStatusInfo(nextCompleted && !task.completed ? 'Task completion updated. +10 XP' : 'Task completion updated.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
       setStatusError(axiosError.response?.data?.message ?? 'Unable to update task');
@@ -431,7 +431,7 @@ export function useDashboardTasks({
 
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
-      setStatusInfo(`Marked ${incompleteIds.length} task${incompleteIds.length === 1 ? '' : 's'} complete offline.`);
+      setStatusInfo(`Marked ${incompleteIds.length} task${incompleteIds.length === 1 ? '' : 's'} complete offline. +${incompleteIds.length * 10} XP`);
       return;
     }
 
@@ -472,7 +472,7 @@ export function useDashboardTasks({
       }
 
       if (updatedTasks.length > 0) {
-        setStatusInfo(`Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete.`);
+        setStatusInfo(`Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete. +${updatedTasks.length * 10} XP`);
       }
 
       if (failedIds.length > 0) {

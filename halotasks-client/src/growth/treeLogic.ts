@@ -27,6 +27,7 @@ export type StageProgress = {
   currentThreshold: number;
   nextThreshold: number;
   progressPercent: number;
+  xpToNextStage: number;
 };
 
 /**
@@ -80,6 +81,7 @@ export const getStageProgressForXp = (xp: number): StageProgress => {
       currentThreshold,
       nextThreshold: currentThreshold,
       progressPercent: 100,
+      xpToNextStage: 0,
     };
   }
 
@@ -93,11 +95,13 @@ export const getStageProgressForXp = (xp: number): StageProgress => {
       currentThreshold,
       nextThreshold,
       progressPercent: 100,
+      xpToNextStage: 0,
     };
   }
 
   const rawPercent = ((xp - currentThreshold) / stageSpan) * 100;
   const progressPercent = Math.max(0, Math.min(rawPercent, 100));
+  const xpToNextStage = Math.max(nextThreshold - xp, 0);
 
   return {
     currentStage,
@@ -105,6 +109,7 @@ export const getStageProgressForXp = (xp: number): StageProgress => {
     currentThreshold,
     nextThreshold,
     progressPercent,
+    xpToNextStage,
   };
 };
 

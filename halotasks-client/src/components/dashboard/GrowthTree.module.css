@@ -161,6 +161,13 @@
   border-radius: 3px;
 }
 
+.xpHint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+  letter-spacing: 0.2px;
+}
+
 .footer {
   margin-top: 16px;
   padding-top: 12px;

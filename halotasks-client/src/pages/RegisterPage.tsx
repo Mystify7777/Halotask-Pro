@@ -39,55 +39,73 @@ export default function RegisterPage() {
 
   return (
     <section className="auth-page">
-      <div className="auth-card">
-        <h1>Register</h1>
-        <p>Create an account to start managing HaloTasks.</p>
+      <div className="auth-shell">
+        <article className="auth-showcase" aria-label="HaloTaskPro registration benefits">
+          <p className="auth-eyebrow">Your Productive System</p>
+          <h1 className="auth-hero-title">Build a reliable routine with less friction.</h1>
+          <p className="auth-hero-copy">
+            HaloTaskPro keeps task execution resilient and motivating: offline continuity, reminder intelligence,
+            progress psychology, and fast control surfaces for daily planning.
+          </p>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label>
-            Name
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-              autoComplete="name"
-            />
-          </label>
+          <div className="cta-band" role="note" aria-label="Sign in call to action">
+            <p>Already have an account?</p>
+            <Link className="cta-link" to="/login">
+              Sign In
+            </Link>
+          </div>
+        </article>
 
-          <label>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              autoComplete="email"
-            />
-          </label>
+        <div className="auth-card">
+          <h2>Create Workspace</h2>
+          <p>Start organizing with HaloTaskPro.</p>
 
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              autoComplete="new-password"
-              minLength={6}
-            />
-          </label>
+          <form onSubmit={handleSubmit} className="auth-form">
+            <label>
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
+                autoComplete="name"
+              />
+            </label>
 
-          {error && <p className="form-error">{error}</p>}
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                autoComplete="email"
+              />
+            </label>
 
-          <button type="submit" disabled={loading}>
-            {loading ? 'Creating account...' : 'Register'}
-          </button>
-        </form>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                autoComplete="new-password"
+                minLength={6}
+              />
+            </label>
 
-        <p className="auth-link">
-          Already registered? <Link to="/login">Sign in</Link>
-        </p>
+            {error && <p className="form-error">{error}</p>}
+
+            <button type="submit" disabled={loading}>
+              {loading ? 'Creating account...' : 'Register'}
+            </button>
+          </form>
+
+          <p className="auth-link">
+            Already registered? <Link to="/login">Sign in</Link>
+          </p>
+        </div>
       </div>
     </section>
   );

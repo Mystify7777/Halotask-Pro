@@ -39,6 +39,9 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
     ? `${getStageDescription(stageProgress.currentStage)} -> ${getStageDescription(stageProgress.nextStage)} (${stageProgress.nextThreshold} XP)`
     : `${getStageDescription(stageProgress.currentStage)} (Max stage)`;
   const progressPercentDisplay = `${stageProgress.progressPercent.toFixed(1)}%`;
+  const xpHint = stageProgress.nextStage
+    ? `${stageProgress.xpToNextStage} XP to ${getStageDescription(stageProgress.nextStage)}`
+    : 'Maximum Growth Reached';
 
   return (
     <div className={styles.container}>
@@ -93,6 +96,7 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
           <div className={styles.xpBar}>
             <div className={styles.xpFill} style={{ width: `${stageProgress.progressPercent}%` }} />
           </div>
+          <p className={styles.xpHint}>{xpHint}</p>
         </div>
       </div>
 
