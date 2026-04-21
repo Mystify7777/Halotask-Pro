@@ -25,6 +25,7 @@ export type ForgotPasswordPayload = {
 };
 
 export type ResetPasswordPayload = {
+  email: string;
   token: string;
   password: string;
 };

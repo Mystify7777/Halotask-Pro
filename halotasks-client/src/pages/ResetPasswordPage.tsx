@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FormEvent, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
@@ -7,15 +7,14 @@ import { isSessionTokenValid } from '../utils/authSession';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
-  const { token: resetToken } = useParams<{ token: string }>();
   const authToken = useAuthStore((state) => state.token);
+  const [email, setEmail] = useState('');
+  const [token, setToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  const token = useMemo(() => (resetToken || '').trim(), [resetToken]);
 
   useEffect(() => {
     if (isSessionTokenValid(authToken)) {
@@ -28,8 +27,13 @@ export default function ResetPasswordPage() {
     setError(null);
     setMessage(null);
 
-    if (!token) {
-      setError('Reset token is missing. Request a new reset link.');
+    if (!email.trim()) {
+      setError('Email is required.');
+      return;
+    }
+
+    if (!token.trim()) {
+      setError('Reset code is required.');
       return;
     }
 
@@ -46,14 +50,18 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const result = await authService.resetPassword({ token, password });
+      const result = await authService.resetPassword({
+        email: email.trim(),
+        token: token.trim(),
+        password,
+      });
       setMessage(result.message || 'Password updated. Please log in.');
       setTimeout(() => {
         navigate('/login', { replace: true });
       }, 1200);
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
-      setError(axiosError.response?.data?.message ?? 'Unable to reset password. Please request a new reset link.');
+      setError(axiosError.response?.data?.message ?? 'Unable to reset password. Please try again or request a new code.');
     } finally {
       setLoading(false);
     }
@@ -63,9 +71,32 @@ export default function ResetPasswordPage() {
     <section className="auth-page">
       <div className="auth-card">
         <h2>Reset Password</h2>
-        <p>Choose a new password for your account.</p>
+        <p>Enter the code from your email and choose a new password.</p>
 
         <form onSubmit={handleSubmit} className="auth-form">
+          <label>
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              autoComplete="email"
+            />
+          </label>
+
+          <label>
+            Reset code
+            <input
+              type="text"
+              value={token}
+              onChange={(event) => setToken(event.target.value.toUpperCase())}
+              placeholder="Enter 6-digit code"
+              required
+              maxLength={10}
+            />
+          </label>
+
           <label>
             New password
             <input
@@ -94,12 +125,12 @@ export default function ResetPasswordPage() {
           {message && <p className="form-success">{message}</p>}
 
           <button type="submit" disabled={loading}>
-            {loading ? 'Updating password...' : 'Update Password'}
+            {loading ? 'Resetting password...' : 'Reset Password'}
           </button>
         </form>
 
         <p className="auth-link auth-secondary-link">
-          Need a new token? <Link to="/forgot-password">Request reset link</Link>
+          Back to <Link to="/login">Sign in</Link>
         </p>
       </div>
     </section>

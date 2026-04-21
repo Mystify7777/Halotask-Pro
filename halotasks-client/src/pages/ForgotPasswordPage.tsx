@@ -5,7 +5,7 @@ import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import { isSessionTokenValid } from '../utils/authSession';
 
-const neutralMessage = 'If an account exists for this email, a reset link has been sent.';
+const neutralMessage = 'If an account exists for this email, check your inbox for a reset code (or your spam folder). The code expires in 15 minutes.';
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -46,7 +46,7 @@ export default function ForgotPasswordPage() {
     <section className="auth-page">
       <div className="auth-card">
         <h2>Forgot Password</h2>
-        <p>Enter your email and we will send password reset instructions.</p>
+        <p>Enter your email to receive a password reset code.</p>
 
         <form onSubmit={handleSubmit} className="auth-form">
           <label>
@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
           {message && <p className="form-success">{message}</p>}
 
           <button type="submit" disabled={loading}>
-            {loading ? 'Sending reset link...' : 'Send Reset Link'}
+            {loading ? 'Sending code...' : 'Send Reset Code'}
           </button>
         </form>
 

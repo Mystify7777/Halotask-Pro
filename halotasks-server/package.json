@@ -16,6 +16,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.4.1",
+    "nodemailer": "^6.9.7",
     "resend": "^6.12.1"
   },
   "devDependencies": {
@@ -23,6 +24,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/nodemailer": "^6.4.14",
     "@types/node": "^25.6.0",
     "@types/supertest": "^7.2.0",
     "mongodb-memory-server": "^11.0.1",

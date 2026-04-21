@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
 import User from '../models/User.model';
 
@@ -13,6 +14,30 @@ const resetEmailSubject = 'Reset your HaloTaskPro password';
 
 const resendApiKey = process.env.RESEND_API_KEY;
 const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
+
+// Initialize SMTP transporter if env vars are available
+const createSmtpTransporter = () => {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = process.env.SMTP_PORT;
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+
+  if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: Number(smtpPort),
+    secure: smtpPort === '465', // Use TLS for port 465
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+  });
+};
+
+const smtpTransporter = createSmtpTransporter();
 
 const forgotAttempts = new Map<string, { count: number; windowStart: number }>();
 
@@ -32,20 +57,13 @@ const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: 
   email: user.email,
 });
 
-const buildResetTokenPair = () => {
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-  return {
-    rawToken,
-    hashedToken,
-  };
+const generateResetCode = () => {
+  // Generate 6-digit numeric code
+  return String(Math.floor(100000 + Math.random() * 900000));
 };
 
-const getResetUrl = (rawToken: string) => {
-  const appBaseUrl = process.env.APP_BASE_URL ?? process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
-  const normalizedBaseUrl = appBaseUrl.endsWith('/') ? appBaseUrl.slice(0, -1) : appBaseUrl;
-  return `${normalizedBaseUrl}/reset-password/${rawToken}`;
+const hashResetCode = (code: string) => {
+  return crypto.createHash('sha256').update(code).digest('hex');
 };
 
 const maskEmail = (email: string) => {
@@ -62,61 +80,91 @@ const maskEmail = (email: string) => {
   return `${local.slice(0, 2)}***@${domain}`;
 };
 
-const buildResetEmailText = (resetUrl: string) =>
+const buildResetEmailText = (resetCode: string) =>
   [
     'We received a request to reset your password.',
     '',
-    `Use the link below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
+    `Use the code below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
     '',
-    resetUrl,
+    `Code: ${resetCode}`,
     '',
     "If you didn't request this, you can ignore this email.",
   ].join('\n');
 
-const buildResetEmailHtml = (resetUrl: string) => `
+const buildResetEmailHtml = (resetCode: string) => `
   <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
     <p>We received a request to reset your password.</p>
-    <p>Use the link below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>
-    <p>
-      <a href="${resetUrl}" style="display: inline-block; padding: 10px 16px; background: #0f4db2; color: #ffffff; text-decoration: none; border-radius: 6px;">
-        Reset Password
-      </a>
+    <p>Use the code below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>
+    <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #0f4db2; margin: 16px 0;">
+      ${resetCode}
     </p>
     <p>If you didn\'t request this, you can ignore this email.</p>
   </div>
 `;
 
-const sendResetPasswordEmail = async (toEmail: string, resetUrl: string) => {
-  const fromAddress = process.env.EMAIL_FROM;
+const sendResetPasswordEmail = async (toEmail: string, resetCode: string) => {
+  const emailText = buildResetEmailText(resetCode);
+  const emailHtml = buildResetEmailHtml(resetCode);
+  const fromAddress = process.env.EMAIL_FROM || 'noreply@halotaskpro.com';
 
-  if (!resendClient || !fromAddress) {
-    console.warn('[Auth] Password reset email transport is not configured.');
-    return;
+  // Try SMTP first (primary transport)
+  if (smtpTransporter) {
+    try {
+      const info = await smtpTransporter.sendMail({
+        from: fromAddress,
+        to: toEmail,
+        subject: resetEmailSubject,
+        text: emailText,
+        html: emailHtml,
+      });
+
+      if (info.messageId) {
+        console.info(
+          `[Auth] Email delivered via SMTP for ${maskEmail(toEmail)}. Message ID: ${info.messageId}`,
+        );
+        console.info(`[Auth] Provider: SMTP | Status: SUCCESS | Email: ${maskEmail(toEmail)}`);
+        return;
+      }
+    } catch (smtpError) {
+      const errorMessage = smtpError instanceof Error ? smtpError.message : 'Unknown SMTP error';
+      console.error(`[Auth] SMTP delivery failed for ${maskEmail(toEmail)}. Error: ${errorMessage}`);
+      console.info(`[Auth] Provider: SMTP | Status: FAILED | Error: ${errorMessage}`);
+    }
   }
 
-  try {
-    const result = await resendClient.emails.send({
-      from: fromAddress,
-      to: toEmail,
-      subject: resetEmailSubject,
-      text: buildResetEmailText(resetUrl),
-      html: buildResetEmailHtml(resetUrl),
-    });
+  // Fallback to Resend (secondary transport)
+  if (resendClient) {
+    try {
+      const result = await resendClient.emails.send({
+        from: fromAddress,
+        to: toEmail,
+        subject: resetEmailSubject,
+        text: emailText,
+        html: emailHtml,
+      });
 
-    if (result.error) {
-      console.error(
-        `[Auth] Failed to send password reset email for ${maskEmail(toEmail)}. Resend error: ${result.error.message}`,
-      );
-      return;
+      if (result.error) {
+        console.error(
+          `[Auth] Resend delivery failed for ${maskEmail(toEmail)}. Error: ${result.error.message}`,
+        );
+        console.info(`[Auth] Provider: Resend | Status: FAILED | Error: ${result.error.message}`);
+      } else if (result.data?.id) {
+        console.info(`[Auth] Email delivered via Resend for ${maskEmail(toEmail)}. ID: ${result.data.id}`);
+        console.info(`[Auth] Provider: Resend | Status: SUCCESS | Email: ${maskEmail(toEmail)}`);
+        return;
+      }
+    } catch (resendError) {
+      const errorMessage = resendError instanceof Error ? resendError.message : 'Unknown Resend error';
+      console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}. Error: ${errorMessage}`);
+      console.info(`[Auth] Provider: Resend | Status: FAILED | Error: ${errorMessage}`);
     }
-
-    if (result.data?.id) {
-      console.info(`[Auth] Password reset email accepted for delivery to ${maskEmail(toEmail)}.`);
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown send error';
-    console.error(`[Auth] Failed to send password reset email for ${maskEmail(toEmail)}. ${errorMessage}`);
   }
+
+  // Final fallback: log code to server logs (no email transport available or both failed)
+  if (!smtpTransporter && !resendClient) {
+    console.warn('[Auth] No email transport configured (SMTP or Resend). Using demo mode.');
+  }
+  console.info(`[Auth] Provider: DEMO_MODE | Status: LOGGED | Code for ${maskEmail(toEmail)}: ${resetCode}`);
 };
 
 const canAttemptForgotPassword = (key: string) => {
@@ -226,15 +274,15 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
     const user = await User.findOne({ email: normalizedEmail });
 
     if (user) {
-      const { rawToken, hashedToken } = buildResetTokenPair();
+      const resetCode = generateResetCode();
+      const hashedCode = hashResetCode(resetCode);
       const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
 
-      user.resetPasswordTokenHash = hashedToken;
+      user.resetPasswordTokenHash = hashedCode;
       user.resetPasswordExpiresAt = expiresAt;
       await user.save();
 
-      const resetUrl = getResetUrl(rawToken);
-      await sendResetPasswordEmail(normalizedEmail, resetUrl);
+      await sendResetPasswordEmail(normalizedEmail, resetCode);
     }
 
     return res.json({ message: neutralForgotMessage });
@@ -245,28 +293,31 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
 export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token, password } = req.body as {
+    const { email, token, password } = req.body as {
+      email?: string;
       token?: string;
       password?: string;
     };
 
-    if (!token || !password) {
-      return res.status(400).json({ message: 'token and password are required' });
+    if (!email || !token || !password) {
+      return res.status(400).json({ message: 'email, token, and password are required' });
     }
 
     if (password.length < 6) {
       return res.status(400).json({ message: 'password must be at least 6 characters long' });
     }
 
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const normalizedEmail = email.toLowerCase().trim();
+    const hashedToken = hashResetCode(token);
 
     const user = await User.findOne({
+      email: normalizedEmail,
       resetPasswordTokenHash: hashedToken,
       resetPasswordExpiresAt: { $gt: new Date() },
     });
 
     if (!user) {
-      return res.status(400).json({ message: 'Reset token is invalid or expired' });
+      return res.status(400).json({ message: 'Reset code is invalid or expired' });
     }
 
     user.passwordHash = await bcrypt.hash(password, 10);

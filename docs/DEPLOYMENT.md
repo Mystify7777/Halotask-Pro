@@ -274,7 +274,38 @@ CLIENT_ORIGIN=https://yourdomain.com
 
 ## Password Reset Email Configuration
 
-### Resend Setup
+### Dual Transport Setup (SMTP + Resend Fallback)
+
+HaloTaskPro supports dual email transport for maximum reliability:
+
+**Priority:**
+1. SMTP (if configured) - Your own email server
+2. Resend (fallback) - Managed email service
+3. Server logs (final fallback) - For debugging
+
+### Option A: SMTP Only (Recommended for Production)
+
+Configure your email provider's SMTP settings in backend `.env`:
+
+**Gmail Example:**
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=<16-char app password from myaccount.google.com/apppasswords>
+EMAIL_FROM=HaloTaskPro <noreply@yourdomain.com>
+```
+
+**Custom SMTP:**
+```env
+SMTP_HOST=mail.yourdomain.com
+SMTP_PORT=587
+SMTP_USER=noreply@yourdomain.com
+SMTP_PASS=<password>
+EMAIL_FROM=HaloTaskPro <noreply@yourdomain.com>
+```
+
+### Option B: Resend Only (Current Setup)
 
 1. Go to https://resend.com/domains
 2. Add your domain or use Resend subdomain
@@ -284,18 +315,42 @@ CLIENT_ORIGIN=https://yourdomain.com
 
 ```env
 RESEND_API_KEY=re_XXXXXXXXXXXXXXXXXXXXXXXXXX
-EMAIL_FROM=noreply@yourdomain.com
+EMAIL_FROM=HaloTaskPro <noreply@yourdomain.com>
+# Don't set SMTP_* variables
 ```
+
+### Option C: Dual Transport (SMTP + Resend Fallback)
+
+Configure both for maximum reliability:
+
+```env
+# SMTP (Primary)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=noreply@yourdomain.com
+SMTP_PASS=<app-password>
+
+# Resend (Fallback)
+RESEND_API_KEY=re_XXXXXXXXXXXXXXXXXXXXXXXXXX
+EMAIL_FROM=HaloTaskPro <noreply@yourdomain.com>
+```
+
+**SMTP will be tried first**, if it fails, Resend takes over. See [DUAL_EMAIL_TRANSPORT.md](DUAL_EMAIL_TRANSPORT.md) for complete setup guide.
 
 ### Testing Email Flow
 
 1. Visit `/forgot-password`
 2. Enter test email address
-3. Check email inbox for reset link
-4. Reset link should include:
-   - Correct domain from `APP_BASE_URL`
-   - Valid reset token
-   - 20-minute expiry
+3. Check server logs for delivery status:
+   ```
+   [Auth] Provider: SMTP | Status: SUCCESS | Email: te***@example.com
+   ```
+   or
+   ```
+   [Auth] Provider: Resend | Status: SUCCESS | Email: te***@example.com
+   ```
+4. Check email inbox for reset code
+5. Use code to reset password
 
 **Troubleshooting:**
 - If email doesn't arrive:
