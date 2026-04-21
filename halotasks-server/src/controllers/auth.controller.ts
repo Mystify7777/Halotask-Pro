@@ -95,15 +95,27 @@ const sendResetPasswordEmail = async (toEmail: string, resetUrl: string) => {
   }
 
   try {
-    await resendClient.emails.send({
+    const result = await resendClient.emails.send({
       from: fromAddress,
       to: toEmail,
       subject: resetEmailSubject,
       text: buildResetEmailText(resetUrl),
       html: buildResetEmailHtml(resetUrl),
     });
+
+    if (result.error) {
+      console.error(
+        `[Auth] Failed to send password reset email for ${maskEmail(toEmail)}. Resend error: ${result.error.message}`,
+      );
+      return;
+    }
+
+    if (result.data?.id) {
+      console.info(`[Auth] Password reset email accepted for delivery to ${maskEmail(toEmail)}.`);
+    }
   } catch (error) {
-    console.error(`[Auth] Failed to send password reset email for ${maskEmail(toEmail)}.`);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown send error';
+    console.error(`[Auth] Failed to send password reset email for ${maskEmail(toEmail)}. ${errorMessage}`);
   }
 };
 
