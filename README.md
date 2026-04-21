@@ -10,6 +10,17 @@ At its heart, HaloTaskPro blends clean task management, smart reminders, resilie
 
 ---
 
+## 🔗 Live Links
+
+- **Live App (Vercel):** https://halotask-pro.vercel.app
+- **Backend API (Render):** https://halotask-pro.onrender.com
+- **Backend API (Railway backup):** https://halotask-pro-production.up.railway.app
+- **Repository:** https://github.com/Mystify7777/Halotask-Pro
+- **Deployment Guide:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- **CORS Guide:** [docs/CORS.md](docs/CORS.md)
+
+---
+
 ## ✨ Why HaloTaskPro Exists
 
 Most to-do apps are excellent at storing tasks.
