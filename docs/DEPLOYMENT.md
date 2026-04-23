@@ -5,7 +5,7 @@
 HaloTasks is a full-stack application with:
 - **Frontend**: React + TypeScript + Vite (static SPA)
 - **Backend**: Node.js + Express + TypeScript + MongoDB
-- **Email**: Resend for password reset notifications
+- **Email**: Dual transport (SMTP primary, Resend fallback)
 
 This guide covers deployment of both client and server to production.
 
@@ -55,10 +55,16 @@ JWT_SECRET=your-secret-here
 # Use exact domain for production (no wildcard)
 CLIENT_ORIGIN=https://yourdomain.com
 
-# Frontend base URL for password reset links
+# Frontend base URL (used by app/client references)
 APP_BASE_URL=https://yourdomain.com
 
-# Resend API key
+# SMTP (primary)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=noreply@yourdomain.com
+SMTP_PASS=<app-password>
+
+# Resend API key (fallback)
 RESEND_API_KEY=re_XXXXXXXXXXXXXXXXXXXXXXXXXX
 
 # Verified sender email in Resend
@@ -357,10 +363,11 @@ EMAIL_FROM=HaloTaskPro <noreply@yourdomain.com>
   - Check RESEND_API_KEY is set and valid
   - Check EMAIL_FROM is verified in Resend
   - Check backend logs for send errors
-- If reset link is broken:
-  - Check APP_BASE_URL matches frontend domain
-  - Check token is included in URL
-  - Check frontend CLIENT_ORIGIN/VITE_API_BASE_URL correct
+- If reset code isn't received:
+   - Check SMTP_* credentials and app password
+   - Check RESEND_API_KEY fallback validity
+   - Check server logs for provider/status lines
+   - Check spam/promotions folders
 
 ---
 
@@ -425,10 +432,11 @@ Error: connect ECONNREFUSED
 
 ### "Email not sending"
 
-- Check RESEND_API_KEY is valid
-- Check EMAIL_FROM is verified in Resend
-- Check backend logs for send errors
-- Test manually via Resend dashboard
+- Check SMTP_* credentials (host, port, user, pass)
+- Check Gmail app password is used (not account password)
+- Check RESEND_API_KEY fallback validity
+- Check EMAIL_FROM for chosen provider policy
+- Check backend logs for provider status lines
 
 ### "CORS errors in browser"
 
@@ -447,7 +455,7 @@ Error: connect ECONNREFUSED
 - Error rates (500s, 401s, validation errors)
 - Database connection pool health
 - Email sending failures
-- Password reset link clickthrough rate
+- Password reset provider usage (SMTP vs Resend vs DEMO_MODE)
 
 ### Logging
 

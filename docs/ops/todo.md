@@ -18,13 +18,22 @@
 - [x] Deadlines
 - [x] Reminder engine (browser)
 - [x] Reminder settings panel
-- [ ] Email fallback reminders
+- [x] Password reset email delivery with fallback (SMTP -> Resend -> logs)
 
 ## Phase 4
-- [ ] Tree growth system
-- [ ] Streak logic
-- [ ] Rewards
+- [x] Tree growth system
+- [x] Streak logic
+- [x] Rewards
 
-Next: Implement Growth Tree Phase 1 (logic + dashboard widget)
+## Auth & Recovery
+- [x] Forgot password neutral response flow
+- [x] Token-based reset (email + token + new password)
+- [x] Token hashing + expiry + single-use enforcement
+- [x] Rate limiting for forgot-password endpoint
 
-Tomorrow first: Fix MongoDB connection (querySrv ECONNREFUSED) by checking DNS resolver, Atlas network access/IP allowlist, and connection string format.
+## Documentation Hygiene
+- [x] Update deployment + API + README to current auth/email architecture
+- [x] Remove temporary/refactor summary docs
+- [x] Remove duplicate legacy top-level product docs
+
+Next: Track only future work here (this file now reflects current shipped state).

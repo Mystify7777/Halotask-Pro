@@ -114,10 +114,10 @@ A gentle, persistent reminder that habits grow the same way trees do: slowly, th
 - Register / Login / Logout flows
 - Protected dashboard routes
 - Forgot password recovery
-- Secure reset tokens with 20-minute expiry
-- Single-use reset links (no token reuse)
+- Token-based reset codes (6-digit)
+- Single-use reset tokens (stored as hash)
 - Rate-limited recovery requests (abuse protection)
-- Email delivery via Resend for reliability
+- Dual email delivery: SMTP primary + Resend fallback
 
 Forgetting a password is human. Suffering to recover shouldn't be.
 
@@ -128,7 +128,7 @@ Forgetting a password is human. Suffering to recover shouldn't be.
 **Frontend:** React + TypeScript + Vite + Zustand + Axios  
 **Backend:** Node.js + Express + TypeScript + MongoDB + Mongoose + JWT  
 **Offline:** IndexedDB via `idb`  
-**Email:** Resend API  
+**Email:** Nodemailer (SMTP) + Resend fallback  
 
 ---
 
@@ -207,7 +207,10 @@ JWT_SECRET=<generate-with-openssl-rand-base64-32>
 CLIENT_ORIGIN=http://localhost:5173
 
 # Email & Password Reset
-APP_BASE_URL=http://localhost:5173
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=noreply@yourdomain.com
+SMTP_PASS=<16-char-app-password>
 RESEND_API_KEY=re_XXXXXXXXX
 EMAIL_FROM=noreply@yourdomain.com
 RESET_TOKEN_TTL_MINUTES=20
@@ -223,8 +226,14 @@ VITE_API_BASE_URL=http://localhost:5000
 
 ## 📚 Documentation
 
-- [**docs/DEPLOYMENT.md**](docs/DEPLOYMENT.md) — Production deployment guide (Heroku, Railway, Docker, Vercel, Netlify)
-- [**docs/CORS.md**](docs/CORS.md) — CORS configuration & troubleshooting
+### Canonical Docs Index
+
+1. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - Production setup, envs, release checklist
+2. [docs/CORS.md](docs/CORS.md) - Cross-origin configuration and troubleshooting
+3. [docs/06_API_Contract.md](docs/06_API_Contract.md) - Backend request/response contract
+4. [docs/PASSWORD_RESET_FLOW.md](docs/PASSWORD_RESET_FLOW.md) - Token reset flow and security model
+5. [docs/DUAL_EMAIL_TRANSPORT.md](docs/DUAL_EMAIL_TRANSPORT.md) - SMTP primary, Resend fallback behavior
+
 - Product docs in [docs/product/](docs/product/) directory
 - Operational docs in [docs/ops/](docs/ops/) directory
 - API reference in [docs/06_API_Contract.md](docs/06_API_Contract.md)

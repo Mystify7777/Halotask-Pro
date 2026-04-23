@@ -45,6 +45,48 @@ Response:
 }
 ```
 
+### POST /api/auth/forgot-password
+Request body:
+```json
+{
+  "email": "user@mail.com"
+}
+```
+
+Response:
+```json
+{
+  "message": "If an account exists for this email, check your inbox for a reset code (or your spam folder). The code expires in 15 minutes."
+}
+```
+
+Notes:
+- Neutral response to prevent account enumeration
+- Rate-limited by IP
+
+### POST /api/auth/reset-password
+Request body:
+```json
+{
+  "email": "user@mail.com",
+  "token": "123456",
+  "password": "newStrongPassword"
+}
+```
+
+Response:
+```json
+{
+  "message": "Password updated. Please log in."
+}
+```
+
+Validation rules:
+- All three fields are required
+- Password must be at least 6 characters
+- Token must match hashed stored token and be unexpired
+- Token is single-use and cleared after success
+
 ## Tasks
 
 All task routes require `Authorization: Bearer <jwt>`.
@@ -150,6 +192,8 @@ Response:
 
 Common errors:
 - `400` validation errors (missing required fields)
+- `400` reset token invalid or expired
 - `401` invalid/missing auth
 - `404` task not found or not owned by requester
 - `409` duplicate auth registration email
+- `429` forgot-password rate limit exceeded
