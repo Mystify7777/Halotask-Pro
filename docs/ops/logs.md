@@ -23,3 +23,5 @@
 [2026-05-09] - Frontend - Forgot password resubmit guard added and reset-code copy synced to configurable TTL
 [2026-05-09] - Frontend - GrowthTree static health constants moved out of component and TaskCard completion checkbox gained an aria-label
 [2026-05-09] - Frontend - Shared TaskFormFields extracted for create/edit forms; TagInput suggestions gained listbox/option ARIA roles
+[2026-05-09] - Frontend - TaskList empty state split into zero-task and filter-empty copy; ForgotPassword submit label now reflects sent-code success
+[2026-05-09] - Frontend - ResetPassword submit button now disables after success and mirrors the redirecting success state

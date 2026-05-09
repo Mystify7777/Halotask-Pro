@@ -637,6 +637,25 @@ button:disabled {
   gap: 0.55rem;
 }
 
+.task-empty-state {
+  margin-top: 1rem;
+  padding: 0.95rem 1rem;
+  display: grid;
+  gap: 0.3rem;
+  border: 1px dashed #c7d7e6;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.task-empty-state strong {
+  color: #193552;
+}
+
+.task-empty-state p {
+  margin: 0;
+  color: #5f7388;
+}
+
 .smart-sections {
   margin-top: 0.75rem;
   display: grid;

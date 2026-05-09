@@ -15,6 +15,7 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const submitLabel = message ? 'Password updated' : loading ? 'Resetting password...' : 'Reset Password';
 
   useEffect(() => {
     if (isSessionTokenValid(authToken)) {
@@ -134,8 +135,8 @@ export default function ResetPasswordPage() {
           {error && <p className="form-error">{error}</p>}
           {message && <p className="form-success">{message}</p>}
 
-          <button type="submit" disabled={loading}>
-            {loading ? 'Resetting password...' : 'Reset Password'}
+          <button type="submit" disabled={loading || Boolean(message)}>
+            {submitLabel}
           </button>
         </form>
 

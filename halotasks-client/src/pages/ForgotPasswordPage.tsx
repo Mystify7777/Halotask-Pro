@@ -17,6 +17,7 @@ export default function ForgotPasswordPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   useRedirectIfAuthenticated('/dashboard');
+  const submitLabel = message ? 'Code sent' : loading ? 'Sending code...' : 'Send Reset Code';
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -61,7 +62,7 @@ export default function ForgotPasswordPage() {
           {message && <p className="form-success">{message}</p>}
 
           <button type="submit" disabled={loading || Boolean(message)}>
-            {loading ? 'Sending code...' : 'Send Reset Code'}
+            {submitLabel}
           </button>
         </form>
 

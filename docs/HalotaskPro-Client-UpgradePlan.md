@@ -68,13 +68,16 @@
 - ✅ `pages/ForgotPasswordPage.tsx` - reset TTL copy now uses configurable value
 - ✅ `components/dashboard/TaskFormFields.tsx` - shared create/edit task fields extracted
 - ✅ `components/shared/TagInput.tsx` - listbox/option ARIA roles added
+- ✅ `components/dashboard/TaskList.tsx` - empty state split into zero-task and filter-empty copy
+- ✅ `pages/ForgotPasswordPage.tsx` - submit label now reflects sent-code success state
+- ✅ `pages/ResetPasswordPage.tsx` - submit button now disables after success and reflects the redirecting state
 
 ## Next Selected Tasks
 
-1. `components/dashboard/TaskList.tsx` - show distinct zero-task state and filter-empty state everywhere
-2. `pages/ForgotPasswordPage.tsx` - disable form after success / reset button text consistency
-3. `components/dashboard/TaskList.tsx` - migrate remaining selection/empty-state polish where needed
-4. `components/dashboard/GrowthTree.tsx` - keep extracting tiny render helpers when convenient
+1. `components/dashboard/GrowthTree.tsx` - keep extracting tiny render helpers when convenient
+2. `components/dashboard/TaskCard.tsx` - review remaining control labels for small accessibility wins
+3. `components/dashboard/TaskList.tsx` - keep any future empty-state wording consistent with filter chips
+4. `components/shared/TagInput.tsx` - verify keyboard focus styles stay obvious as the form evolves
 
 ---
 

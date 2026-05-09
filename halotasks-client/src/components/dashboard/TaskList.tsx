@@ -52,13 +52,23 @@ export default function TaskList({
   onRemoveEditTag,
 }: TaskListProps) {
   const selectedIdsSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const isFilteredEmpty = Boolean(tagFilter);
+  const emptyStateTitle = isFilteredEmpty ? 'No tasks match this filter.' : 'No tasks yet';
+  const emptyStateMessage = isFilteredEmpty
+    ? 'Try a different tag or clear the current filter to see tasks again.'
+    : 'Create your first task to get started.';
 
   if (loadingTasks) {
     return <p>Loading tasks...</p>;
   }
 
   if (tasks.length === 0) {
-    return <p>{tagFilter ? 'No tasks match the current filters.' : 'Create your first task to get started.'}</p>;
+    return (
+      <div className="task-empty-state">
+        <strong>{emptyStateTitle}</strong>
+        <p>{emptyStateMessage}</p>
+      </div>
+    );
   }
 
   return (
