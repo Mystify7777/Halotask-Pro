@@ -18,6 +18,57 @@ import { useDashboardTasks } from '../hooks/useDashboardTasks';
 import { useNetworkStatus } from '../offline/network';
 import type { Task } from '../types/task';
 
+function getTaskEmptyStateContent({
+  totalTasks,
+  search,
+  filterMode,
+  priorityFilter,
+  tagFilter,
+}: {
+  totalTasks: number;
+  search: string;
+  filterMode: string;
+  priorityFilter: string;
+  tagFilter: string | null;
+}) {
+  if (totalTasks === 0) {
+    return {
+      title: 'No tasks yet',
+      message: 'Create your first task to get started.',
+    };
+  }
+
+  const activeFilters: string[] = [];
+
+  if (search.trim()) {
+    activeFilters.push(`search "${search.trim()}"`);
+  }
+
+  if (filterMode !== 'all') {
+    activeFilters.push(filterMode === 'active' ? 'active tasks' : 'completed tasks');
+  }
+
+  if (priorityFilter !== 'all') {
+    activeFilters.push(`${priorityFilter} priority`);
+  }
+
+  if (tagFilter) {
+    activeFilters.push(`tag "${tagFilter}"`);
+  }
+
+  if (activeFilters.length === 0) {
+    return {
+      title: 'No tasks available',
+      message: 'Refresh the page or create a new task to continue.',
+    };
+  }
+
+  return {
+    title: 'No tasks match your filters.',
+    message: `Try clearing ${activeFilters.join(', ')} to see tasks again.`,
+  };
+}
+
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -66,6 +117,14 @@ export default function DashboardPage() {
     getTasks: () => tasksRef.current,
     setStatusInfo,
     setStatusError,
+  });
+
+  const taskEmptyState = getTaskEmptyStateContent({
+    totalTasks: tasksHook.tasks.length,
+    search: tasksHook.search,
+    filterMode: tasksHook.filterMode,
+    priorityFilter: tasksHook.priorityFilter,
+    tagFilter: tasksHook.tagFilter,
   });
 
   return (
@@ -218,6 +277,8 @@ export default function DashboardPage() {
               onToggleTagFilter={(tag) => tasksHook.setTagFilter((current) => (current === tag ? null : tag))}
               onAddEditTag={tasksHook.addEditTag}
               onRemoveEditTag={tasksHook.removeEditTag}
+              emptyStateTitle={taskEmptyState.title}
+              emptyStateMessage={taskEmptyState.message}
             />
           }
         />

@@ -28,3 +28,4 @@
 [2026-05-09] - Frontend - GrowthTree footer message extracted into a small helper to simplify render branching
 [2026-05-09] - Frontend - TaskCard controls now expose task-specific accessibility labels for select, edit, and delete actions
 [2026-05-09] - Frontend - TagInput chip and suggestion buttons now have visible keyboard focus styles
+[2026-05-09] - Frontend - TaskList empty state now reflects the full active filter set from DashboardPage

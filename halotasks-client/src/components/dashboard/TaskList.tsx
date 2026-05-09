@@ -28,6 +28,8 @@ type TaskListProps = {
   onToggleTagFilter: (tag: string) => void;
   onAddEditTag: (tag: string) => AddTagResult;
   onRemoveEditTag: (tag: string) => void;
+  emptyStateTitle: string;
+  emptyStateMessage: string;
 };
 
 export default function TaskList({
@@ -50,13 +52,10 @@ export default function TaskList({
   onToggleTagFilter,
   onAddEditTag,
   onRemoveEditTag,
+  emptyStateTitle,
+  emptyStateMessage,
 }: TaskListProps) {
   const selectedIdsSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const isFilteredEmpty = Boolean(tagFilter);
-  const emptyStateTitle = isFilteredEmpty ? 'No tasks match this filter.' : 'No tasks yet';
-  const emptyStateMessage = isFilteredEmpty
-    ? 'Try a different tag or clear the current filter to see tasks again.'
-    : 'Create your first task to get started.';
 
   if (loadingTasks) {
     return <p>Loading tasks...</p>;

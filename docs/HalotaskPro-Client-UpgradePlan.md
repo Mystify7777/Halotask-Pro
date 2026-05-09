@@ -74,13 +74,14 @@
 - ✅ `components/dashboard/GrowthTree.tsx` - footer message extracted into a small helper
 - ✅ `components/dashboard/TaskCard.tsx` - task-specific accessibility labels added to selection and action controls
 - ✅ `components/shared/TagInput.tsx` - keyboard focus styles added for chips and suggestions
+- ✅ `components/dashboard/TaskList.tsx` + `pages/DashboardPage.tsx` - empty state now reflects the full active filter set
 
 ## Next Selected Tasks
 
-1. `components/dashboard/TaskList.tsx` - keep any future empty-state wording consistent with filter chips
-2. `pages/ResetPasswordPage.tsx` - consider matching forgot-password messaging tone if future copy changes land
-3. `components/dashboard/GrowthTree.tsx` - optional future polish: fold helper names into a small view-model shape
-4. `components/shared/TagInput.tsx` - optional future polish: add an explicit aria-activedescendant pattern if keyboard navigation grows more complex
+1. `pages/ResetPasswordPage.tsx` - consider matching forgot-password messaging tone if future copy changes land
+2. `components/dashboard/GrowthTree.tsx` - optional future polish: fold helper names into a small view-model shape
+3. `components/shared/TagInput.tsx` - optional future polish: add an explicit aria-activedescendant pattern if keyboard navigation grows more complex
+4. `components/dashboard/TaskCard.tsx` - optional future polish: make selected-state text more descriptive for screen readers if needed
 
 ---
 
