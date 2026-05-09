@@ -18,6 +18,18 @@ const HEALTH_LABEL: Record<TreeHealth, string> = {
   dead: 'Needs Care',
 };
 
+function getFooterMessage(state: TreeState) {
+  if (state.streakDays > 0) {
+    return 'Keep completing tasks to grow your tree and build a streak.';
+  }
+
+  if (state.xp > 0) {
+    return 'Your streak broke, but your progress remains. Complete a task to restart.';
+  }
+
+  return 'Complete your first task to plant a seed.';
+}
+
 /**
  * GrowthTree Widget
  * 
@@ -101,19 +113,7 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
 
       {/* Footer Message */}
       <div className={styles.footer}>
-        {state.streakDays > 0 && (
-          <p className={styles.message}>
-            Keep completing tasks to grow your tree and build a streak.
-          </p>
-        )}
-        {state.streakDays === 0 && state.xp > 0 && (
-          <p className={styles.message}>
-            Your streak broke, but your progress remains. Complete a task to restart.
-          </p>
-        )}
-        {state.streakDays === 0 && state.xp === 0 && (
-          <p className={styles.message}>Complete your first task to plant a seed.</p>
-        )}
+        <p className={styles.message}>{getFooterMessage(state)}</p>
       </div>
     </div>
   );

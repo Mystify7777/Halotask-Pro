@@ -71,13 +71,15 @@
 - ✅ `components/dashboard/TaskList.tsx` - empty state split into zero-task and filter-empty copy
 - ✅ `pages/ForgotPasswordPage.tsx` - submit label now reflects sent-code success state
 - ✅ `pages/ResetPasswordPage.tsx` - submit button now disables after success and reflects the redirecting state
+- ✅ `components/dashboard/GrowthTree.tsx` - footer message extracted into a small helper
+- ✅ `components/dashboard/TaskCard.tsx` - task-specific accessibility labels added to selection and action controls
 
 ## Next Selected Tasks
 
-1. `components/dashboard/GrowthTree.tsx` - keep extracting tiny render helpers when convenient
-2. `components/dashboard/TaskCard.tsx` - review remaining control labels for small accessibility wins
-3. `components/dashboard/TaskList.tsx` - keep any future empty-state wording consistent with filter chips
-4. `components/shared/TagInput.tsx` - verify keyboard focus styles stay obvious as the form evolves
+1. `components/dashboard/TaskList.tsx` - keep any future empty-state wording consistent with filter chips
+2. `components/shared/TagInput.tsx` - verify keyboard focus styles stay obvious as the form evolves
+3. `pages/ResetPasswordPage.tsx` - consider matching forgot-password messaging tone if future copy changes land
+4. `components/dashboard/GrowthTree.tsx` - optional future polish: fold helper names into a small view-model shape
 
 ---
 

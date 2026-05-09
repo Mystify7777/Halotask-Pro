@@ -69,13 +69,20 @@ export default function TaskCard({
         <label className="select-task-control">
           <input
             type="checkbox"
+            aria-label={`Select task "${task.title}"`}
             checked={isSelected}
             onChange={() => onToggleSelect(task._id)}
             disabled={bulkActionLoading}
           />
           Select
         </label>
-        <button className="ghost-btn" onClick={() => onStartEditing(task)} type="button" disabled={bulkActionLoading}>
+        <button
+          className="ghost-btn"
+          onClick={() => onStartEditing(task)}
+          type="button"
+          disabled={bulkActionLoading}
+          aria-label={`Edit task "${task.title}"`}
+        >
           Edit
         </button>
         <button
@@ -83,6 +90,7 @@ export default function TaskCard({
           onClick={() => onDeleteTask(task._id)}
           disabled={activeActionTaskId === task._id || bulkActionLoading}
           type="button"
+          aria-label={`Delete task "${task.title}"`}
         >
           {activeActionTaskId === task._id ? 'Deleting...' : 'Delete'}
         </button>

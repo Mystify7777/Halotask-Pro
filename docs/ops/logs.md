@@ -25,3 +25,5 @@
 [2026-05-09] - Frontend - Shared TaskFormFields extracted for create/edit forms; TagInput suggestions gained listbox/option ARIA roles
 [2026-05-09] - Frontend - TaskList empty state split into zero-task and filter-empty copy; ForgotPassword submit label now reflects sent-code success
 [2026-05-09] - Frontend - ResetPassword submit button now disables after success and mirrors the redirecting success state
+[2026-05-09] - Frontend - GrowthTree footer message extracted into a small helper to simplify render branching
+[2026-05-09] - Frontend - TaskCard controls now expose task-specific accessibility labels for select, edit, and delete actions
