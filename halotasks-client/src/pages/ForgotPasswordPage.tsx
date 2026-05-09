@@ -5,7 +5,8 @@ import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
 
-const neutralMessage = 'If an account exists for this email, check your inbox for a reset code (or your spam folder). The code expires in 15 minutes.';
+const RESET_TOKEN_TTL_MINUTES = Number(import.meta.env.VITE_RESET_TOKEN_TTL_MINUTES ?? 20);
+const neutralMessage = `If an account exists for this email, check your inbox for a reset code (or your spam folder). The code expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`;
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();

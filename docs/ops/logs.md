@@ -19,3 +19,6 @@
 [2026-04-19] - Frontend - Reminder Engine Phase 2 added with smart start-time alerts based on due date, estimated work, and default buffer
 [2026-04-19] - Frontend - Reminder settings panel added with local persistence, buffer control, type toggles, and quiet hours
 [2026-04-19] - Docs - Full project documentation refresh completed across README, product, ops, and API contract
+[2026-05-09] - Frontend - Shared redirect hook extracted for authenticated pages; login/register emails now trim before auth calls
+[2026-05-09] - Frontend - Forgot password resubmit guard added and reset-code copy synced to configurable TTL
+[2026-05-09] - Frontend - GrowthTree static health constants moved out of component and TaskCard completion checkbox gained an aria-label

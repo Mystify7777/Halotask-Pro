@@ -6,6 +6,18 @@ interface GrowthTreeProps {
   state: TreeState;
 }
 
+const HEALTH_COLOR: Record<TreeHealth, string> = {
+  healthy: '#22c55e',
+  wilting: '#eab308',
+  dead: '#ef4444',
+};
+
+const HEALTH_LABEL: Record<TreeHealth, string> = {
+  healthy: 'Healthy',
+  wilting: 'Wilting',
+  dead: 'Needs Care',
+};
+
 /**
  * GrowthTree Widget
  * 
@@ -18,19 +30,6 @@ interface GrowthTreeProps {
  * Minimal, premium design. Emotionally resonant, not gamified.
  */
 export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
-
-  const healthColor: Record<TreeHealth, string> = {
-    healthy: '#22c55e',
-    wilting: '#eab308',
-    dead: '#ef4444',
-  };
-
-  const healthLabel: Record<TreeHealth, string> = {
-    healthy: 'Healthy',
-    wilting: 'Wilting',
-    dead: 'Needs Care',
-  };
-
   // Calculate days since last activity
   const daysSinceActive = daysBetween(state.lastActiveDate, getTodayDate());
   const streakStatus = daysSinceActive === 0 ? 'Active Today' : `${daysSinceActive}d since last`;
@@ -63,10 +62,10 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
           <span className={styles.healthLabel}>Health</span>
           <div
             className={styles.healthDot}
-            style={{ backgroundColor: healthColor[state.health] }}
-            title={healthLabel[state.health]}
+            style={{ backgroundColor: HEALTH_COLOR[state.health] }}
+            title={HEALTH_LABEL[state.health]}
           />
-          <span className={styles.healthText}>{healthLabel[state.health]}</span>
+          <span className={styles.healthText}>{HEALTH_LABEL[state.health]}</span>
         </div>
 
         {/* Streak Counter */}
@@ -105,6 +104,11 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
         {state.streakDays > 0 && (
           <p className={styles.message}>
             Keep completing tasks to grow your tree and build a streak.
+          </p>
+        )}
+        {state.streakDays === 0 && state.xp > 0 && (
+          <p className={styles.message}>
+            Your streak broke, but your progress remains. Complete a task to restart.
           </p>
         )}
         {state.streakDays === 0 && state.xp === 0 && (

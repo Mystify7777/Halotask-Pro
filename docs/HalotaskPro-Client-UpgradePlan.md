@@ -63,13 +63,16 @@
 - ✅ `hooks/useRedirectIfAuthenticated.ts` - shared authenticated redirect hook
 - ✅ `pages/ForgotPasswordPage.tsx` - trimmed email and disabled resubmit after success
 - ✅ `components/dashboard/TaskList.tsx` - Set-based selection and better empty state
+- ✅ `components/dashboard/GrowthTree.tsx` - static health constants moved outside component and footer fallback added
+- ✅ `components/dashboard/TaskCard.tsx` - completion checkbox aria-label added
+- ✅ `pages/ForgotPasswordPage.tsx` - reset TTL copy now uses configurable value
 
 ## Next Selected Tasks
 
-1. `components/dashboard/GrowthTree.tsx` - move static health labels/colors outside component
-2. `components/dashboard/TaskCard.tsx` - add aria-label to completion checkbox
-3. `components/dashboard/TaskList.tsx` - show distinct zero-task state and filter-empty state everywhere
-4. `pages/ForgotPasswordPage.tsx` - sync expiry copy with server TTL
+1. `components/dashboard/TaskList.tsx` - show distinct zero-task state and filter-empty state everywhere
+2. `components/dashboard/TaskFormFields` - extract shared task form fields component
+3. `components/shared/TagInput.tsx` - add listbox/option ARIA roles
+4. `pages/ForgotPasswordPage.tsx` - disable form after success / reset button text consistency
 
 ---
 
@@ -457,7 +460,7 @@ Both forms are nearly identical — same fields, same `TagInput`, same priority 
 
 ---
 
-### 2.12 Components — move `healthColor` and `healthLabel` outside component
+### 2.12 Components — move `healthColor` and `healthLabel` outside component ✅ Completed
 
 **File:** `components/dashboard/GrowthTree.tsx`
 
@@ -473,7 +476,7 @@ const HEALTH_COLOR: Record<TreeHealth, string> = {
 
 ---
 
-### 2.13 Components — add missing footer case to GrowthTree
+### 2.13 Components — add missing footer case to GrowthTree ✅ Completed
 
 **File:** `components/dashboard/GrowthTree.tsx`
 
@@ -489,7 +492,7 @@ A user with XP > 0 but `streakDays === 0` (earned XP then let streak lapse) show
 
 ---
 
-### 2.14 Components — add `aria-label` to TaskCard checkbox
+### 2.14 Components — add `aria-label` to TaskCard checkbox ✅ Completed
 
 **File:** `components/dashboard/TaskCard.tsx`
 

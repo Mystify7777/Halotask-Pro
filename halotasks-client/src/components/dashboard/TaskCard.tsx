@@ -32,6 +32,7 @@ export default function TaskCard({
       <label>
         <input
           type="checkbox"
+          aria-label={`Mark "${task.title}" as complete`}
           checked={task.completed}
           onChange={() => onToggleTask(task)}
           disabled={activeActionTaskId === task._id || bulkActionLoading}
