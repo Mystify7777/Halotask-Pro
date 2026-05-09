@@ -9,8 +9,11 @@ import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import RegisterPage from './pages/RegisterPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import { useAdaptiveTheme } from './theme';
 
 export default function App() {
+  useAdaptiveTheme();
+
   return (
     <BrowserRouter>
       <Routes>
