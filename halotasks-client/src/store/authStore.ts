@@ -10,7 +10,7 @@ type AuthState = {
   clearAuth: () => void;
 };
 
-const TOKEN_KEY = 'halotasks_token';
+export const TOKEN_KEY = 'halotasks_token';
 const USER_KEY = 'halotasks_user';
 
 const getInitialToken = () => localStorage.getItem(TOKEN_KEY);

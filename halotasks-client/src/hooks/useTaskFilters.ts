@@ -48,7 +48,7 @@ export const useTaskFilters = ({
 
       return (
         task.title.toLowerCase().includes(normalizedSearch) ||
-        task.description.toLowerCase().includes(normalizedSearch)
+        task.description?.toLowerCase().includes(normalizedSearch) === true
       );
     });
   }, [tasks, search, filterMode, priorityFilter, tagFilter]);

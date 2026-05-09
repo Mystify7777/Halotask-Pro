@@ -22,6 +22,18 @@ export default function ResetPasswordPage() {
     }
   }, [authToken, navigate]);
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      navigate('/login', { replace: true });
+    }, 1200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [message, navigate]);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -56,9 +68,6 @@ export default function ResetPasswordPage() {
         password,
       });
       setMessage(result.message || 'Password updated. Please log in.');
-      setTimeout(() => {
-        navigate('/login', { replace: true });
-      }, 1200);
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
       setError(axiosError.response?.data?.message ?? 'Unable to reset password. Please try again or request a new code.');
@@ -93,7 +102,8 @@ export default function ResetPasswordPage() {
               onChange={(event) => setToken(event.target.value.toUpperCase())}
               placeholder="Enter 6-digit code"
               required
-              maxLength={10}
+              maxLength={6}
+              inputMode="numeric"
             />
           </label>
 
