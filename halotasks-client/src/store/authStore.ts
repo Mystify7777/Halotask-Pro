@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { clearCachedAuthUser, setCachedAuthUser } from '../offline/cache';
 import { AuthResponse, AuthUser } from '../types/auth';
-import { markKnownUser } from '../utils/authSession';
+import { isSessionTokenValid, markKnownUser } from '../utils/authSession';
 
 type AuthState = {
   token: string | null;
@@ -13,7 +13,17 @@ type AuthState = {
 export const TOKEN_KEY = 'halotasks_token';
 const USER_KEY = 'halotasks_user';
 
-const getInitialToken = () => localStorage.getItem(TOKEN_KEY);
+const getInitialToken = () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+
+  if (!token || !isSessionTokenValid(token)) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    return null;
+  }
+
+  return token;
+};
 
 const getInitialUser = (): AuthUser | null => {
   const raw = localStorage.getItem(USER_KEY);
@@ -22,7 +32,17 @@ const getInitialUser = (): AuthUser | null => {
   }
 
   try {
-    return JSON.parse(raw) as AuthUser;
+    const parsed = JSON.parse(raw) as Partial<AuthUser>;
+
+    if (!parsed?.id || !parsed?.email || !parsed?.name) {
+      return null;
+    }
+
+    return {
+      id: parsed.id,
+      email: parsed.email,
+      name: parsed.name,
+    };
   } catch {
     return null;
   }

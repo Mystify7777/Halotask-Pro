@@ -1,9 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -17,11 +17,7 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [token, navigate]);
+  useRedirectIfAuthenticated('/dashboard');
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,7 +25,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const result = await authService.login({ email, password });
+      const result = await authService.login({ email: email.trim(), password });
       setAuth(result);
       navigate(from, { replace: true });
     } catch (requestError) {

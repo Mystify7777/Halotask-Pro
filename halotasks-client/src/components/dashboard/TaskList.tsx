@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Task } from '../../types/task';
 import { TaskEditState } from './types';
 import TaskCard from './TaskCard';
@@ -50,12 +51,14 @@ export default function TaskList({
   onAddEditTag,
   onRemoveEditTag,
 }: TaskListProps) {
+  const selectedIdsSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
   if (loadingTasks) {
     return <p>Loading tasks...</p>;
   }
 
   if (tasks.length === 0) {
-    return <p>No tasks match the current filters.</p>;
+    return <p>{tagFilter ? 'No tasks match the current filters.' : 'Create your first task to get started.'}</p>;
   }
 
   return (
@@ -79,7 +82,7 @@ export default function TaskList({
               task={task}
               activeActionTaskId={activeActionTaskId}
               tagFilter={tagFilter}
-              isSelected={selectedIds.includes(task._id)}
+              isSelected={selectedIdsSet.has(task._id)}
               bulkActionLoading={bulkActionLoading}
               onToggleTask={onToggleTask}
               onDeleteTask={onDeleteTask}

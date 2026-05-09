@@ -1,9 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -15,11 +15,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [token, navigate]);
+  useRedirectIfAuthenticated('/dashboard');
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -27,7 +23,7 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const result = await authService.register({ name, email, password });
+      const result = await authService.register({ name: name.trim(), email: email.trim(), password });
       setAuth(result);
       navigate('/dashboard', { replace: true });
     } catch (requestError) {

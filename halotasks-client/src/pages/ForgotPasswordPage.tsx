@@ -1,9 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
 
 const neutralMessage = 'If an account exists for this email, check your inbox for a reset code (or your spam folder). The code expires in 15 minutes.';
 
@@ -15,11 +15,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [navigate, token]);
+  useRedirectIfAuthenticated('/dashboard');
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -28,7 +24,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const result = await authService.forgotPassword({ email });
+      const result = await authService.forgotPassword({ email: email.trim() });
       setMessage(result.message || neutralMessage);
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -63,7 +59,7 @@ export default function ForgotPasswordPage() {
           {error && <p className="form-error">{error}</p>}
           {message && <p className="form-success">{message}</p>}
 
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={loading || Boolean(message)}>
             {loading ? 'Sending code...' : 'Send Reset Code'}
           </button>
         </form>

@@ -51,11 +51,31 @@
 | `utils/` (all 4) | 0 | 3 | 1h |
 | **TOTAL** | **13** | **60** | **~35–45h** |
 
+## Completed Since Last Pass
+
+- ✅ `services/api.ts` - shared token source, 10s request timeout, global 401 redirect
+- ✅ `store/authStore.ts` - exported shared `TOKEN_KEY`
+- ✅ `services/api.ts` - API error normalization helper
+- ✅ `store/authStore.ts` - token expiry check on init and safe user restore
+- ✅ `hooks/useTaskFilters.ts` - null-safe description search
+- ✅ `pages/ResetPasswordPage.tsx` - cleaned redirect timer, fixed token input to 6 digits
+- ✅ `pages/LoginPage.tsx` + `pages/RegisterPage.tsx` - trimmed auth emails
+- ✅ `hooks/useRedirectIfAuthenticated.ts` - shared authenticated redirect hook
+- ✅ `pages/ForgotPasswordPage.tsx` - trimmed email and disabled resubmit after success
+- ✅ `components/dashboard/TaskList.tsx` - Set-based selection and better empty state
+
+## Next Selected Tasks
+
+1. `components/dashboard/GrowthTree.tsx` - move static health labels/colors outside component
+2. `components/dashboard/TaskCard.tsx` - add aria-label to completion checkbox
+3. `components/dashboard/TaskList.tsx` - show distinct zero-task state and filter-empty state everywhere
+4. `pages/ForgotPasswordPage.tsx` - sync expiry copy with server TTL
+
 ---
 
 ## Phase 1 — Critical Fixes (Do Before Deploy)
 
-### 1.1 Split source of truth for auth token
+### 1.1 Split source of truth for auth token ✅ Completed
 
 **Files:** `store/authStore.ts` + `services/api.ts`
 
@@ -84,7 +104,7 @@ axiosInstance.interceptors.request.use((config) => {
 
 ---
 
-### 1.2 Add a global 401 interceptor
+### 1.2 Add a global 401 interceptor ✅ Completed
 
 **File:** `services/api.ts`
 
@@ -106,7 +126,7 @@ axiosInstance.interceptors.response.use(
 
 ---
 
-### 1.3 Add request timeout to Axios
+### 1.3 Add request timeout to Axios ✅ Completed
 
 **File:** `services/api.ts`
 
@@ -251,7 +271,7 @@ The growth tree uses `localStorage` while everything else (tasks, auth cache, sy
 
 ---
 
-### 1.11 Crash risk in `useTaskFilters`
+### 1.11 Crash risk in `useTaskFilters` ✅ Completed
 
 **File:** `hooks/useTaskFilters.ts`
 
@@ -317,7 +337,7 @@ export type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
 
 ---
 
-### 2.3 Services — add error normalisation utility
+### 2.3 Services — add error normalisation utility ✅ Completed
 
 **File:** `services/api.ts`
 
@@ -334,7 +354,7 @@ export const getApiErrorMessage = (error: unknown, fallback = 'Something went wr
 
 ---
 
-### 2.4 Store — add token expiry check on init
+### 2.4 Store — add token expiry check on init ✅ Completed
 
 **File:** `store/authStore.ts`
 
@@ -355,7 +375,7 @@ const getInitialState = () => {
 
 ---
 
-### 2.5 Store — add shape validation on `getInitialUser`
+### 2.5 Store — add shape validation on `getInitialUser` ✅ Completed
 
 **File:** `store/authStore.ts`
 
@@ -399,7 +419,7 @@ If `taskService.getTasks()` returns 401, the catch block shows "Showing cached d
 
 ---
 
-### 2.9 Components — fix O(n²) selection check in `TaskList`
+### 2.9 Components — fix O(n²) selection check in `TaskList` ✅ Completed
 
 **File:** `components/dashboard/TaskList.tsx`
 
@@ -413,7 +433,7 @@ const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
 ---
 
-### 2.10 Components — fix misleading empty state in `TaskList`
+### 2.10 Components — fix misleading empty state in `TaskList` ✅ Completed
 
 **File:** `components/dashboard/TaskList.tsx`
 
@@ -511,7 +531,7 @@ The suggestions dropdown has no `role="listbox"` and suggestion items have no `r
 
 ---
 
-### 2.16 Pages — trim email before auth calls
+### 2.16 Pages — trim email before auth calls ✅ Completed
 
 **Files:** `pages/LoginPage.tsx` + `pages/RegisterPage.tsx`
 
@@ -525,7 +545,7 @@ authService.register({ name: name.trim(), email: email.trim(), password })
 
 ---
 
-### 2.17 Pages — extract `useRedirectIfAuthenticated` hook
+### 2.17 Pages — extract `useRedirectIfAuthenticated` hook ✅ Completed
 
 **Files:** `pages/LoginPage.tsx` + `pages/RegisterPage.tsx`
 
@@ -544,7 +564,7 @@ export const useRedirectIfAuthenticated = (to = '/dashboard') => {
 
 ---
 
-### 2.18 Pages — fix `setTimeout` cleanup on `ResetPasswordPage`
+### 2.18 Pages — fix `setTimeout` cleanup on `ResetPasswordPage` ✅ Completed
 
 **File:** `pages/ResetPasswordPage.tsx`
 
@@ -561,7 +581,7 @@ useEffect(() => {
 
 ---
 
-### 2.19 Pages — fix `maxLength` mismatch on reset token input
+### 2.19 Pages — fix `maxLength` mismatch on reset token input ✅ Completed
 
 **File:** `pages/ResetPasswordPage.tsx`
 
@@ -753,7 +773,7 @@ Standardise on one convention, e.g. `halotasks:<feature>` and document it in a s
 | 3.10 | `reminders/permissions.ts` | Export `hasReminderPermission(): boolean` returning `Notification.permission === 'granted'` for cleaner callsites |
 | 3.11 | `reminders/scheduler.ts` | Add a small delay before the first `runNow()` call to avoid firing all pending reminders the instant the app opens |
 | 3.12 | `growth/treeTypes.ts` | Mark `GrowthEventPayload` with a `// TODO: wire to UI feedback` comment or build the feature (covered in 2.23) |
-| 3.13 | `pages/ForgotPasswordPage.tsx` | Disable the form after a successful submission to prevent re-submitting against the rate limiter |
+| 3.13 | `pages/ForgotPasswordPage.tsx` | Disable the form after a successful submission to prevent re-submitting against the rate limiter | ✅ Completed |
 | 3.14 | `pages/ForgotPasswordPage.tsx` | Sync the "expires in 15 minutes" UI copy with the server's actual `RESET_TOKEN_TTL_MINUTES` value |
 | 3.15 | `pages/RegisterPage.tsx` | Add a password confirmation field — currently a typo in the password has no client-side feedback |
 | 3.16 | All forms | Trim all text inputs (name, title, description) before submission |
