@@ -66,13 +66,15 @@
 - ✅ `components/dashboard/GrowthTree.tsx` - static health constants moved outside component and footer fallback added
 - ✅ `components/dashboard/TaskCard.tsx` - completion checkbox aria-label added
 - ✅ `pages/ForgotPasswordPage.tsx` - reset TTL copy now uses configurable value
+- ✅ `components/dashboard/TaskFormFields.tsx` - shared create/edit task fields extracted
+- ✅ `components/shared/TagInput.tsx` - listbox/option ARIA roles added
 
 ## Next Selected Tasks
 
 1. `components/dashboard/TaskList.tsx` - show distinct zero-task state and filter-empty state everywhere
-2. `components/dashboard/TaskFormFields` - extract shared task form fields component
-3. `components/shared/TagInput.tsx` - add listbox/option ARIA roles
-4. `pages/ForgotPasswordPage.tsx` - disable form after success / reset button text consistency
+2. `pages/ForgotPasswordPage.tsx` - disable form after success / reset button text consistency
+3. `components/dashboard/TaskList.tsx` - migrate remaining selection/empty-state polish where needed
+4. `components/dashboard/GrowthTree.tsx` - keep extracting tiny render helpers when convenient
 
 ---
 
@@ -452,7 +454,7 @@ A user with zero tasks sees "No tasks match the current filters" — but they ha
 
 ---
 
-### 2.11 Components — extract shared `TaskFormFields`
+### 2.11 Components — extract shared `TaskFormFields` ✅ Completed
 
 **Files:** `components/dashboard/TaskCreateForm.tsx` + `TaskEditForm.tsx`
 
@@ -510,7 +512,7 @@ The completion checkbox has no accessible label. A screen reader will announce i
 
 ---
 
-### 2.15 Components — add ARIA roles to TagInput dropdown
+### 2.15 Components — add ARIA roles to TagInput dropdown ✅ Completed
 
 **File:** `components/shared/TagInput.tsx`
 

@@ -184,12 +184,14 @@ export default function TagInput({
       />
 
       {suggestionsOpen && filteredSuggestions.length > 0 && (
-        <div className="tag-suggestion-dropdown">
+        <div className="tag-suggestion-dropdown" role="listbox" aria-label="Tag suggestions">
           {filteredSuggestions.map((tag, index) => (
             <button
               key={`suggestion-${tag}`}
               type="button"
               className={index === suggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
+              role="option"
+              aria-selected={index === suggestionIndex}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => selectSuggestion(tag)}
             >

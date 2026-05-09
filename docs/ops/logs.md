@@ -22,3 +22,4 @@
 [2026-05-09] - Frontend - Shared redirect hook extracted for authenticated pages; login/register emails now trim before auth calls
 [2026-05-09] - Frontend - Forgot password resubmit guard added and reset-code copy synced to configurable TTL
 [2026-05-09] - Frontend - GrowthTree static health constants moved out of component and TaskCard completion checkbox gained an aria-label
+[2026-05-09] - Frontend - Shared TaskFormFields extracted for create/edit forms; TagInput suggestions gained listbox/option ARIA roles

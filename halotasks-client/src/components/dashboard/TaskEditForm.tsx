@@ -1,6 +1,5 @@
 import { Priority } from '../../types/task';
-import { SUGGESTED_TAGS } from '../../utils/tagHelpers';
-import TagInput from '../shared/TagInput';
+import TaskFormFields from './TaskFormFields';
 import { TaskEditState } from './types';
 
 type AddTagResult = {
@@ -32,55 +31,55 @@ export default function TaskEditForm({
 }: TaskEditFormProps) {
   return (
     <div className="edit-panel">
-      <input
-        type="text"
-        value={editState.title}
-        onChange={(event) =>
+      <TaskFormFields
+        title={editState.title}
+        priority={editState.priority}
+        dueDate={editState.dueDate}
+        estimatedMinutes={editState.estimatedMinutes}
+        tags={editState.tags}
+        tagInput={editState.tagInput}
+        tagSuggestions={editTagSuggestions}
+        onTitleChange={(value) =>
           onEditStateChange((current) =>
             current
               ? {
                   ...current,
-                  title: event.target.value,
+                  title: value,
                 }
               : current,
           )
         }
-      />
-      <select
-        value={editState.priority}
-        onChange={(event) =>
+        onPriorityChange={(value) =>
           onEditStateChange((current) =>
             current
               ? {
                   ...current,
-                  priority: event.target.value as Priority,
+                  priority: value,
                 }
               : current,
           )
         }
-      >
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-      </select>
-      <input
-        type="date"
-        value={editState.dueDate}
-        onChange={(event) =>
+        onDueDateChange={(value) =>
           onEditStateChange((current) =>
             current
               ? {
                   ...current,
-                  dueDate: event.target.value,
+                  dueDate: value,
                 }
               : current,
           )
         }
-      />
-      <TagInput
-        selectedTags={editState.tags}
-        inputValue={editState.tagInput}
-        onInputValueChange={(value) =>
+        onEstimatedMinutesChange={(value) =>
+          onEditStateChange((current) =>
+            current
+              ? {
+                  ...current,
+                  estimatedMinutes: value,
+                }
+              : current,
+          )
+        }
+        onTagInputChange={(value) =>
           onEditStateChange((current) =>
             current
               ? {
@@ -92,28 +91,9 @@ export default function TaskEditForm({
         }
         onAddTag={onAddEditTag}
         onRemoveTag={onRemoveEditTag}
-        suggestedTags={SUGGESTED_TAGS}
-        dynamicSuggestions={editTagSuggestions}
-        placeholder="Type tag then Enter or comma"
-      />
-      <input
-        type="number"
-        min={0}
-        value={editState.estimatedMinutes}
-        onChange={(event) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  estimatedMinutes: event.target.value,
-                }
-              : current,
-          )
-        }
-        placeholder="Estimated minutes"
       />
       <div className="task-actions">
-        <button onClick={() => onSaveTaskEdit(taskId)} disabled={activeActionTaskId === taskId}>
+        <button type="button" onClick={() => onSaveTaskEdit(taskId)} disabled={activeActionTaskId === taskId}>
           {activeActionTaskId === taskId ? 'Saving...' : 'Save'}
         </button>
         <button className="ghost-btn" onClick={onCancelEditing} type="button">
