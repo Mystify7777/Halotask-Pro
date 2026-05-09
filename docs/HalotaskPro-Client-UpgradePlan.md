@@ -73,13 +73,14 @@
 - ✅ `pages/ResetPasswordPage.tsx` - submit button now disables after success and reflects the redirecting state
 - ✅ `components/dashboard/GrowthTree.tsx` - footer message extracted into a small helper
 - ✅ `components/dashboard/TaskCard.tsx` - task-specific accessibility labels added to selection and action controls
+- ✅ `components/shared/TagInput.tsx` - keyboard focus styles added for chips and suggestions
 
 ## Next Selected Tasks
 
 1. `components/dashboard/TaskList.tsx` - keep any future empty-state wording consistent with filter chips
-2. `components/shared/TagInput.tsx` - verify keyboard focus styles stay obvious as the form evolves
-3. `pages/ResetPasswordPage.tsx` - consider matching forgot-password messaging tone if future copy changes land
-4. `components/dashboard/GrowthTree.tsx` - optional future polish: fold helper names into a small view-model shape
+2. `pages/ResetPasswordPage.tsx` - consider matching forgot-password messaging tone if future copy changes land
+3. `components/dashboard/GrowthTree.tsx` - optional future polish: fold helper names into a small view-model shape
+4. `components/shared/TagInput.tsx` - optional future polish: add an explicit aria-activedescendant pattern if keyboard navigation grows more complex
 
 ---
 

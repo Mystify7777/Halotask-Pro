@@ -629,6 +629,13 @@ button:disabled {
   color: #0b3d90;
 }
 
+.tag-chip:focus-visible,
+.selected-chip button:focus-visible,
+.suggestion-item:focus-visible {
+  outline: 2px solid #0f4db2;
+  outline-offset: 2px;
+}
+
 .task-list {
   list-style: none;
   padding: 0;

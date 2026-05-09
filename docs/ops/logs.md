@@ -27,3 +27,4 @@
 [2026-05-09] - Frontend - ResetPassword submit button now disables after success and mirrors the redirecting success state
 [2026-05-09] - Frontend - GrowthTree footer message extracted into a small helper to simplify render branching
 [2026-05-09] - Frontend - TaskCard controls now expose task-specific accessibility labels for select, edit, and delete actions
+[2026-05-09] - Frontend - TagInput chip and suggestion buttons now have visible keyboard focus styles
