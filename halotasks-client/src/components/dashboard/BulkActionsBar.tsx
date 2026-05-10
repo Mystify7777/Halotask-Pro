@@ -18,20 +18,47 @@ export default function BulkActionsBar({
   onDeleteSelected,
 }: BulkActionsBarProps) {
   return (
-    <div className="bulk-actions-bar">
-      <span className="bulk-count">{selectedCount} selected</span>
-      <button className="ghost-btn" type="button" onClick={onSelectAllVisible} disabled={loading || allVisibleSelected}>
-        Select All Visible
-      </button>
-      <button className="ghost-btn" type="button" onClick={onMarkSelectedComplete} disabled={loading}>
-        Mark Complete
-      </button>
-      <button className="danger-btn" type="button" onClick={onDeleteSelected} disabled={loading}>
-        Delete Selected
-      </button>
-      <button className="ghost-btn" type="button" onClick={onClearSelection} disabled={loading}>
-        Clear Selection
-      </button>
+    <div className="bulk-actions-bar" role="toolbar" aria-label="Bulk task actions">
+      <span className="bulk-count" aria-live="polite">
+        {selectedCount} selected
+      </span>
+
+      <div className="bulk-actions-btns">
+        <button
+          type="button"
+          className="ghost-btn btn-sm"
+          onClick={onSelectAllVisible}
+          disabled={loading || allVisibleSelected}
+        >
+          Select all
+        </button>
+        <button
+          type="button"
+          className="ghost-btn btn-sm"
+          onClick={onMarkSelectedComplete}
+          disabled={loading}
+        >
+          ✓ Complete
+        </button>
+        <button
+          type="button"
+          className="danger-btn btn-sm"
+          onClick={onDeleteSelected}
+          disabled={loading}
+          aria-label={`Delete ${selectedCount} selected tasks`}
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          className="ghost-btn btn-sm"
+          onClick={onClearSelection}
+          disabled={loading}
+          aria-label="Clear selection"
+        >
+          ✕
+        </button>
+      </div>
     </div>
   );
 }

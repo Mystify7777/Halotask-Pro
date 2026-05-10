@@ -3,7 +3,6 @@ import { Task } from '../../types/task';
 import { TaskEditState } from './types';
 import TaskCard from './TaskCard';
 import TaskEditForm from './TaskEditForm';
-import TaskListSkeleton from './TaskListSkeleton';
 
 type AddTagResult = {
   message: string | null;
@@ -56,19 +55,46 @@ export default function TaskList({
   emptyStateTitle,
   emptyStateMessage,
 }: TaskListProps) {
+  // O(1) per-task lookup — avoids O(n²) Array.includes inside the render loop
   const selectedIdsSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  /** Three shimmer cards shown while tasks are loading */
+  function TaskListSkeleton() {
+    return (
+      <ul className="task-list" aria-busy="true" aria-label="Loading tasks">
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="task-item task-skeleton" aria-hidden="true">
+            <div className="skeleton-check" />
+            <div className="skeleton-body">
+              <div className="skeleton-line skeleton-title" />
+              <div className="skeleton-line skeleton-meta" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  /** Empty state with contextual icon — first-run vs filtered */
+  function TaskEmptyState({ title, message }: { title: string; message: string }) {
+    const isFirstRun = title === 'No tasks yet';
+    return (
+      <div className="task-empty-state">
+        <span className="task-empty-icon" aria-hidden="true">
+          {isFirstRun ? '🌱' : '🔍'}
+        </span>
+        <strong className="task-empty-title">{title}</strong>
+        <p className="task-empty-msg">{message}</p>
+      </div>
+    );
+  }
 
   if (loadingTasks) {
     return <TaskListSkeleton />;
   }
 
   if (tasks.length === 0) {
-    return (
-      <div className="task-empty-state">
-        <strong>{emptyStateTitle}</strong>
-        <p>{emptyStateMessage}</p>
-      </div>
-    );
+    return <TaskEmptyState title={emptyStateTitle} message={emptyStateMessage} />;
   }
 
   return (
