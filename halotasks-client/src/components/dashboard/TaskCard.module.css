@@ -1,0 +1,114 @@
+/* Card wrapper */
+.card {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--duration-theme) var(--ease-in-out),
+    border-color var(--duration-theme) var(--ease-in-out),
+    opacity var(--duration-normal) var(--ease-out);
+}
+
+/* Checkbox */
+.check {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Toggle spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  border-top-color: white;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Task info block */
+.info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.title {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--leading-snug);
+  transition: color var(--duration-theme) var(--ease-in-out);
+}
+
+/* Meta row */
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.metaItem {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.priorityWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.priorityLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Actions column */
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Bulk select checkbox */
+.selectBox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  width: 16px !important;
+  padding: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.editBtn {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+}
+
+.deleteBtn {
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+}

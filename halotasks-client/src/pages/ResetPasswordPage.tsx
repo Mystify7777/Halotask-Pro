@@ -1,21 +1,27 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import { isSessionTokenValid } from '../utils/authSession';
+import styles from './AuthPages.module.css';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
-  const authToken = useAuthStore((state) => state.token);
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
+  const location = useLocation();
+  const authToken = useAuthStore((s) => s.token);
+
+  const prefilledEmail = (location.state as { email?: string } | null)?.email ?? '';
+
+  const [email, setEmail] = useState(prefilledEmail);
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const submitLabel = message ? 'Password updated' : loading ? 'Resetting password...' : 'Reset Password';
+  const [success, setSuccess] = useState(false);
+
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (isSessionTokenValid(authToken)) {
@@ -24,38 +30,33 @@ export default function ResetPasswordPage() {
   }, [authToken, navigate]);
 
   useEffect(() => {
-    if (!message) {
-      return;
-    }
+    return () => {
+      if (redirectTimer.current) clearTimeout(redirectTimer.current);
+    };
+  }, []);
 
-    const timeoutId = window.setTimeout(() => {
-      navigate('/login', { replace: true });
-    }, 1200);
+  const confirmMismatch = confirm.length > 0 && confirm !== password;
 
-    return () => window.clearTimeout(timeoutId);
-  }, [message, navigate]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
     setError(null);
-    setMessage(null);
 
     if (!email.trim()) {
       setError('Email is required.');
       return;
     }
 
-    if (!token.trim()) {
+    if (!code.trim()) {
       setError('Reset code is required.');
       return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters long.');
+      setError('Password must be at least 6 characters.');
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (password !== confirm) {
       setError('Passwords do not match.');
       return;
     }
@@ -63,87 +64,157 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const result = await authService.resetPassword({
+      await authService.resetPassword({
         email: email.trim(),
-        token: token.trim(),
+        token: code.trim(),
         password,
       });
-      setMessage(result.message || 'Password updated. Please log in.');
-    } catch (requestError) {
-      const axiosError = requestError as AxiosError<{ message?: string }>;
-      setError(axiosError.response?.data?.message ?? 'Unable to reset password. Please try again or request a new code.');
+      setSuccess(true);
+      redirectTimer.current = setTimeout(() => {
+        navigate('/login', { replace: true });
+      }, 2000);
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ message?: string }>;
+      setError(axiosErr.response?.data?.message ?? 'Unable to reset password. Please try again or request a new code.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <section className="auth-page">
-      <div className="auth-card">
-        <h2>Reset Password</h2>
-        <p>Enter the code from your email and choose a new password.</p>
+    <main className={styles.page}>
+      <header className={styles.authHeader}>
+        <button
+          type="button"
+          className={styles.backBtn}
+          onClick={() => navigate('/forgot-password')}
+          aria-label="Back to forgot password"
+        >
+          &larr;
+        </button>
+        <div className={styles.authLogoRow}>
+          <span className={styles.authLogoEmoji} aria-hidden="true">
+            🌱
+          </span>
+          <span className={styles.authLogoText}>halotask</span>
+        </div>
+      </header>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              autoComplete="email"
-            />
-          </label>
+      <section className={styles.card} aria-label="Reset password">
+        {success ? (
+          <>
+            <div className={styles.cardTop}>
+              <h1 className={styles.cardTitle}>Password updated!</h1>
+              <p className={styles.cardSub}>Redirecting you to sign in...</p>
+            </div>
+            <div className={styles.successBox} role="status">
+              <p className={styles.successTitle}>✅ All done</p>
+              <p className={styles.successBody}>
+                Your password has been reset. You'll be redirected to the sign in page in a moment.
+              </p>
+            </div>
+            <div className="auth-cta-stack">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  if (redirectTimer.current) clearTimeout(redirectTimer.current);
+                  navigate('/login', { replace: true });
+                }}
+              >
+                Sign in now
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={styles.cardTop}>
+              <h1 className={styles.cardTitle}>Set a new password</h1>
+              <p className={styles.cardSub}>Enter the 6-digit code from your email and choose a new password.</p>
+            </div>
 
-          <label>
-            Reset code
-            <input
-              type="text"
-              value={token}
-              onChange={(event) => setToken(event.target.value.toUpperCase())}
-              placeholder="Enter 6-digit code"
-              required
-              maxLength={6}
-              inputMode="numeric"
-            />
-          </label>
+            <form onSubmit={handleSubmit} className="auth-form" noValidate>
+              <label>
+                Email address
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  autoComplete="email"
+                  inputMode="email"
+                  autoFocus={!prefilledEmail}
+                />
+              </label>
 
-          <label>
-            New password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-          </label>
+              <label>
+                Reset code
+                <input
+                  className={styles.tokenInput}
+                  type="text"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  required
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus={!!prefilledEmail}
+                />
+              </label>
 
-          <label>
-            Confirm password
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-          </label>
+              <label>
+                New password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+              </label>
 
-          {error && <p className="form-error">{error}</p>}
-          {message && <p className="form-success">{message}</p>}
+              <label>
+                Confirm new password
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  placeholder="Type it again"
+                  required
+                  autoComplete="new-password"
+                  style={confirmMismatch ? { borderColor: 'var(--color-danger)' } : undefined}
+                />
+              </label>
 
-          <button type="submit" disabled={loading || Boolean(message)}>
-            {submitLabel}
-          </button>
-        </form>
+              {confirmMismatch && (
+                <p className="form-error" role="alert" style={{ marginTop: 'calc(var(--space-2) * -1)' }}>
+                  Passwords don't match
+                </p>
+              )}
 
-        <p className="auth-link auth-secondary-link">
-          Back to <Link to="/login">Sign in</Link>
+              {error && (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+
+              <div className="auth-cta-stack">
+                <button type="submit" className="btn-primary" disabled={loading || confirmMismatch}>
+                  {loading ? 'Updating password...' : 'Reset password'}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+
+        <p className={styles.switchLink}>
+          <Link to="/login">Back to sign in</Link>
         </p>
-      </div>
-    </section>
+      </section>
+    </main>
   );
 }

@@ -1,0 +1,157 @@
+/* Page shell */
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
+  overflow-x: hidden;
+}
+
+/* Hero section */
+.hero {
+  position: relative;
+  background: var(--color-header-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
+  padding-bottom: var(--space-8);
+}
+
+/* Sky SVG fills the top of the hero */
+.skyWrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.skySvg {
+  width: 100%;
+  height: auto;
+  display: block;
+  transition: fill var(--duration-theme) var(--ease-in-out);
+}
+
+/* Logo row sits over the hero */
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  position: relative;
+  z-index: 1;
+}
+
+.logoIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logoText {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-header-text);
+  letter-spacing: -0.01em;
+}
+
+/* Copy block */
+.heroCopy {
+  padding: 0 var(--space-6) 0;
+  position: relative;
+  z-index: 1;
+}
+
+.tagline {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  color: var(--color-header-text);
+  margin-bottom: var(--space-3);
+}
+
+.sub {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--color-header-subtext);
+  margin-bottom: var(--space-6);
+}
+
+/* CTA buttons */
+.ctaStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Override global button styles inside module scope */
+.ctaStack :global(.btn-primary) {
+  background: var(--color-btn-primary-bg);
+  color: var(--color-btn-primary-text);
+}
+
+.ctaStack :global(.btn-secondary) {
+  border-color: var(--color-btn-secondary-border);
+  color: var(--color-header-text);
+}
+
+/* Features section */
+.features {
+  padding: var(--space-6);
+  background: var(--color-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
+}
+
+/* Emoji above the card title */
+.featEmoji {
+  font-size: 1.5rem;
+  margin-bottom: var(--space-2);
+  line-height: 1;
+}
+
+/* Theme preview strip */
+.themePreview {
+  padding: var(--space-2) var(--space-6) var(--space-10);
+  text-align: center;
+  background: var(--color-bg);
+  transition: background-color var(--duration-theme) var(--ease-in-out);
+}
+
+.themePreviewLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-3);
+}
+
+.themeDots {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  align-items: center;
+}
+
+.themeDot {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  border: 2.5px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast);
+  background-clip: padding-box;
+}
+
+.themeDot:hover {
+  transform: scale(1.25);
+}
+
+.themeDotActive {
+  transform: scale(1.45);
+  border-color: var(--color-text-primary);
+  opacity: 1;
+}

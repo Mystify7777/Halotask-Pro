@@ -29,3 +29,14 @@
 [2026-05-09] - Frontend - TaskCard controls now expose task-specific accessibility labels for select, edit, and delete actions
 [2026-05-09] - Frontend - TagInput chip and suggestion buttons now have visible keyboard focus styles
 [2026-05-09] - Frontend - TaskList empty state now reflects the full active filter set from DashboardPage
+[2026-05-10] - Frontend - App theme context added in App with exported useTheme hook and provider wiring around router tree
+[2026-05-10] - Frontend - HomePage rebuilt with themed hero sky SVG, feature cards, CTA flow, and interactive theme preview dots via HomePage.module.css
+[2026-05-10] - Frontend - Shared AuthPages.module.css introduced and auth screens migrated to branded module-based layouts
+[2026-05-10] - Frontend - LoginPage upgraded with session-token redirect guard, trimmed-email login submit, and improved auth form UX/accessibility
+[2026-05-10] - Frontend - RegisterPage upgraded with confirm-password validation, strength meter, trimmed payload fields, and guarded submit states
+[2026-05-10] - Frontend - ForgotPasswordPage upgraded to neutral-account messaging flow with resend path, 429-specific feedback, and reset-route handoff
+[2026-05-10] - Frontend - ResetPasswordPage upgraded with prefilled email from route state, numeric 6-digit code normalization, timer cleanup, and success redirect controls
+[2026-05-10] - Frontend - AppLayout replaced with route-aware mobile shell including themed greeting header, bottom nav, growth orb tooltip, and FAB create-task handoff
+[2026-05-10] - Frontend - ProtectedRoute and SmartEntryGate standardized with explicit guard intent/docs and preserved destination-aware auth redirects
+[2026-05-10] - Frontend - TaskCard redesigned with module CSS, priority/due/estimate metadata row, visible action spinner, and improved checkbox/tag/action accessibility
+[2026-05-10] - Ops - Client builds revalidated after each migration batch; latest tsc+vite build passing on updated auth/home/layout/task components

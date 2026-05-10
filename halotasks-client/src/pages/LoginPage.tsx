@@ -1,9 +1,10 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
+import { isSessionTokenValid } from '../utils/authSession';
+import styles from './AuthPages.module.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -17,69 +18,100 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
-  useRedirectIfAuthenticated('/dashboard');
+  useEffect(() => {
+    if (isSessionTokenValid(token)) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [token, navigate]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
+      // Trim email to prevent whitespace login mismatches.
       const result = await authService.login({ email: email.trim(), password });
       setAuth(result);
       navigate(from, { replace: true });
-    } catch (requestError) {
-      const axiosError = requestError as AxiosError<{ message?: string }>;
-      setError(axiosError.response?.data?.message ?? 'Login failed. Please try again.');
+    } catch (err) {
+      const axiosErr = err as AxiosError<{ message?: string }>;
+      setError(axiosErr.response?.data?.message ?? 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <section className="auth-page">
-      <div className="auth-card">
-        <h2>Welcome Back</h2>
-        <p>Welcome back. Sign in to continue your focused workflow.</p>
+    <main className={styles.page}>
+      <header className={styles.authHeader}>
+        <button type="button" className={styles.backBtn} onClick={() => navigate('/home')} aria-label="Back to home">
+          &larr;
+        </button>
+        <div className={styles.authLogoRow}>
+          <span className={styles.authLogoEmoji} aria-hidden="true">
+            🌱
+          </span>
+          <span className={styles.authLogoText}>halotask</span>
+        </div>
+      </header>
 
-          <form onSubmit={handleSubmit} className="auth-form">
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-                autoComplete="email"
-              />
-            </label>
+      <section className={styles.card} aria-label="Sign in">
+        <div className={styles.cardTop}>
+          <h1 className={styles.cardTitle}>Welcome back</h1>
+          <p className={styles.cardSub}>Sign in to continue growing your tree.</p>
+        </div>
 
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                autoComplete="current-password"
-              />
-            </label>
+        <form onSubmit={handleSubmit} className="auth-form" noValidate>
+          <label>
+            Email address
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              required
+              autoComplete="email"
+              autoFocus
+              inputMode="email"
+            />
+          </label>
 
-            <p className="auth-inline-link">
-              <Link to="/forgot-password">Forgot password?</Link>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="********"
+              required
+              autoComplete="current-password"
+            />
+          </label>
+
+          <div className={styles.forgotRow}>
+            <Link to="/forgot-password" className={styles.forgotLink}>
+              Forgot password?
+            </Link>
+          </div>
+
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
             </p>
+          )}
 
-            {error && <p className="form-error">{error}</p>}
-
-            <button type="submit" disabled={loading}>
-              {loading ? 'Signing in...' : 'Login'}
+          <div className="auth-cta-stack">
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign in'}
             </button>
-          </form>
+          </div>
+        </form>
 
-        <p className="auth-link">
-          No account yet? <Link to="/register">Create one</Link>
+        <p className={styles.switchLink}>
+          Don't have an account? <Link to="/register">Create one free</Link>
         </p>
-      </div>
-    </section>
+      </section>
+    </main>
   );
 }
