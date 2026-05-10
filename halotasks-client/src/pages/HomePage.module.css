@@ -6,6 +6,10 @@
   background: var(--color-bg);
   transition: background-color var(--duration-theme) var(--ease-in-out);
   overflow-x: hidden;
+  /* Centre at a comfortable max-width on large screens */
+  max-width: 860px;
+  margin-inline: auto;
+  width: 100%;
 }
 
 /* Hero section */

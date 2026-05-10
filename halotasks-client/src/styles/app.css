@@ -38,9 +38,7 @@ a { color: var(--color-text-link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 input, select, button, textarea { font: inherit; }
 
-#root {
-  max-width:  var(--mobile-max-width);
-  margin:     0 auto;
+ #root {
   min-height: 100dvh;
   position:   relative;
   background: var(--color-bg);
