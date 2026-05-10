@@ -40,3 +40,8 @@
 [2026-05-10] - Frontend - ProtectedRoute and SmartEntryGate standardized with explicit guard intent/docs and preserved destination-aware auth redirects
 [2026-05-10] - Frontend - TaskCard redesigned with module CSS, priority/due/estimate metadata row, visible action spinner, and improved checkbox/tag/action accessibility
 [2026-05-10] - Ops - Client builds revalidated after each migration batch; latest tsc+vite build passing on updated auth/home/layout/task components
+
+[2026-05-10] - Frontend - Global stylesheet `src/styles/app.css` replaced with user-provided global stylesheet (resets, app shell, and component overrides).
+[2026-05-10] - Frontend - Theme tokens `src/styles/tokens.css` updated with refined sunrise/midday/sunset/night palettes, spacing, typography, and shadow scales.
+[2026-05-10] - Frontend - `src/pages/HomePage.module.css` synced to global layout (added max-width and centering for comfortable reading width).
+[2026-05-10] - Ops - Production build (tsc + vite) run after tokens update; build succeeded and dist assets generated.
