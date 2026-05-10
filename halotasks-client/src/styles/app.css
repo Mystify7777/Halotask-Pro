@@ -38,7 +38,7 @@ a { color: var(--color-text-link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 input, select, button, textarea { font: inherit; }
 
- #root {
+#root {
   min-height: 100dvh;
   position:   relative;
   background: var(--color-bg);
@@ -100,6 +100,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   min-height: 100dvh; display: flex; flex-direction: column;
   background: var(--color-bg);
   transition: background-color var(--duration-theme) var(--ease-in-out);
+  /* Centre auth forms on desktop at a comfortable reading width */
+  max-width:     860px;
+  margin-inline: auto;
+  width:         100%;
 }
 .auth-shell { flex: 1; display: flex; flex-direction: column; }
 
@@ -193,6 +197,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   display: flex; flex-direction: column; min-height: 100dvh;
   background: var(--color-bg);
   transition: background-color var(--duration-theme) var(--ease-in-out);
+  /* On mobile: full width. On desktop: centred column with a max-width. */
+  max-width:      var(--desktop-max-width, 1280px);
+  margin-inline:  auto;
+  width:          100%;
 }
 
 .top-nav {
@@ -216,7 +224,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 /* ─── Bottom nav ──────────────────────────────────────────── */
 .bottom-nav {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: min(var(--mobile-max-width), 100vw); height: var(--nav-height);
+  /* Match the app-shell max-width so the nav fills the column, not the whole viewport */
+  width: min(var(--desktop-max-width, 1280px), 100vw);
+  height: var(--nav-height);
   background: var(--color-nav-bg); border-top: 1.5px solid var(--color-nav-border);
   display: flex; align-items: center; justify-content: space-around;
   padding-bottom: env(safe-area-inset-bottom, 0); z-index: var(--z-sticky);
@@ -403,7 +413,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .fab {
   position: fixed;
   bottom: var(--fab-offset-bottom);
-  right: calc((100vw - min(var(--mobile-max-width), 100vw)) / 2 + var(--fab-offset-right));
+  /* Mirror of orb — anchor to the right edge of the app-shell */
+  right: max(
+    var(--fab-offset-right),
+    calc(50vw - var(--desktop-max-width, 1280px) / 2 + var(--fab-offset-right))
+  );
   width: var(--fab-size); height: var(--fab-size);
   border-radius: var(--radius-full); background: var(--color-fab-bg);
   color: var(--color-fab-text); border: none; box-shadow: var(--shadow-fab);
@@ -415,7 +429,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 /* ─── Growth tree orb ─────────────────────────────────────── */
 .orb-wrap {
   position: fixed; bottom: var(--orb-offset-bottom);
-  left: calc((100vw - min(var(--mobile-max-width), 100vw)) / 2 + var(--orb-offset-left));
+  /* Centre the app-shell, then offset from its left edge */
+  left: max(
+    var(--orb-offset-left),
+    calc(50vw - var(--desktop-max-width, 1280px) / 2 + var(--orb-offset-left))
+  );
   z-index: var(--z-orb);
 }
 .orb {

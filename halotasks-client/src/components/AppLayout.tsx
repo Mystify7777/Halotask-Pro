@@ -111,7 +111,7 @@ export default function AppLayout({
         >
           <TreeOrbSvg />
           <div className="orb-xp">
-            <span>{xp} XP - {stage}</span>
+            <span>{xp} XP · {stage}</span>
           </div>
         </button>
 
