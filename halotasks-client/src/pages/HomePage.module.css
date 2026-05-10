@@ -93,8 +93,15 @@
 
 /* Override global button styles inside module scope */
 .ctaStack :global(.btn-primary) {
-  background: var(--color-btn-primary-bg);
-  color: var(--color-btn-primary-text);
+  /* Always use white background in the hero — the hero background colour on
+     sunrise & midday themes matches --color-btn-primary-bg, making the button
+     invisible. Force contrast here regardless of theme. */
+  background: rgba(255, 255, 255, 0.95);
+  color: #1a1a2e; /* dark neutral that reads on all 4 themes */
+  border: none;
+}
+.ctaStack :global(.btn-primary):hover {
+  background: #ffffff;
 }
 
 .ctaStack :global(.btn-secondary) {

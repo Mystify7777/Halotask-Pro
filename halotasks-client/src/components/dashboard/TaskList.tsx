@@ -3,6 +3,7 @@ import { Task } from '../../types/task';
 import { TaskEditState } from './types';
 import TaskCard from './TaskCard';
 import TaskEditForm from './TaskEditForm';
+import TaskListSkeleton from './TaskListSkeleton';
 
 type AddTagResult = {
   message: string | null;
@@ -58,7 +59,7 @@ export default function TaskList({
   const selectedIdsSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   if (loadingTasks) {
-    return <p>Loading tasks...</p>;
+    return <TaskListSkeleton />;
   }
 
   if (tasks.length === 0) {

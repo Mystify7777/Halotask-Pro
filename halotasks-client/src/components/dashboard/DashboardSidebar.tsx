@@ -7,9 +7,9 @@ type DashboardSidebarProps = {
 
 export default function DashboardSidebar({ taskPanel, growthPanel }: DashboardSidebarProps) {
   return (
-    <>
+    <div className="sidebar">
       <div className="panel">{taskPanel}</div>
       <div className="panel">{growthPanel}</div>
-    </>
+    </div>
   );
 }
