@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode } from 'react';
+import { ReactNode } from 'react';
 import { Priority } from '../../types/task';
 import { SUGGESTED_TAGS } from '../../utils/tagHelpers';
 import TagInput from '../shared/TagInput';
@@ -49,19 +49,35 @@ export default function TaskFormFields({
         placeholder="Add a task title"
         value={title}
         onChange={(event) => onTitleChange(event.target.value)}
+        aria-label="Task title"
         required
       />
-      <select value={priority} onChange={(event) => onPriorityChange(event.target.value as Priority)}>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-      </select>
-      <input
-        type="date"
-        value={dueDate}
-        onChange={(event) => onDueDateChange(event.target.value)}
-        aria-label="Due date"
-      />
+
+      <div className="form-row-2col">
+        <label className="form-field-label">
+          <span>Priority</span>
+          <select
+            value={priority}
+            onChange={(event) => onPriorityChange(event.target.value as Priority)}
+            aria-label="Priority"
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+
+        <label className="form-field-label">
+          <span>Due date</span>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(event) => onDueDateChange(event.target.value)}
+            aria-label="Due date"
+          />
+        </label>
+      </div>
+
       <TagInput
         selectedTags={tags}
         inputValue={tagInput}
@@ -72,13 +88,19 @@ export default function TaskFormFields({
         dynamicSuggestions={tagSuggestions}
         placeholder="Type tag then Enter or comma"
       />
-      <input
-        type="number"
-        min={0}
-        value={estimatedMinutes}
-        onChange={(event) => onEstimatedMinutesChange(event.target.value)}
-        placeholder="Estimated minutes"
-      />
+
+      <label className="form-field-label">
+        <span>Estimated time</span>
+        <input
+          type="number"
+          min={0}
+          value={estimatedMinutes}
+          onChange={(event) => onEstimatedMinutesChange(event.target.value)}
+          placeholder="Minutes"
+          aria-label="Estimated minutes"
+        />
+      </label>
+
       {children}
     </>
   );

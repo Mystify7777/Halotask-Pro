@@ -18,6 +18,14 @@ type TaskEditFormProps = {
   onRemoveEditTag: (tag: string) => void;
 };
 
+/** Convenience updater: merges partial edit state */
+function patch(
+  onEditStateChange: TaskEditFormProps['onEditStateChange'],
+  update: Partial<TaskEditState>,
+) {
+  onEditStateChange((current) => (current ? { ...current, ...update } : current));
+}
+
 export default function TaskEditForm({
   taskId,
   editState,
@@ -29,6 +37,8 @@ export default function TaskEditForm({
   onAddEditTag,
   onRemoveEditTag,
 }: TaskEditFormProps) {
+  const isSaving = activeActionTaskId === taskId;
+
   return (
     <div className="edit-panel">
       <TaskFormFields
@@ -39,64 +49,30 @@ export default function TaskEditForm({
         tags={editState.tags}
         tagInput={editState.tagInput}
         tagSuggestions={editTagSuggestions}
-        onTitleChange={(value) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  title: value,
-                }
-              : current,
-          )
-        }
-        onPriorityChange={(value) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  priority: value,
-                }
-              : current,
-          )
-        }
-        onDueDateChange={(value) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  dueDate: value,
-                }
-              : current,
-          )
-        }
-        onEstimatedMinutesChange={(value) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  estimatedMinutes: value,
-                }
-              : current,
-          )
-        }
-        onTagInputChange={(value) =>
-          onEditStateChange((current) =>
-            current
-              ? {
-                  ...current,
-                  tagInput: value,
-                }
-              : current,
-          )
-        }
+        onTitleChange={(value) => patch(onEditStateChange, { title: value })}
+        onPriorityChange={(value) => patch(onEditStateChange, { priority: value as Priority })}
+        onDueDateChange={(value) => patch(onEditStateChange, { dueDate: value })}
+        onEstimatedMinutesChange={(value) => patch(onEditStateChange, { estimatedMinutes: value })}
+        onTagInputChange={(value) => patch(onEditStateChange, { tagInput: value })}
         onAddTag={onAddEditTag}
         onRemoveTag={onRemoveEditTag}
       />
-      <div className="task-actions">
-        <button type="button" onClick={() => onSaveTaskEdit(taskId)} disabled={activeActionTaskId === taskId}>
-          {activeActionTaskId === taskId ? 'Saving...' : 'Save'}
+      <div className="task-edit-actions">
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          onClick={() => onSaveTaskEdit(taskId)}
+          disabled={isSaving || !editState.title.trim()}
+          aria-busy={isSaving}
+        >
+          {isSaving ? 'Saving…' : 'Save'}
         </button>
-        <button className="ghost-btn" onClick={onCancelEditing} type="button">
+        <button
+          type="button"
+          className="ghost-btn btn-sm"
+          onClick={onCancelEditing}
+          disabled={isSaving}
+        >
           Cancel
         </button>
       </div>

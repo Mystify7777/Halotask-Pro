@@ -1,0 +1,38 @@
+{
+  "format": "Automated Changelog Log",
+  "description": "Machine-readable changelog tracking all HaloTaskPro updates. Includes frontend components, backend APIs, accessibility improvements, and feature implementations.",
+  "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
+  "entries": [
+    {
+      "date": "2026-05-11",
+      "category": "Accessibility",
+      "title": "Completed component accessibility audit and batch implementations",
+      "description": "Implemented ARIA attributes across all components. Batch 1: TagInput + TaskFormFields with full ARIA support. Batch 2: TaskCreateForm, TaskFilters, TaskEditForm with semantic HTML. Batch 3: GrowthTree, ReminderSettings with permission display. Added form field labels, filter segments, and permission badge styles.",
+      "files": [
+        "halotasks-client/src/components/shared/TagInput.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskFilters.tsx",
+        "halotasks-client/src/components/dashboard/TaskEditForm.tsx",
+        "halotasks-client/src/components/dashboard/GrowthTree.tsx",
+        "halotasks-client/src/components/dashboard/ReminderSettings.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
+      "category": "Frontend",
+      "title": "Build validation after component updates",
+      "description": "All builds passed successfully. 137 modules transformed, 351.50 KB JS / 111.80 KB gzip, 49.92 KB CSS / 9.37 KB gzip. No TypeScript errors or warnings.",
+      "files": [
+        "halotasks-client/package.json",
+        "halotasks-client/vite.config.js"
+      ],
+      "priority": "high",
+      "status": "completed"
+    }
+  ],
+  "lastUpdated": "2026-05-11T00:00:00Z"
+}

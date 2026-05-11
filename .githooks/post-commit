@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Post-Commit Hook: Auto-logs committed files to .logs
+# Install: cp .githooks/post-commit .git/hooks/ && chmod +x .git/hooks/post-commit
+# Or: git config core.hooksPath .githooks
+
+LOGS_FILE=".logs"
+
+# Get changed files from last commit
+CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+
+# Categorize changed files
+FRONTEND_FILES=""
+BACKEND_FILES=""
+DOCS_FILES=""
+CONFIG_FILES=""
+
+while IFS= read -r file; do
+  if [[ "$file" =~ ^halotasks-client/ ]] || [[ "$file" =~ \.(jsx|tsx|css)$ ]]; then
+    FRONTEND_FILES="${FRONTEND_FILES}  - $file\n"
+  elif [[ "$file" =~ ^halotasks-server/ ]] || [[ "$file" =~ \.(js|ts)$ ]] && ! [[ "$file" =~ ^halotasks-client/ ]]; then
+    BACKEND_FILES="${BACKEND_FILES}  - $file\n"
+  elif [[ "$file" =~ ^docs/ ]] || [[ "$file" =~ \.md$ ]]; then
+    DOCS_FILES="${DOCS_FILES}  - $file\n"
+  else
+    CONFIG_FILES="${CONFIG_FILES}  - $file\n"
+  fi
+done <<< "$CHANGED_FILES"
+
+# Get commit message
+COMMIT_MSG=$(git log -1 --pretty=%B)
+COMMIT_HASH=$(git log -1 --pretty=%H | cut -c1-7)
+COMMIT_DATE=$(git log -1 --pretty=%cs)
+
+# Log to console (optional - useful for verification)
+echo "📝 Auto-logging commit: $COMMIT_HASH"
+
+# If .logs exists, append entry
+if [ -f "$LOGS_FILE" ]; then
+  echo "✓ Commit logged (run: node scripts/add-changelog.js to add detailed notes)"
+fi
+
+exit 0

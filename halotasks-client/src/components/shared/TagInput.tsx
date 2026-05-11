@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { KeyboardEvent, useEffect, useId, useMemo, useState } from 'react';
 import { MAX_TAGS, normalizeTag, toTitleCase } from '../../utils/tagHelpers';
 
 type AddTagResult = {
@@ -26,6 +26,9 @@ export default function TagInput({
   dynamicSuggestions,
   placeholder,
 }: TagInputProps) {
+  const uid = useId();
+  const listboxId = `${uid}-listbox`;
+
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
 
@@ -39,23 +42,15 @@ export default function TagInput({
       setSuggestionIndex(-1);
       return;
     }
-
     setSuggestionIndex((current) => {
-      if (current < 0) {
-        return 0;
-      }
-
+      if (current < 0) return 0;
       return Math.min(current, filteredSuggestions.length - 1);
     });
   }, [filteredSuggestions]);
 
   const commitTag = (rawTag: string) => {
     const result = onAddTag(rawTag);
-
-    if (!result.message) {
-      onInputValueChange('');
-    }
-
+    if (!result.message) onInputValueChange('');
     return result;
   };
 
@@ -67,10 +62,7 @@ export default function TagInput({
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      if (!filteredSuggestions.length) {
-        return;
-      }
-
+      if (!filteredSuggestions.length) return;
       setSuggestionsOpen(true);
       setSuggestionIndex((current) => {
         const next = current + 1;
@@ -81,10 +73,7 @@ export default function TagInput({
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      if (!filteredSuggestions.length) {
-        return;
-      }
-
+      if (!filteredSuggestions.length) return;
       setSuggestionsOpen(true);
       setSuggestionIndex((current) => {
         const base = current < 0 ? 0 : current;
@@ -105,9 +94,7 @@ export default function TagInput({
       return;
     }
 
-    if (event.key !== 'Enter' && event.key !== ',') {
-      return;
-    }
+    if (event.key !== 'Enter' && event.key !== ',') return;
 
     event.preventDefault();
 
@@ -125,27 +112,33 @@ export default function TagInput({
 
   const toggleSuggestedTag = (tag: string) => {
     const normalized = normalizeTag(tag);
-
     if (selectedTags.includes(normalized)) {
       onRemoveTag(normalized);
-      return;
+    } else {
+      commitTag(normalized);
     }
-
-    commitTag(normalized);
   };
+
+  const isDropdownOpen = suggestionsOpen && filteredSuggestions.length > 0;
+  const activeDescendant =
+    isDropdownOpen && suggestionIndex >= 0
+      ? `${uid}-opt-${suggestionIndex}`
+      : undefined;
 
   return (
     <div className="tag-input-block">
-      <div className="chip-row">
+      {/* Quick-select preset tags */}
+      <div className="chip-row" role="group" aria-label="Preset tags">
         {suggestedTags.map((tag) => {
           const normalized = normalizeTag(tag);
-
+          const isSelected = selectedTags.includes(normalized);
           return (
             <button
               key={`suggested-${normalized}`}
               type="button"
-              className={selectedTags.includes(normalized) ? 'tag-chip selected' : 'tag-chip'}
+              className={isSelected ? 'tag-chip selected' : 'tag-chip'}
               onClick={() => toggleSuggestedTag(normalized)}
+              aria-pressed={isSelected}
             >
               {toTitleCase(normalized)}
             </button>
@@ -153,41 +146,57 @@ export default function TagInput({
         })}
       </div>
 
-      <div className="chip-row selected-row">
-        {selectedTags.map((tag) => (
-          <span key={`selected-${tag}`} className="selected-chip">
-            {tag}
-            <button type="button" onClick={() => onRemoveTag(tag)} aria-label={`Remove ${tag}`}>
-              x
-            </button>
-          </span>
-        ))}
-      </div>
+      {/* Chosen tags */}
+      {selectedTags.length > 0 && (
+        <div className="chip-row selected-row" aria-label="Selected tags">
+          {selectedTags.map((tag) => (
+            <span key={`selected-${tag}`} className="selected-chip">
+              {tag}
+              <button type="button" onClick={() => onRemoveTag(tag)} aria-label={`Remove tag ${tag}`}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
-      <p className="tag-helper-text">{selectedTags.length}/{MAX_TAGS} tags used</p>
+      <p className="tag-helper-text" aria-live="polite">
+        {selectedTags.length}/{MAX_TAGS} tags used
+      </p>
 
+      {/* Combobox input */}
       <input
         type="text"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={isDropdownOpen}
+        aria-controls={listboxId}
+        aria-activedescendant={activeDescendant}
         value={inputValue}
         onChange={(event) => {
           onInputValueChange(event.target.value);
           setSuggestionsOpen(true);
         }}
         onFocus={() => {
-          if (filteredSuggestions.length > 0) {
-            setSuggestionsOpen(true);
-          }
+          if (filteredSuggestions.length > 0) setSuggestionsOpen(true);
         }}
         onBlur={() => setSuggestionsOpen(false)}
         onKeyDown={handleInputKeyDown}
         placeholder={placeholder}
       />
 
-      {suggestionsOpen && filteredSuggestions.length > 0 && (
-        <div className="tag-suggestion-dropdown" role="listbox" aria-label="Tag suggestions">
+      {/* Suggestion dropdown */}
+      {isDropdownOpen && (
+        <div
+          id={listboxId}
+          className="tag-suggestion-dropdown"
+          role="listbox"
+          aria-label="Tag suggestions"
+        >
           {filteredSuggestions.map((tag, index) => (
             <button
               key={`suggestion-${tag}`}
+              id={`${uid}-opt-${index}`}
               type="button"
               className={index === suggestionIndex ? 'suggestion-item active' : 'suggestion-item'}
               role="option"
