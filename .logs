@@ -5,6 +5,17 @@
   "entries": [
     {
       "date": "2026-05-11",
+      "category": "Bugfix",
+      "title": "Prevent permanent sync errors from retrying forever",
+      "description": "Updated the offline queue processor to detect permanent 4xx failures, discard impossible entries, and keep transient errors queued for retry.",
+      "files": [
+        "halotasks-client/src/offline/queueProcessor.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
       "category": "Frontend",
       "title": "Updated dashboard toolbar and productivity snapshot",
       "description": "Wrapped the dashboard controls in a dedicated toolbar shell, upgraded SmartSections to iconified insight cards, and synced the dashboard layout and toolbar styles.",

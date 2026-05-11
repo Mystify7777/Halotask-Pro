@@ -19,6 +19,27 @@ export type ProcessSyncQueueResult = {
   remaining: number;
 };
 
+/**
+ * Returns true for HTTP status codes that are permanent client errors.
+ * Retrying these entries will not succeed, so they should be discarded.
+ */
+function isPermanentError(error: unknown): boolean {
+  const status =
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof (error as { response?: unknown }).response === 'object' &&
+    (error as { response: { status?: unknown } }).response !== null
+      ? (error as { response: { status?: number } }).response?.status
+      : null;
+
+  if (status === null || status === undefined) {
+    return false;
+  }
+
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export const processSyncQueue = async ({
   onTaskCreated,
   onTaskUpdated,
@@ -95,7 +116,13 @@ export const processSyncQueue = async ({
 
         processed += 1;
       }
-    } catch {
+    } catch (error) {
+      if (isPermanentError(error)) {
+        console.warn('[syncQueue] Discarding permanently failed entry:', entry.type, entry.taskId, error);
+        processed += 1;
+        continue;
+      }
+
       remainingQueue.push(entry);
     }
   }
