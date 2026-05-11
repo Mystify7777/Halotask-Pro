@@ -81,6 +81,18 @@ export const saveTreeState = (state: TreeState): void => {
 };
 
 /**
+ * Initialize tree storage on app start.
+ *
+ * The current implementation is synchronous, but this wrapper keeps the hook
+ * contract ready for future async migration work.
+ */
+export const initTreeStorage = async (): Promise<TreeState> => {
+  const initialState = getTreeState();
+  setTreeState(initialState);
+  return initialState;
+};
+
+/**
  * Clear all growth data (for testing or reset)
  */
 export const clearTreeState = (): void => {

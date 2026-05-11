@@ -5,6 +5,19 @@
   "entries": [
     {
       "date": "2026-05-11",
+      "category": "Frontend",
+      "title": "Hardened growth storage and offline queue handling",
+      "description": "Added batch-5 growth storage initialization and serialized sync queue writes to keep task progress and offline actions stable.",
+      "files": [
+        "halotasks-client/src/growth/treeStorage.ts",
+        "halotasks-client/src/hooks/useDashboardGrowth.ts",
+        "halotasks-client/src/offline/syncQueue.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
       "category": "Bugfix",
       "title": "Prevent permanent sync errors from retrying forever",
       "description": "Updated the offline queue processor to detect permanent 4xx failures, discard impossible entries, and keep transient errors queued for retry.",
