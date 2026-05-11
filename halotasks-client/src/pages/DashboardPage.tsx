@@ -157,103 +157,103 @@ export default function DashboardPage() {
         growthPanel={treeState ? <GrowthTree state={treeState} /> : null}
       />
 
-      <div className="panel">
-        <DashboardToolbar
-          filters={
-            <TaskFilters
-              search={tasksHook.search}
-              filterMode={tasksHook.filterMode}
-              priorityFilter={tasksHook.priorityFilter}
-              sortBy={tasksHook.sortBy}
-              tagFilter={tasksHook.tagFilter}
-              onSearchChange={tasksHook.setSearch}
-              onFilterModeChange={tasksHook.setFilterMode}
-              onPriorityFilterChange={tasksHook.setPriorityFilter}
-              onSortByChange={tasksHook.setSortBy}
-              onClearTagFilter={() => tasksHook.setTagFilter(null)}
+      <DashboardToolbar
+        filters={
+          <TaskFilters
+            search={tasksHook.search}
+            filterMode={tasksHook.filterMode}
+            priorityFilter={tasksHook.priorityFilter}
+            sortBy={tasksHook.sortBy}
+            tagFilter={tasksHook.tagFilter}
+            onSearchChange={tasksHook.setSearch}
+            onFilterModeChange={tasksHook.setFilterMode}
+            onPriorityFilterChange={tasksHook.setPriorityFilter}
+            onSortByChange={tasksHook.setSortBy}
+            onClearTagFilter={() => tasksHook.setTagFilter(null)}
+          />
+        }
+        syncArea={
+          <div className="sync-status-row">
+            <p className={`sync-status ${sync.syncStatus}`}>
+              Status:{' '}
+              {sync.syncStatus === 'offline'
+                ? 'Offline'
+                : sync.syncStatus === 'syncing'
+                  ? 'Syncing'
+                  : sync.syncStatus === 'cached'
+                    ? 'Cached'
+                    : sync.syncStatus === 'errors-pending'
+                      ? `Errors Pending (${sync.pendingQueueCount})`
+                      : 'Synced'}
+              {sync.lastSyncAt
+                ? ` • Last sync ${new Date(sync.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : ''}
+            </p>
+            <ReminderSettings
+              isOpen={reminders.isReminderSettingsOpen}
+              settings={reminders.reminderSettings}
+              onToggleOpen={() => reminders.setIsReminderSettingsOpen((current) => !current)}
+              onSettingsChange={reminders.handleReminderSettingsChange}
             />
-          }
-          syncArea={
-            <div className="sync-status-row">
-              <p className={`sync-status ${sync.syncStatus}`}>
-                Status:{' '}
-                {sync.syncStatus === 'offline'
-                  ? 'Offline'
-                  : sync.syncStatus === 'syncing'
-                    ? 'Syncing'
-                    : sync.syncStatus === 'cached'
-                      ? 'Cached'
-                      : sync.syncStatus === 'errors-pending'
-                        ? `Errors Pending (${sync.pendingQueueCount})`
-                        : 'Synced'}
-                {sync.lastSyncAt
-                  ? ` • Last sync ${new Date(sync.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                  : ''}
-              </p>
-              <ReminderSettings
-                isOpen={reminders.isReminderSettingsOpen}
-                settings={reminders.reminderSettings}
-                onToggleOpen={() => reminders.setIsReminderSettingsOpen((current) => !current)}
-                onSettingsChange={reminders.handleReminderSettingsChange}
-              />
-              {reminders.remindersSupported && reminders.notificationPermission === 'default' && (
-                <button
-                  type="button"
-                  className="ghost-btn retry-sync-btn"
-                  onClick={reminders.handleEnableReminders}
-                  disabled={sync.syncStatus === 'syncing' || loadingTasks}
-                >
-                  Enable Reminders
-                </button>
-              )}
-              {reminders.remindersSupported && reminders.notificationPermission === 'denied' && (
-                <span className="reminder-permission-note">Reminders blocked by browser settings.</span>
-              )}
-              {(sync.syncStatus === 'errors-pending' || sync.retryingSync) && (
-                <button
-                  type="button"
-                  className="ghost-btn retry-sync-btn"
-                  onClick={sync.handleRetrySync}
-                  disabled={sync.syncStatus === 'syncing' || sync.retryingSync || loadingTasks}
-                >
-                  Retry Sync
-                </button>
-              )}
-            </div>
-          }
-          inlineActions={
-            <div className="inline-actions-row">
+            {reminders.remindersSupported && reminders.notificationPermission === 'default' && (
               <button
                 type="button"
-                className="ghost-btn"
-                onClick={tasksHook.handleClearCompleted}
-                disabled={tasksHook.bulkActionLoading}
+                className="ghost-btn retry-sync-btn"
+                onClick={reminders.handleEnableReminders}
+                disabled={sync.syncStatus === 'syncing' || loadingTasks}
               >
-                Clear Completed
+                Enable Reminders
               </button>
-            </div>
-          }
-          bulkActions={
-            tasksHook.selectedVisibleIds.length > 0 ? (
-              <BulkActionsBar
-                selectedCount={tasksHook.selectedVisibleIds.length}
-                allVisibleSelected={tasksHook.allVisibleSelected}
-                loading={tasksHook.bulkActionLoading}
-                onSelectAllVisible={() => tasksHook.selectAll(tasksHook.visibleTaskIds)}
-                onClearSelection={tasksHook.clearSelection}
-                onMarkSelectedComplete={tasksHook.handleMarkSelectedComplete}
-                onDeleteSelected={tasksHook.handleDeleteSelected}
-              />
-            ) : null
-          }
-          statusMessages={
-            <>
-              {statusError && <p className="form-error">{statusError}</p>}
-              {statusInfo && <p className="form-success">{statusInfo}</p>}
-            </>
-          }
-        />
+            )}
+            {reminders.remindersSupported && reminders.notificationPermission === 'denied' && (
+              <span className="reminder-permission-note">Reminders blocked by browser settings.</span>
+            )}
+            {(sync.syncStatus === 'errors-pending' || sync.retryingSync) && (
+              <button
+                type="button"
+                className="ghost-btn retry-sync-btn"
+                onClick={sync.handleRetrySync}
+                disabled={sync.syncStatus === 'syncing' || sync.retryingSync || loadingTasks}
+              >
+                Retry Sync
+              </button>
+            )}
+          </div>
+        }
+        inlineActions={
+          <div className="inline-actions-row">
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={tasksHook.handleClearCompleted}
+              disabled={tasksHook.bulkActionLoading}
+            >
+              Clear Completed
+            </button>
+          </div>
+        }
+        bulkActions={
+          tasksHook.selectedVisibleIds.length > 0 ? (
+            <BulkActionsBar
+              selectedCount={tasksHook.selectedVisibleIds.length}
+              allVisibleSelected={tasksHook.allVisibleSelected}
+              loading={tasksHook.bulkActionLoading}
+              onSelectAllVisible={() => tasksHook.selectAll(tasksHook.visibleTaskIds)}
+              onClearSelection={tasksHook.clearSelection}
+              onMarkSelectedComplete={tasksHook.handleMarkSelectedComplete}
+              onDeleteSelected={tasksHook.handleDeleteSelected}
+            />
+          ) : null
+        }
+        statusMessages={
+          <>
+            {statusError && <p className="form-error">{statusError}</p>}
+            {statusInfo && <p className="form-success">{statusInfo}</p>}
+          </>
+        }
+      />
 
+      <div className="panel">
         <DashboardContent
           smartSections={<SmartSections tasks={tasksHook.tasks} />}
           taskList={

@@ -5,6 +5,20 @@
   "entries": [
     {
       "date": "2026-05-11",
+      "category": "Frontend",
+      "title": "Updated dashboard toolbar and productivity snapshot",
+      "description": "Wrapped the dashboard controls in a dedicated toolbar shell, upgraded SmartSections to iconified insight cards, and synced the dashboard layout and toolbar styles.",
+      "files": [
+        "halotasks-client/src/components/dashboard/DashboardToolbar.tsx",
+        "halotasks-client/src/components/dashboard/SmartSections.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
       "category": "Accessibility",
       "title": "Completed component accessibility audit and batch implementations",
       "description": "Implemented ARIA attributes across all components. Batch 1: TagInput + TaskFormFields with full ARIA support. Batch 2: TaskCreateForm, TaskFilters, TaskEditForm with semantic HTML. Batch 3: GrowthTree, ReminderSettings with permission display. Added form field labels, filter segments, and permission badge styles.",
