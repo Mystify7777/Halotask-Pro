@@ -1,4 +1,5 @@
 import { ReminderSettings as ReminderSettingsType, BufferMinutes } from '../../reminders/settings';
+import { getNotificationPermissionStatus, isNotificationSupported } from '../../reminders/permissions';
 
 type ReminderSettingsProps = {
   isOpen: boolean;
@@ -9,12 +10,49 @@ type ReminderSettingsProps = {
 
 const BUFFER_OPTIONS: BufferMinutes[] = [15, 30, 60, 90];
 
-export default function ReminderSettings({ isOpen, settings, onToggleOpen, onSettingsChange }: ReminderSettingsProps) {
+function PermissionBadge() {
+  if (!isNotificationSupported()) {
+    return (
+      <span className="permission-badge permission-badge--denied" title="Notifications not supported in this browser">
+        🚫 Not supported
+      </span>
+    );
+  }
+
+  const status = getNotificationPermissionStatus();
+
+  if (status === 'granted') {
+    return (
+      <span className="permission-badge permission-badge--granted" title="Notifications are enabled">
+        ✓ Enabled
+      </span>
+    );
+  }
+
+  if (status === 'denied') {
+    return (
+      <span className="permission-badge permission-badge--denied" title="Notifications are blocked — change this in browser settings">
+        ✕ Blocked
+      </span>
+    );
+  }
+
+  // 'default' — not yet asked
+  return (
+    <span className="permission-badge permission-badge--default" title="Notification permission not yet granted">
+      ? Not granted
+    </span>
+  );
+}
+
+export default function ReminderSettings({
+  isOpen,
+  settings,
+  onToggleOpen,
+  onSettingsChange,
+}: ReminderSettingsProps) {
   const updateSettings = (partial: Partial<ReminderSettingsType>) => {
-    onSettingsChange({
-      ...settings,
-      ...partial,
-    });
+    onSettingsChange({ ...settings, ...partial });
   };
 
   return (
@@ -24,7 +62,14 @@ export default function ReminderSettings({ isOpen, settings, onToggleOpen, onSet
       </button>
 
       {isOpen && (
-        <div className="reminder-settings-panel">
+        <div className="reminder-settings-panel" role="dialog" aria-label="Reminder settings">
+          {/* Permission status at the top of the panel */}
+          <div className="reminder-permission-row">
+            <span className="reminder-permission-label">Browser permission</span>
+            <PermissionBadge />
+          </div>
+
+          <hr className="reminder-divider" />
           <label className="inline-check-label">
             <input
               type="checkbox"
