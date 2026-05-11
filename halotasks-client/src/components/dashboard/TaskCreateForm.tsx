@@ -44,7 +44,7 @@ export default function TaskCreateForm({
   onRemoveTag,
 }: TaskCreateFormProps) {
   return (
-    <form className="task-create-form" onSubmit={onSubmit}>
+    <form className="task-create-form" onSubmit={onSubmit} noValidate>
       <TaskFormFields
         title={title}
         priority={priority}
@@ -61,8 +61,13 @@ export default function TaskCreateForm({
         onAddTag={onAddTag}
         onRemoveTag={onRemoveTag}
       />
-      <button type="submit" disabled={creatingTask}>
-        {creatingTask ? 'Saving...' : 'Add Task'}
+      <button
+        type="submit"
+        className="btn-primary"
+        disabled={creatingTask || !title.trim()}
+        aria-busy={creatingTask}
+      >
+        {creatingTask ? 'Saving…' : 'Add Task'}
       </button>
     </form>
   );
