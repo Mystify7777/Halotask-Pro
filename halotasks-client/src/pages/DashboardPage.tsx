@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import { useLocation } from 'react-router-dom';
 import BulkActionsBar from '../components/dashboard/BulkActionsBar';
 import DashboardContent from '../components/dashboard/DashboardContent';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
@@ -8,6 +9,7 @@ import GrowthTree from '../components/dashboard/GrowthTree';
 import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
+import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
@@ -84,6 +86,18 @@ export default function DashboardPage() {
     refreshPendingQueueCount: async () => 0,
   });
 
+  const location = useLocation();
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+
+  // FAB navigates here with { openCreate: true } — open the sheet on mobile
+  useEffect(() => {
+    if ((location.state as { openCreate?: boolean } | null)?.openCreate) {
+      setIsSheetOpen(true);
+      // Clear the router state so a back/forward doesn't re-open the sheet
+      window.history.replaceState({}, '', location.pathname);
+    }
+  }, [location.state, location.pathname]);
+
   const { isOnline } = useNetworkStatus();
   const { treeState, processGrowthForCompletion } = useDashboardGrowth();
 
@@ -118,6 +132,14 @@ export default function DashboardPage() {
     setStatusInfo,
     setStatusError,
   });
+
+  // Close sheet and reset form fields after a successful create
+  const handleSheetSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    tasksHook.handleCreateTask(e);
+    // handleCreateTask is async; close the sheet optimistically —
+    // if the create fails the form fields remain populated.
+    setIsSheetOpen(false);
+  };
 
   const taskEmptyState = getTaskEmptyStateContent({
     totalTasks: tasksHook.tasks.length,
@@ -288,6 +310,28 @@ export default function DashboardPage() {
       </div>
 
       </div> {/* end main-column */}
+
+      {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}
+      <TaskCreateSheet
+        isOpen={isSheetOpen}
+        onClose={() => setIsSheetOpen(false)}
+        title={tasksHook.title}
+        priority={tasksHook.priority}
+        dueDate={tasksHook.dueDate}
+        estimatedMinutes={tasksHook.estimatedMinutes}
+        creatingTask={tasksHook.creatingTask}
+        tags={tasksHook.createTags}
+        tagInput={tasksHook.createTagInput}
+        tagSuggestions={tasksHook.createTagSuggestions}
+        onSubmit={handleSheetSubmit}
+        onTitleChange={tasksHook.setTitle}
+        onPriorityChange={tasksHook.setPriority}
+        onDueDateChange={tasksHook.setDueDate}
+        onEstimatedMinutesChange={tasksHook.setEstimatedMinutes}
+        onTagInputChange={tasksHook.setCreateTagInput}
+        onAddTag={tasksHook.addCreateTag}
+        onRemoveTag={tasksHook.removeCreateTag}
+      />
     </section>
   );
 }
