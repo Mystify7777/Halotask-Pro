@@ -255,6 +255,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out);
 }
 .dashboard-page { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
+/* Toolbar + content wrapped together so the 2-col desktop grid sees exactly 2 children */
+.main-column { display: grid; gap: var(--space-4); align-content: start; }
 .panel {
   background: var(--color-surface); border-radius: var(--radius-xl);
   border: 1.5px solid var(--color-border); padding: var(--space-4);

@@ -157,6 +157,9 @@ export default function DashboardPage() {
         growthPanel={treeState ? <GrowthTree state={treeState} /> : null}
       />
 
+      {/* main-column keeps toolbar + content as one grid child,
+          so dashboard-page grid sees: [sidebar] [main-column] */}
+      <div className="main-column">
       <DashboardToolbar
         filters={
           <TaskFilters
@@ -283,6 +286,8 @@ export default function DashboardPage() {
           }
         />
       </div>
+
+      </div> {/* end main-column */}
     </section>
   );
 }
