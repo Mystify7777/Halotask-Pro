@@ -1,8 +1,21 @@
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../App';
 import styles from './AppLayout.module.css';
+
+type OrbRegistrar = { register: (fn: () => void) => () => void };
+const OrbContext = createContext<OrbRegistrar>({ register: () => () => {} });
+
+export function useRegisterOrbTap(fn: () => void): void {
+  const { register } = useContext(OrbContext);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  useEffect(() => {
+    return register(() => fnRef.current());
+  }, [register]);
+}
 
 const NAV_ITEMS = [
   { id: 'tasks', label: 'Tasks', emoji: '✅', path: '/dashboard' },
@@ -52,6 +65,16 @@ export default function AppLayout({
   const [orbTooltipVisible, setOrbTooltipVisible] = useState(false);
   const [tooltipTimer, setTooltipTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
+  const orbHandlerRef = useRef<(() => void) | null>(null);
+  const orbContextValue = useMemo<OrbRegistrar>(() => ({
+    register: (fn) => {
+      orbHandlerRef.current = fn;
+      return () => {
+        orbHandlerRef.current = null;
+      };
+    },
+  }), []);
+
   const activeNav: NavId = (() => {
     if (location.pathname.includes('insights')) return 'insights';
     if (location.pathname.includes('reminders')) return 'reminders';
@@ -65,6 +88,11 @@ export default function AppLayout({
   };
 
   const handleOrbTap = () => {
+    if (orbHandlerRef.current) {
+      orbHandlerRef.current();
+      return;
+    }
+
     if (tooltipTimer) clearTimeout(tooltipTimer);
     setOrbTooltipVisible(true);
     const id = setTimeout(() => setOrbTooltipVisible(false), 1500);
@@ -79,6 +107,7 @@ export default function AppLayout({
   })();
 
   return (
+    <OrbContext.Provider value={orbContextValue}>
     <div className={`app-shell ${styles.shell}`}>
       <header className={`top-nav ${styles.header}`}>
         <div className="brand">
@@ -168,5 +197,6 @@ export default function AppLayout({
         ))}
       </nav>
     </div>
+    </OrbContext.Provider>
   );
 }

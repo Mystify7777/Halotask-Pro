@@ -10,6 +10,8 @@ import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
+import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
+import { useRegisterOrbTap } from '../components/AppLayout';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
@@ -88,6 +90,11 @@ export default function DashboardPage() {
 
   const location = useLocation();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [isGrowthSheetOpen, setIsGrowthSheetOpen] = useState(false);
+
+  // Register orb-tap handler — AppLayout calls this when the orb is tapped.
+  // On desktop the sheet is display:none via CSS; on mobile it slides up.
+  useRegisterOrbTap(() => setIsGrowthSheetOpen(true));
 
   // FAB navigates here with { openCreate: true } — open the sheet on mobile
   useEffect(() => {
@@ -332,6 +339,15 @@ export default function DashboardPage() {
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
       />
+
+      {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}
+      {treeState && (
+        <GrowthTreeSheet
+          isOpen={isGrowthSheetOpen}
+          onClose={() => setIsGrowthSheetOpen(false)}
+          treeState={treeState}
+        />
+      )}
     </section>
   );
 }
