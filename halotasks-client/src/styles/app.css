@@ -324,10 +324,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   padding: var(--space-6) var(--space-4); align-content: center; min-height: 200px;
 }
 .task-empty-icon { font-size: 2.5rem; line-height: 1; }
+.task-empty-title,
 .task-empty-state strong {
   font-size: var(--text-lg); font-weight: var(--weight-bold);
   color: var(--color-text-primary);
 }
+.task-empty-msg,
 .task-empty-state p {
   font-size: var(--text-sm); color: var(--color-text-secondary);
   line-height: var(--leading-relaxed);
@@ -609,6 +611,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   border: none; border-top: 1px solid var(--color-border); margin: var(--space-2) 0;
 }
 .quiet-hours-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.reminder-permission-note {
+  font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--color-warning);
+  padding: var(--space-2) var(--space-3); background: var(--color-warning-bg); border-radius: var(--radius-sm);
+}
 
 /* ─── Sidebar (desktop) ───────────────────────────────────── */
 .sidebar { display: none; }
@@ -629,6 +635,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
     top: var(--space-4);
   }
   .bottom-nav { display: none; }
+  /* Sidebar create form replaces the mobile FAB on desktop. */
+  .fab { display: none; }
   /* On desktop the FAB is anchored to the edge of the shell — no extra right padding needed */
   .main-grid { padding-right: var(--space-4); }
 }
