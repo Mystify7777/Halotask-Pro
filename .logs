@@ -4,6 +4,66 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-12",
+      "category": "Docs",
+      "title": "Cleaned and reorganized server upgrade plan",
+      "description": "Refactored server_upgrade_plan.md into a single structured roadmap grouped by priority with normalized issue sections and clear recommendations.",
+      "files": [
+        "docs/server_upgrade_plan.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Frontend",
+      "title": "Aligned app.css with assistance baseline and fixed desktop overlap",
+      "description": "Added missing empty-state and reminder-note selectors, validated authenticated dashboard layout, and fixed desktop FAB overlap with toolbar actions.",
+      "files": [
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
+      "category": "Frontend",
+      "title": "Hardened growth storage and offline queue handling",
+      "description": "Added batch-5 growth storage initialization and serialized sync queue writes to keep task progress and offline actions stable.",
+      "files": [
+        "halotasks-client/src/growth/treeStorage.ts",
+        "halotasks-client/src/hooks/useDashboardGrowth.ts",
+        "halotasks-client/src/offline/syncQueue.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
+      "category": "Bugfix",
+      "title": "Prevent permanent sync errors from retrying forever",
+      "description": "Updated the offline queue processor to detect permanent 4xx failures, discard impossible entries, and keep transient errors queued for retry.",
+      "files": [
+        "halotasks-client/src/offline/queueProcessor.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-11",
+      "category": "Frontend",
+      "title": "Updated dashboard toolbar and productivity snapshot",
+      "description": "Wrapped the dashboard controls in a dedicated toolbar shell, upgraded SmartSections to iconified insight cards, and synced the dashboard layout and toolbar styles.",
+      "files": [
+        "halotasks-client/src/components/dashboard/DashboardToolbar.tsx",
+        "halotasks-client/src/components/dashboard/SmartSections.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-11",
       "category": "Accessibility",
       "title": "Completed component accessibility audit and batch implementations",
@@ -34,5 +94,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-11T00:00:00Z"
+  "lastUpdated": "2026-05-12T00:00:00Z"
 }

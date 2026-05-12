@@ -88,6 +88,22 @@ export default function AppLayout({
             <p className={styles.brandGreeting}>{greeting}{user?.name ? `, ${user.name.split(' ')[0]}` : ''} 👋</p>
           </div>
         </div>
+
+        {/* Desktop-only nav — hidden on mobile via CSS module */}
+        <nav className={styles.desktopNav} aria-label="Desktop navigation">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`${styles.desktopNavLink} ${activeNav === item.id ? styles.desktopNavLinkActive : ''}`}
+              onClick={() => navigate(item.path)}
+              aria-current={activeNav === item.id ? 'page' : undefined}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
         <div className="user-actions">
           <button
             type="button"
