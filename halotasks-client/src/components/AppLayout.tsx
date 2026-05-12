@@ -88,7 +88,9 @@ export default function AppLayout({
   };
 
   const handleOrbTap = () => {
-    if (orbHandlerRef.current) {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+
+    if (orbHandlerRef.current && isMobile) {
       orbHandlerRef.current();
       return;
     }
