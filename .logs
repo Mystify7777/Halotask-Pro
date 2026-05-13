@@ -6,6 +6,32 @@
     {
       "date": "2026-05-13",
       "category": "Feature",
+      "title": "Add adaptive theme controls to Settings page",
+      "description": "Replaced the Settings stub with a full appearance and account screen, including the adaptive toggle switch, manual theme override banner with reset action, theme cards with per-theme accent dots, and the password change link.",
+      "files": [
+        "halotasks-client/src/pages/SettingsPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-13",
+      "category": "Feature",
+      "title": "Add protected dashboard subpages",
+      "description": "Added protected routes for /dashboard/insights, /dashboard/reminders, and /dashboard/settings, each rendered inside the shared AppLayout so unauthenticated users are redirected consistently.",
+      "files": [
+        "halotasks-client/src/App.tsx",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/pages/RemindersPage.tsx",
+        "halotasks-client/src/pages/SettingsPage.tsx"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-13",
+      "category": "Feature",
       "title": "Sync orb display with live Growth Tree data",
       "description": "Added orb data context updates so the floating orb reflects live XP/stage/progress from treeState with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.",
       "files": [
