@@ -6,10 +6,13 @@ import SmartEntryGate from './components/SmartEntryGate';
 import DashboardPage from './pages/DashboardPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import HomePage from './pages/HomePage';
+import InsightsPage from './pages/InsightsPage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import RegisterPage from './pages/RegisterPage';
+import RemindersPage from './pages/RemindersPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import SettingsPage from './pages/SettingsPage';
 import { useAdaptiveTheme, type UseAdaptiveThemeReturn } from './theme';
 
 const ThemeContext = createContext<UseAdaptiveThemeReturn | null>(null);
@@ -39,6 +42,36 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <DashboardPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/insights"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <InsightsPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/reminders"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <RemindersPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/settings"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <SettingsPage />
                 </AppLayout>
               </ProtectedRoute>
             }
