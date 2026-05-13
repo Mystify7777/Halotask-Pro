@@ -291,13 +291,18 @@ export function useDashboardTasks({
     setStatusInfo(null);
 
     if (!isOnline) {
-      persistTasks((current) => current.filter((task) => task._id !== taskId));
+      try {
+        await enqueueSyncAction({
+          type: 'delete',
+          taskId,
+        });
+        await syncBridgeRef.current.refreshPendingQueueCount();
+      } catch {
+        setStatusError('Could not queue deletion — storage unavailable. Please try again.');
+        return;
+      }
 
-      await enqueueSyncAction({
-        type: 'delete',
-        taskId,
-      });
-      await syncBridgeRef.current.refreshPendingQueueCount();
+      persistTasks((current) => current.filter((task) => task._id !== taskId));
 
       syncBridgeRef.current.setSyncStatus('offline');
       setStatusInfo('Task deleted offline. Pending sync.');
@@ -330,16 +335,22 @@ export function useDashboardTasks({
     }
 
     if (!isOnline) {
+      try {
+        await Promise.all(
+          completedIds.map((taskId) =>
+            enqueueSyncAction({
+              type: 'delete',
+              taskId,
+            }),
+          ),
+        );
+        await syncBridgeRef.current.refreshPendingQueueCount();
+      } catch {
+        setStatusError('Could not queue deletion — storage unavailable. Please try again.');
+        return;
+      }
+
       persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
-      await Promise.all(
-        completedIds.map((taskId) =>
-          enqueueSyncAction({
-            type: 'delete',
-            taskId,
-          }),
-        ),
-      );
-      await syncBridgeRef.current.refreshPendingQueueCount();
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
       setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'} offline.`);
@@ -499,16 +510,22 @@ export function useDashboardTasks({
     }
 
     if (!isOnline) {
+      try {
+        await Promise.all(
+          selectedVisibleIds.map((taskId) =>
+            enqueueSyncAction({
+              type: 'delete',
+              taskId,
+            }),
+          ),
+        );
+        await syncBridgeRef.current.refreshPendingQueueCount();
+      } catch {
+        setStatusError('Could not queue deletion — storage unavailable. Please try again.');
+        return;
+      }
+
       persistTasks((current) => current.filter((task) => !selectedVisibleIds.includes(task._id)));
-      await Promise.all(
-        selectedVisibleIds.map((taskId) =>
-          enqueueSyncAction({
-            type: 'delete',
-            taskId,
-          }),
-        ),
-      );
-      await syncBridgeRef.current.refreshPendingQueueCount();
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
       setStatusInfo(`Deleted ${selectedVisibleIds.length} task${selectedVisibleIds.length === 1 ? '' : 's'} offline.`);

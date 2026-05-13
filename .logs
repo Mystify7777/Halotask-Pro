@@ -4,6 +4,106 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-13",
+      "category": "Feature",
+      "title": "Add adaptive theme controls to Settings page",
+      "description": "Replaced the Settings stub with a full appearance and account screen, including the adaptive toggle switch, manual theme override banner with reset action, theme cards with per-theme accent dots, and the password change link.",
+      "files": [
+        "halotasks-client/src/pages/SettingsPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-13",
+      "category": "Feature",
+      "title": "Add protected dashboard subpages",
+      "description": "Added protected routes for /dashboard/insights, /dashboard/reminders, and /dashboard/settings, each rendered inside the shared AppLayout so unauthenticated users are redirected consistently.",
+      "files": [
+        "halotasks-client/src/App.tsx",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/pages/RemindersPage.tsx",
+        "halotasks-client/src/pages/SettingsPage.tsx"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-13",
+      "category": "Feature",
+      "title": "Sync orb display with live Growth Tree data",
+      "description": "Added orb data context updates so the floating orb reflects live XP/stage/progress from treeState with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Feature",
+      "title": "Add Growth Tree sheet and orb handler",
+      "description": "Added GrowthTreeSheet mobile drawer and OrbContext with useRegisterOrbTap so pages can register orb handlers. Orb tap opens the sheet on mobile and preserves tooltip fallback on desktop to avoid locking scroll.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/dashboard/GrowthTreeSheet.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Bugfix",
+      "title": "Prevent offline deletions from disappearing when queue write fails",
+      "description": "Changed offline delete flows to enqueue first and only remove from UI state after successful queueing for single, completed-bulk, and selected-bulk deletes. Added a clear user-facing failure message when storage is unavailable.",
+      "files": [
+        "halotasks-client/src/hooks/useDashboardTasks.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Feature",
+      "title": "Added mobile task create sheet drawer",
+      "description": "Introduced TaskCreateSheet with slide-up mobile drawer UX, Escape/backdrop close behavior, body scroll locking, focus management, and router-state opening via FAB with optimistic close on submit.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Frontend",
+      "title": "Added desktop header nav and fixed responsive spacing",
+      "description": "Added desktop navigation links in AppLayout header using shared NAV_ITEMS and active state aria-current, and fixed desktop main padding when bottom nav is hidden.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/AppLayout.module.css",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-12",
+      "category": "Bugfix",
+      "title": "Fixed dashboard two-column grid child structure",
+      "description": "Wrapped dashboard toolbar and content panel in main-column so dashboard-page maps cleanly to sidebar + main content columns and prevents panel wrapping behind sidebar.",
+      "files": [
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-12",
       "category": "Docs",
       "title": "Cleaned and reorganized server upgrade plan",
@@ -94,5 +194,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-12T00:00:00Z"
+  "lastUpdated": "2026-05-13T10:59:00Z"
 }

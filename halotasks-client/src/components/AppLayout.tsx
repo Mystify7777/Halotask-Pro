@@ -1,8 +1,36 @@
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../App';
 import styles from './AppLayout.module.css';
+
+type OrbData = { xp: number; stage: string; xpToNext: number; progressPct: number };
+type OrbContextValue = {
+  register: (fn: () => void) => () => void;
+  setOrbData: (data: OrbData) => void;
+};
+const OrbContext = createContext<OrbContextValue>({
+  register: () => () => {},
+  setOrbData: () => {},
+});
+
+export function useRegisterOrbTap(fn: () => void): void {
+  const { register } = useContext(OrbContext);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  useEffect(() => {
+    return register(() => fnRef.current());
+  }, [register]);
+}
+
+export function useUpdateOrbData(data: OrbData): void {
+  const { setOrbData } = useContext(OrbContext);
+
+  useEffect(() => {
+    setOrbData(data);
+  }, [data.xp, data.stage, data.xpToNext, data.progressPct, setOrbData]);
+}
 
 const NAV_ITEMS = [
   { id: 'tasks', label: 'Tasks', emoji: '✅', path: '/dashboard' },
@@ -28,21 +56,9 @@ function TreeOrbSvg() {
   );
 }
 
-type AppLayoutProps = {
-  children: React.ReactNode;
-  xp?: number;
-  stage?: string;
-  xpToNext?: number;
-  progressPct?: number;
-};
+type AppLayoutProps = { children: React.ReactNode };
 
-export default function AppLayout({
-  children,
-  xp = 0,
-  stage = 'Seed',
-  xpToNext = 100,
-  progressPct = 0,
-}: AppLayoutProps) {
+export default function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
@@ -51,6 +67,18 @@ export default function AppLayout({
 
   const [orbTooltipVisible, setOrbTooltipVisible] = useState(false);
   const [tooltipTimer, setTooltipTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [orbData, setOrbData] = useState<OrbData>({ xp: 0, stage: 'Seed', xpToNext: 100, progressPct: 0 });
+
+  const orbHandlerRef = useRef<(() => void) | null>(null);
+  const orbContextValue = useMemo<OrbContextValue>(() => ({
+    register: (fn) => {
+      orbHandlerRef.current = fn;
+      return () => {
+        orbHandlerRef.current = null;
+      };
+    },
+    setOrbData,
+  }), [setOrbData]);
 
   const activeNav: NavId = (() => {
     if (location.pathname.includes('insights')) return 'insights';
@@ -65,6 +93,13 @@ export default function AppLayout({
   };
 
   const handleOrbTap = () => {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+
+    if (orbHandlerRef.current && isMobile) {
+      orbHandlerRef.current();
+      return;
+    }
+
     if (tooltipTimer) clearTimeout(tooltipTimer);
     setOrbTooltipVisible(true);
     const id = setTimeout(() => setOrbTooltipVisible(false), 1500);
@@ -79,6 +114,7 @@ export default function AppLayout({
   })();
 
   return (
+    <OrbContext.Provider value={orbContextValue}>
     <div className={`app-shell ${styles.shell}`}>
       <header className={`top-nav ${styles.header}`}>
         <div className="brand">
@@ -123,20 +159,20 @@ export default function AppLayout({
           type="button"
           className="orb"
           onClick={handleOrbTap}
-          aria-label={`Growth tree - ${stage}, ${xp} XP. Tap for details.`}
+          aria-label={`Growth tree - ${orbData.stage}, ${orbData.xp} XP. Tap for details.`}
         >
           <TreeOrbSvg />
           <div className="orb-xp">
-            <span>{xp} XP · {stage}</span>
+            <span>{orbData.xp} XP · {orbData.stage}</span>
           </div>
         </button>
 
         <div className={`orb-tooltip ${orbTooltipVisible ? 'visible' : ''}`} aria-live="polite">
-          <p className="orb-ttl">🌱 {stage}</p>
-          <p className="orb-sub">{xpToNext} XP to next stage</p>
+          <p className="orb-ttl">🌱 {orbData.stage}</p>
+          <p className="orb-sub">{orbData.xpToNext} XP to next stage</p>
           <div className="orb-prog">
             <div className="progress-bar-wrap">
-              <div className="progress-bar" style={{ width: `${progressPct}%` }} />
+              <div className="progress-bar" style={{ width: `${orbData.progressPct}%` }} />
             </div>
           </div>
         </div>
@@ -168,5 +204,6 @@ export default function AppLayout({
         ))}
       </nav>
     </div>
+    </OrbContext.Provider>
   );
 }
