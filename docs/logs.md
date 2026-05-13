@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-13] - Feature - Sync orb display with live Growth Tree data: Added orb data context updates so the floating orb now reflects real XP/stage/progress from `treeState` with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.
+
 [2026-05-12] - Feature - Add Growth Tree sheet and orb handler: Added `GrowthTreeSheet` mobile drawer and `OrbContext` with `useRegisterOrbTap` so pages can register orb handlers; orb tap now opens the sheet on mobile and preserves tooltip fallback on desktop to avoid locking scroll.
 
 [2026-05-12] - Bugfix - Prevent offline deletions from disappearing when queue write fails: Changed offline delete flows to enqueue first and only remove from UI state after successful queueing for single, completed-bulk, and selected-bulk deletes. Added a clear user-facing failure message when storage is unavailable.

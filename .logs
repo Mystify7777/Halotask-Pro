@@ -4,6 +4,18 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-13",
+      "category": "Feature",
+      "title": "Sync orb display with live Growth Tree data",
+      "description": "Added orb data context updates so the floating orb reflects live XP/stage/progress from treeState with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-12",
       "category": "Feature",
       "title": "Add Growth Tree sheet and orb handler",
@@ -156,5 +168,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-12T06:05:00Z"
+  "lastUpdated": "2026-05-13T10:59:00Z"
 }

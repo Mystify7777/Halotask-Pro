@@ -11,9 +11,10 @@ import SmartSections from '../components/dashboard/SmartSections';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
-import { useRegisterOrbTap } from '../components/AppLayout';
+import { useRegisterOrbTap, useUpdateOrbData } from '../components/AppLayout';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
+import { getStageDescription, getStageProgressForXp } from '../growth/treeLogic';
 import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
 import { useDashboardReminders } from '../hooks/useDashboardReminders';
 import { useDashboardSync } from '../hooks/useDashboardSync';
@@ -107,6 +108,19 @@ export default function DashboardPage() {
 
   const { isOnline } = useNetworkStatus();
   const { treeState, processGrowthForCompletion } = useDashboardGrowth();
+
+  const orbTreeData = treeState
+    ? (() => {
+        const progress = getStageProgressForXp(treeState.xp);
+        return {
+          xp: treeState.xp,
+          stage: getStageDescription(treeState.stage),
+          xpToNext: progress.xpToNextStage,
+          progressPct: progress.progressPercent,
+        };
+      })()
+    : { xp: 0, stage: 'Seed', xpToNext: 100, progressPct: 0 };
+  useUpdateOrbData(orbTreeData);
 
   const tasksHook = useDashboardTasks({
     tasks,
