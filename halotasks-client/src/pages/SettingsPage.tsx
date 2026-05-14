@@ -15,16 +15,26 @@ export default function SettingsPage() {
       <section className="settings-section panel">
         <h2>Appearance</h2>
 
-        <div className="setting-row">
+        <div className="setting-row setting-row--top">
           <div className="setting-info">
-            <span className="setting-label">Adaptive theme</span>
-            <span className="setting-desc">Changes theme automatically based on time of day</span>
+            <label
+              htmlFor="adaptive-theme-toggle"
+              className="setting-label"
+              style={{ cursor: 'pointer' }}
+            >
+              Adaptive theme
+            </label>
+            <span id="adaptive-theme-desc" className="setting-desc">
+              Changes theme automatically based on time of day
+            </span>
           </div>
-          <label className="toggle-switch" aria-label="Toggle adaptive theme">
+          <label className="toggle-switch">
             <input
+              id="adaptive-theme-toggle"
               type="checkbox"
               checked={isAdaptive}
               onChange={(e) => setAdaptive(e.target.checked)}
+              aria-describedby="adaptive-theme-desc"
             />
             <span className="toggle-track">
               <span className="toggle-thumb" />
@@ -63,13 +73,18 @@ export default function SettingsPage() {
                   }
                 }}
                 aria-pressed={isActive}
+                aria-label={
+                  isActive
+                    ? `${themeConfig.label} — current theme`
+                    : `Switch to ${themeConfig.label} theme`
+                }
               >
                 <span className="theme-card-dot" aria-hidden="true" />
                 <span className="theme-card-emoji" aria-hidden="true">
                   {themeConfig.emoji}
                 </span>
-                <span className="theme-card-label">{themeConfig.label}</span>
-                <span className="theme-card-time">{themeConfig.timeRange}</span>
+                <span className="theme-card-label" aria-hidden="true">{themeConfig.label}</span>
+                <span className="theme-card-time" aria-hidden="true">{themeConfig.timeRange}</span>
               </button>
             );
           })}
