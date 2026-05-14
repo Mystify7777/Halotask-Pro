@@ -664,7 +664,41 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .divider { height: 1px; background: var(--color-border-subtle); margin: var(--space-4) 0; }
-
+/* ─── Reminders page ──────────────────────────────── */
+.permission-card {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  padding: var(--space-4); border-radius: var(--radius-xl);
+  border: 1.5px solid var(--color-border);
+}
+.permission-card--granted {
+  background: var(--color-success-bg); border-color: var(--color-success-border);
+}
+.permission-card--denied {
+  background: var(--color-danger-bg); border-color: var(--color-danger-border);
+}
+.permission-card--default {
+  background: var(--color-warning-bg); border-color: var(--color-warning-border);
+  flex-wrap: wrap;
+}
+.permission-card-icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 2px; }
+.permission-card strong {
+  display: block; font-size: var(--text-sm);
+  font-weight: var(--weight-semibold); color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+.permission-card p {
+  font-size: var(--text-xs); color: var(--color-text-secondary); line-height: var(--leading-relaxed);
+}
+/* Quiet hours: two time inputs side by side */
+.quiet-hours-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+/* Dim alert toggles when master switch is off */
+.toggle-switch input:disabled + .toggle-track {
+  opacity: 0.4; cursor: not-allowed;
+}
+.toggle-switch:has(input:disabled) { cursor: not-allowed; }
 /* ─── Settings page ───────────────────────────────────────── */
 .settings-page { display: grid; gap: var(--space-4); }
 .settings-section { display: grid; gap: var(--space-3); }
