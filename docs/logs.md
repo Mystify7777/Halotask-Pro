@@ -25,6 +25,12 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-14] - Feature - Add insights overview page: Replaced the insights stub with a data-driven page that loads live or cached tasks, initializes growth state, shows today-at-a-glance metrics, renders task completion and priority breakdowns, and embeds the Growth Tree view.
+
+[2026-05-14] - Feature - Build out reminder notification settings UI: Replaced the reminders placeholder with a full settings surface for browser notification permission, a master reminders toggle, per-alert switches, buffer time selection, and quiet-hours scheduling, with disabled-state handling when reminders are turned off.
+
+[2026-05-14] - Accessibility - Improve adaptive theme accessibility and control contrast: Adjusted the adaptive theme control to use a proper label association, aria-describedby wiring, top-aligned toggle layout, stronger unchecked track contrast, flex-safe switch sizing, and dynamic theme-card aria labels.
+
 [2026-05-13] - Feature - Add adaptive theme controls to Settings page: Replaced the Settings stub with a full appearance and account screen, including the adaptive toggle switch, manual theme override banner with reset action, theme cards with per-theme accent dots, and the password change link.
 
 [2026-05-13] - Feature - Add protected dashboard subpages: Added protected routes for /dashboard/insights, /dashboard/reminders, and /dashboard/settings, each rendered inside the shared AppLayout so unauthenticated users are redirected consistently.

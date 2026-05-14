@@ -4,6 +4,42 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-14",
+      "category": "Feature",
+      "title": "Add insights overview page",
+      "description": "Replaced the insights stub with a data-driven page that loads live or cached tasks, initializes growth state, shows today-at-a-glance metrics, renders task completion and priority breakdowns, and embeds the Growth Tree view.",
+      "files": [
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-14",
+      "category": "Feature",
+      "title": "Build out reminder notification settings UI",
+      "description": "Replaced the reminders placeholder with a full settings surface for browser notification permission, a master reminders toggle, per-alert switches, buffer time selection, and quiet-hours scheduling, with disabled-state handling when reminders are turned off.",
+      "files": [
+        "halotasks-client/src/pages/RemindersPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-14",
+      "category": "Accessibility",
+      "title": "Improve adaptive theme accessibility and control contrast",
+      "description": "Adjusted the adaptive theme control to use a proper label association, aria-describedby wiring, top-aligned toggle layout, stronger unchecked track contrast, flex-safe switch sizing, and dynamic theme-card aria labels.",
+      "files": [
+        "halotasks-client/src/pages/SettingsPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-13",
       "category": "Feature",
       "title": "Add adaptive theme controls to Settings page",
@@ -194,5 +230,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-13T10:59:00Z"
+  "lastUpdated": "2026-05-14T00:00:00Z"
 }
