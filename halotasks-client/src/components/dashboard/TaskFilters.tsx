@@ -13,6 +13,7 @@ type TaskFiltersProps = {
   onPriorityFilterChange: (value: 'all' | Priority) => void;
   onSortByChange: (value: TaskSortOption) => void;
   onClearTagFilter: () => void;
+  onAddTask?: () => void;
 };
 
 const FILTER_MODES: { value: FilterMode; label: string }[] = [
@@ -32,6 +33,7 @@ export default function TaskFilters({
   onPriorityFilterChange,
   onSortByChange,
   onClearTagFilter,
+  onAddTask,
 }: TaskFiltersProps) {
   return (
     <div className="filters-block" role="search" aria-label="Filter and search tasks">
@@ -44,19 +46,32 @@ export default function TaskFilters({
         className="filter-search"
       />
 
-      {/* Status segment */}
-      <div className="filter-segment" role="group" aria-label="Status filter">
-        {FILTER_MODES.map(({ value, label }) => (
+      {/* Segment + CTA row */}
+      <div className="filter-segment-row">
+        <div className="filter-segment" role="group" aria-label="Status filter">
+          {FILTER_MODES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              className={filterMode === value ? 'segment-btn active' : 'segment-btn'}
+              onClick={() => onFilterModeChange(value)}
+              aria-pressed={filterMode === value}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {onAddTask && (
           <button
-            key={value}
             type="button"
-            className={filterMode === value ? 'segment-btn active' : 'segment-btn'}
-            onClick={() => onFilterModeChange(value)}
-            aria-pressed={filterMode === value}
+            className="btn-primary btn-sm"
+            onClick={onAddTask}
+            aria-label="Add new task"
           >
-            {label}
+            + New task
           </button>
-        ))}
+        )}
       </div>
 
       <div className="filter-row-selects">

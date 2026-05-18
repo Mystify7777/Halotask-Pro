@@ -57,9 +57,10 @@ const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: 
   email: user.email,
 });
 
-const generateResetCode = () => {
-  // Generate 6-digit numeric code
-  return String(Math.floor(100000 + Math.random() * 900000));
+const generateResetCode = (): string => {
+  // crypto.randomInt is cryptographically secure — Math.random() is not.
+  // Range [100000, 1000000) produces a guaranteed 6-digit code.
+  return String(crypto.randomInt(100000, 1000000));
 };
 
 const hashResetCode = (code: string) => {
@@ -102,7 +103,7 @@ const buildResetEmailHtml = (resetCode: string) => `
   </div>
 `;
 
-const sendResetPasswordEmail = async (toEmail: string, resetCode: string) => {
+const sendResetPasswordEmail = async (toEmail: string, resetCode: string): Promise<void> => {
   const emailText = buildResetEmailText(resetCode);
   const emailHtml = buildResetEmailHtml(resetCode);
   const fromAddress = process.env.EMAIL_FROM || 'noreply@halotaskpro.com';
@@ -119,16 +120,12 @@ const sendResetPasswordEmail = async (toEmail: string, resetCode: string) => {
       });
 
       if (info.messageId) {
-        console.info(
-          `[Auth] Email delivered via SMTP for ${maskEmail(toEmail)}. Message ID: ${info.messageId}`,
-        );
-        console.info(`[Auth] Provider: SMTP | Status: SUCCESS | Email: ${maskEmail(toEmail)}`);
+        console.info(`[Auth] Email delivered via SMTP. Recipient: ${maskEmail(toEmail)}`);
         return;
       }
     } catch (smtpError) {
-      const errorMessage = smtpError instanceof Error ? smtpError.message : 'Unknown SMTP error';
-      console.error(`[Auth] SMTP delivery failed for ${maskEmail(toEmail)}. Error: ${errorMessage}`);
-      console.info(`[Auth] Provider: SMTP | Status: FAILED | Error: ${errorMessage}`);
+      const msg = smtpError instanceof Error ? smtpError.message : 'Unknown SMTP error';
+      console.error(`[Auth] SMTP delivery failed for ${maskEmail(toEmail)}: ${msg}`);
     }
   }
 
@@ -144,27 +141,30 @@ const sendResetPasswordEmail = async (toEmail: string, resetCode: string) => {
       });
 
       if (result.error) {
-        console.error(
-          `[Auth] Resend delivery failed for ${maskEmail(toEmail)}. Error: ${result.error.message}`,
-        );
-        console.info(`[Auth] Provider: Resend | Status: FAILED | Error: ${result.error.message}`);
+        console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}: ${result.error.message}`);
       } else if (result.data?.id) {
-        console.info(`[Auth] Email delivered via Resend for ${maskEmail(toEmail)}. ID: ${result.data.id}`);
-        console.info(`[Auth] Provider: Resend | Status: SUCCESS | Email: ${maskEmail(toEmail)}`);
+        console.info(`[Auth] Email delivered via Resend. Recipient: ${maskEmail(toEmail)}`);
         return;
       }
     } catch (resendError) {
-      const errorMessage = resendError instanceof Error ? resendError.message : 'Unknown Resend error';
-      console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}. Error: ${errorMessage}`);
-      console.info(`[Auth] Provider: Resend | Status: FAILED | Error: ${errorMessage}`);
+      const msg = resendError instanceof Error ? resendError.message : 'Unknown Resend error';
+      console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}: ${msg}`);
     }
   }
 
-  // Final fallback: log code to server logs (no email transport available or both failed)
   if (!smtpTransporter && !resendClient) {
-    console.warn('[Auth] No email transport configured (SMTP or Resend). Using demo mode.');
+    // Genuine demo/dev mode — no transports configured at all.
+    // Logging the code here is intentional so developers can test the flow locally.
+    console.warn('[Auth] No email transport configured. Running in demo mode.');
+    console.info(`[Auth] DEMO MODE — reset code for ${maskEmail(toEmail)}: ${resetCode}`);
+  } else {
+    // Transports were configured but both failed — do NOT log the code.
+    // Logging a live reset code to server logs is a security risk.
+    console.error(
+      `[Auth] All email transports failed for ${maskEmail(toEmail)}. ` +
+      'User will receive the neutral response. Code NOT logged for security.',
+    );
   }
-  console.info(`[Auth] Provider: DEMO_MODE | Status: LOGGED | Code for ${maskEmail(toEmail)}: ${resetCode}`);
 };
 
 const canAttemptForgotPassword = (key: string) => {

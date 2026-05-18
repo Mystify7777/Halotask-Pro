@@ -1,198 +1,163 @@
+/* ─── Container ─────────────────────────────────────────────────────────────
+   GrowthTree is always rendered inside a .panel — no card styling of its own.
+   The container is purely a layout wrapper that uses the parent's surface/bg. */
 .container {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
+  display: grid;
+  gap: var(--space-3);
 }
 
-.container:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
-}
-
+/* ─── Header ─────────────────────────────────────────────────────────────── */
 .header {
-  margin-bottom: 16px;
-  border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 12px;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
   margin: 0;
-  letter-spacing: 0.3px;
 }
 
+/* ─── Stage display ──────────────────────────────────────────────────────── */
 .display {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  gap: var(--space-3);
 }
 
 .stageSection {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 16px 0;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
 }
 
 .emoji {
-  font-size: 48px;
+  font-size: 3rem; /* 48px — no token at this size */
   line-height: 1;
-  animation: gentle-bounce 2s ease-in-out infinite;
+  animation: gentleBounce 2s ease-in-out infinite;
 }
 
-@keyframes gentle-bounce {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
+@keyframes gentleBounce {
+  0%, 100% { transform: translateY(0);    }
+  50%       { transform: translateY(-4px); }
 }
 
 .stageName {
-  font-size: 14px;
-  font-weight: 600;
-  color: #374151;
-  letter-spacing: 0.2px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
 }
 
-.healthRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-}
-
-.healthLabel {
-  font-size: 12px;
-  font-weight: 500;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  min-width: 50px;
-}
-
-.healthDot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  box-shadow: 0 0 8px currentColor;
-}
-
-.healthText {
-  font-size: 13px;
-  font-weight: 500;
-  color: #4b5563;
-}
-
+/* ─── Stat rows (health / streak / leaves) ───────────────────────────────── */
+.healthRow,
 .statRow {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 0;
-  font-size: 13px;
+  align-items: flex-start; /* flex-start so multi-line values (PATH) align to top */
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
 }
 
+/* Column 1: uppercase label */
+.healthLabel,
 .statLabel {
-  font-weight: 500;
-  color: #6b7280;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  min-width: 50px;
+  letter-spacing: 0.05em;
+  min-width: 72px;  /* aligns all value columns */
+  flex-shrink: 0;
 }
 
+/* Column 2: health dot (inline in JSX) */
+.healthDot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  /* colour is set inline — varies by health state */
+}
+
+/* Column 2/3: values */
+.healthText,
 .statValue {
-  font-weight: 600;
-  color: #1f2937;
-  font-size: 14px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
+/* Trailing hint (e.g. "Active Today", "1d since last") */
 .statHint {
-  font-size: 11px;
-  color: #9ca3af;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
   margin-left: auto;
 }
 
+/* ─── XP section ─────────────────────────────────────────────────────────── */
 .xpSection {
-  padding-top: 8px;
-  border-top: 1px solid #e5e7eb;
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
 }
 
 .xpHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
 }
 
 .xpLabel {
-  font-size: 12px;
-  font-weight: 500;
-  color: #6b7280;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.05em;
 }
 
 .xpValue {
-  font-size: 14px;
-  font-weight: 600;
-  color: #059669;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-success);
 }
 
 .xpBar {
   height: 6px;
-  background-color: #e5e7eb;
-  border-radius: 3px;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
 .xpFill {
   height: 100%;
-  background: linear-gradient(90deg, #059669 0%, #10b981 100%);
-  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  border-radius: 3px;
+  background: var(--color-success);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-slow) var(--ease-spring);
+  min-width: 3px; /* always show a sliver at 0% */
 }
 
 .xpHint {
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: #6b7280;
-  letter-spacing: 0.2px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
 }
 
+/* ─── Footer message ─────────────────────────────────────────────────────── */
 .footer {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid #e5e7eb;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
 }
 
 .message {
-  font-size: 12px;
-  color: #6b7280;
-  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
   font-style: italic;
-  line-height: 1.5;
-}
-
-/* Responsive */
-@media (max-width: 640px) {
-  .container {
-    padding: 16px;
-  }
-
-  .emoji {
-    font-size: 40px;
-  }
-
-  .stageName {
-    font-size: 13px;
-  }
+  line-height: var(--leading-relaxed);
+  margin: 0;
 }
