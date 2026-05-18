@@ -18,7 +18,13 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!jwtSecret) {
-    return res.status(500).json({ message: 'JWT_SECRET is not configured' });
+    // JWT_SECRET missing is a server misconfiguration — log it as a critical
+    // error but never expose config details in the client-facing response.
+    console.error(
+      '[Auth] CRITICAL: JWT_SECRET environment variable is not set. ' +
+      'All authenticated requests will fail until this is resolved.',
+    );
+    return res.status(500).json({ message: 'Internal server error' });
   }
 
   try {

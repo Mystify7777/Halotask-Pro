@@ -5,6 +5,18 @@
   "entries": [
     {
       "date": "2026-05-18",
+      "category": "Security",
+      "title": "Harden password reset code generation and error handling",
+      "description": "Replaced Math.random() with crypto.randomInt(100000, 1000000) for cryptographically secure 6-digit reset codes. Restructured sendResetPasswordEmail to distinguish between configured-but-failed transports (error logged, code NOT logged) versus unconfigured demo mode (code logged for testing). Added explicit Promise<void> return type to sendResetPasswordEmail. Updated requireAuth middleware to return generic 'Internal server error' to clients while logging full JWT_SECRET configuration details to console.error for server visibility.",
+      "files": [
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/src/middleware/auth.middleware.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-18",
       "category": "Feature",
       "title": "Add InsightModal with task completion UI and card interactivity",
       "description": "Created new InsightModal reusable component for viewing task subsets per card type. Mobile renders as bottom-sheet with slideUp animation, desktop as centered 480px card. Each modal displays sorted task lists (overdue by date, due-today by priority, etc.) with circular toggle buttons for completion and strikethrough completed titles. Integrated into SmartSections with openModal state tracking which card type is open. Made InsightCard components into <button> elements with hover/focus interactive states. Modal stays open after toggling to enable batch completion workflow.",
