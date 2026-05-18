@@ -104,3 +104,14 @@ export const getEstimatedWorkload = (tasks: Task[]) => {
 
   return Array.from(uniqueById.values()).reduce((total, task) => total + Math.max(0, task.estimatedMinutes), 0);
 };
+
+/**
+ * Total estimated minutes of tasks marked completed today.
+ * Uses updatedAt as a proxy for completedAt until the server adds that field.
+ */
+export const getWorkDoneToday = (tasks: Task[]): number => {
+  return getCompletedToday(tasks).reduce(
+    (total, task) => total + Math.max(0, task.estimatedMinutes),
+    0,
+  );
+};

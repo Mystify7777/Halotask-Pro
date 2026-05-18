@@ -5,16 +5,25 @@ import {
   getEstimatedWorkload,
   getOverdueTasks,
   getUpcomingTasks,
+  getWorkDoneToday,
 } from '../../utils/taskInsights';
 
 type SmartSectionsProps = {
   tasks: Task[];
 };
 
+type InsightCardVariant =
+  | 'overdue'
+  | 'due-today'
+  | 'upcoming'
+  | 'completed'
+  | 'workload'
+  | 'work-done';
+
 type InsightCardProps = {
   label: string;
   value: string | number;
-  variant: 'overdue' | 'due-today' | 'upcoming' | 'completed' | 'workload';
+  variant: InsightCardVariant;
   icon: string;
 };
 
@@ -30,25 +39,28 @@ function InsightCard({ label, value, variant, icon }: InsightCardProps) {
   );
 }
 
-export default function SmartSections({ tasks }: SmartSectionsProps) {
-  const overdueCount = getOverdueTasks(tasks).length;
-  const dueTodayCount = getDueTodayTasks(tasks).length;
-  const upcomingCount = getUpcomingTasks(tasks).length;
-  const completedTodayCount = getCompletedToday(tasks).length;
-  const workloadMinutes = getEstimatedWorkload(tasks);
+/** Format minutes as "Xh Ym" or "X min" */
+const formatMinutes = (mins: number): string =>
+  mins >= 60
+    ? `${Math.floor(mins / 60)}h ${mins % 60}m`
+    : `${mins} min`;
 
-  const workloadLabel =
-    workloadMinutes >= 60
-      ? `${Math.floor(workloadMinutes / 60)}h ${workloadMinutes % 60}m`
-      : `${workloadMinutes} min`;
+export default function SmartSections({ tasks }: SmartSectionsProps) {
+  const overdueCount        = getOverdueTasks(tasks).length;
+  const dueTodayCount       = getDueTodayTasks(tasks).length;
+  const upcomingCount       = getUpcomingTasks(tasks).length;
+  const completedTodayCount = getCompletedToday(tasks).length;
+  const workloadMinutes     = getEstimatedWorkload(tasks);
+  const workDoneMinutes     = getWorkDoneToday(tasks);
 
   return (
     <section className="smart-sections" aria-label="Productivity snapshot">
-      <InsightCard icon="⚠️" label="Overdue" value={overdueCount} variant="overdue" />
-      <InsightCard icon="📅" label="Due Today" value={dueTodayCount} variant="due-today" />
-      <InsightCard icon="🔜" label="Upcoming" value={upcomingCount} variant="upcoming" />
-      <InsightCard icon="✅" label="Completed Today" value={completedTodayCount} variant="completed" />
-      <InsightCard icon="⏱️" label="Workload Today" value={workloadLabel} variant="workload" />
+      <InsightCard icon="⚠️" label="Overdue"          value={overdueCount}               variant="overdue"   />
+      <InsightCard icon="📅" label="Due Today"         value={dueTodayCount}              variant="due-today" />
+      <InsightCard icon="🔜" label="Upcoming"          value={upcomingCount}              variant="upcoming"  />
+      <InsightCard icon="✅" label="Completed Today"   value={completedTodayCount}        variant="completed" />
+      <InsightCard icon="⏱️" label="Workload Today"    value={formatMinutes(workloadMinutes)} variant="workload"  />
+      <InsightCard icon="💪" label="Work Done Today"   value={formatMinutes(workDoneMinutes)} variant="work-done" />
     </section>
   );
 }

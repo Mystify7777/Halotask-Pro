@@ -4,6 +4,20 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-18",
+      "category": "Feature",
+      "title": "Enhance SmartSections with work-done metrics and refactor GrowthTree styles",
+      "description": "Added sixth productivity card (Work Done Today) to SmartSections component with estimated minutes formatting helper. Refactored GrowthTree.module.css to use CSS variables instead of hardcoded colors, improving theme consistency and maintainability. Updated taskInsights utility with getWorkDoneToday() function to track completed task workload.",
+      "files": [
+        "halotasks-client/src/components/dashboard/SmartSections.tsx",
+        "halotasks-client/src/utils/taskInsights.ts",
+        "halotasks-client/src/components/dashboard/GrowthTree.module.css",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-14",
       "category": "Feature",
       "title": "Add insights overview page",

@@ -465,6 +465,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .insight-card.upcoming { border-color: var(--color-info-border);    background: var(--color-info-bg); }
 .insight-card.completed{ border-color: var(--color-success-border); background: var(--color-success-bg); }
 .insight-card.workload { border-color: var(--color-border);         background: var(--color-surface-raised); }
+.insight-card.work-done { border-color: var(--color-success-border); background: var(--color-success-bg); opacity: 0.85; }
 
 /* ─── Progress bar ────────────────────────────────────────── */
 .progress-bar-wrap {
