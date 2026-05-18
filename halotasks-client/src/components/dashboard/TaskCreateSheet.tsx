@@ -50,8 +50,12 @@ export default function TaskCreateSheet({
     }
   }, [isOpen]);
 
-  // Prevent body scroll while sheet is open
+  // Lock body scroll while open — only on mobile where the sheet is visible.
+  // On desktop the sheet is display:none via CSS, so locking would freeze
+  // the page scroll with no visible sheet to close.
   useEffect(() => {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    if (!isMobile) return;
     document.body.style.overflow = isOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);

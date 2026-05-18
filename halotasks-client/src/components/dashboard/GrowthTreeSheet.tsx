@@ -26,8 +26,12 @@ export default function GrowthTreeSheet({ isOpen, onClose, treeState }: GrowthTr
     if (isOpen) sheetRef.current?.focus();
   }, [isOpen]);
 
-  // Lock body scroll while open
+  // Lock body scroll while open — only on mobile where the sheet is visible.
+  // On desktop it is display:none via CSS; locking without showing anything
+  // would freeze page scroll.
   useEffect(() => {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    if (!isMobile) return;
     document.body.style.overflow = isOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);

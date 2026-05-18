@@ -298,6 +298,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .filter-search { width: 100%; }
 .filter-row-selects { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 
+/* Segment + CTA row */
+.filter-segment-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+
 /* Status segment control */
 .filter-segment {
   display: flex; border: 1.5px solid var(--color-border);

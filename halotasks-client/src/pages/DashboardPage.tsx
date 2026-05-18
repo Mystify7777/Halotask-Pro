@@ -216,6 +216,7 @@ export default function DashboardPage() {
             onPriorityFilterChange={tasksHook.setPriorityFilter}
             onSortByChange={tasksHook.setSortBy}
             onClearTagFilter={() => tasksHook.setTagFilter(null)}
+            onAddTask={() => setIsSheetOpen(true)}
           />
         }
         syncArea={

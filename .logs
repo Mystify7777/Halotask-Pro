@@ -5,6 +5,21 @@
   "entries": [
     {
       "date": "2026-05-18",
+      "category": "Bugfix",
+      "title": "Fix scroll lock on desktop sheets and add mobile + New task button",
+      "description": "Added window.matchMedia check to TaskCreateSheet and GrowthTreeSheet so scroll lock only applies on mobile (max-width: 767px) where sheets are visible. On desktop, sheets are display:none via CSS, so the previous always-on lock would freeze page scroll with no visible sheet to close. Added optional onAddTask prop to TaskFilters with mobile-visible '+ New task' button that opens the create sheet. Button positioned right of status segment pills using new .filter-segment-row flex layout.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/components/dashboard/GrowthTreeSheet.tsx",
+        "halotasks-client/src/components/dashboard/TaskFilters.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-18",
       "category": "Feature",
       "title": "Enhance SmartSections with work-done metrics and refactor GrowthTree styles",
       "description": "Added sixth productivity card (Work Done Today) to SmartSections component with estimated minutes formatting helper. Refactored GrowthTree.module.css to use CSS variables instead of hardcoded colors, improving theme consistency and maintainability. Updated taskInsights utility with getWorkDoneToday() function to track completed task workload.",
