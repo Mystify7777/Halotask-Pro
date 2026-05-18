@@ -302,7 +302,7 @@ export default function DashboardPage() {
 
       <div className="panel">
         <DashboardContent
-          smartSections={<SmartSections tasks={tasksHook.tasks} />}
+          smartSections={<SmartSections tasks={tasksHook.tasks} onToggleTask={tasksHook.handleToggleTask} />}
           taskList={
             <TaskList
               tasks={tasksHook.sortedTasks}

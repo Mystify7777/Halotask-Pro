@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-18] - Feature - Add InsightModal with task completion UI and card interactivity: Created new InsightModal reusable component for viewing task subsets per card type. Mobile renders as bottom-sheet with slideUp animation, desktop as centered 480px card. Each modal displays sorted task lists (overdue by date, due-today by priority, etc.) with circular toggle buttons for completion and strikethrough completed titles. Integrated into SmartSections with openModal state tracking which card type is open. Made InsightCard components into <button> elements with hover/focus interactive states. Modal stays open after toggling to enable batch completion workflow.
+
 [2026-05-18] - Bugfix - Fix scroll lock on desktop sheets and add mobile + New task button: Added window.matchMedia check to TaskCreateSheet and GrowthTreeSheet so scroll lock only applies on mobile (max-width: 767px) where sheets are visible. On desktop, sheets are display:none via CSS, so the previous always-on lock would freeze page scroll with no visible sheet to close. Added optional onAddTask prop to TaskFilters with mobile-visible '+ New task' button that opens the create sheet. Button positioned right of status segment pills using new .filter-segment-row flex layout.
 
 [2026-05-18] - Feature - Enhance SmartSections with work-done metrics and refactor GrowthTree styles: Added sixth productivity card (Work Done Today) to SmartSections component with estimated minutes formatting helper. Refactored GrowthTree.module.css to use CSS variables instead of hardcoded colors, improving theme consistency and maintainability. Updated taskInsights utility with getWorkDoneToday() function to track completed task workload.

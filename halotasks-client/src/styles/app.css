@@ -669,6 +669,87 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .divider { height: 1px; background: var(--color-border-subtle); margin: var(--space-4) 0; }
 
+/* ─── Insight modal ──────────────────────────────── */
+/* Mobile: bottom sheet */
+.insight-modal {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  z-index: var(--z-modal);
+  background: var(--color-surface);
+  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+  border-top: 1.5px solid var(--color-border);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-4);
+  max-height: 80dvh; overflow-y: auto;
+  display: grid; gap: var(--space-3);
+  animation: slideUp var(--duration-normal) var(--ease-out);
+  outline: none;
+}
+/* Desktop: centered card */
+@media (min-width: 768px) {
+  .insight-modal {
+    top: 50%; left: 50%; bottom: auto; right: auto;
+    transform: translate(-50%, -50%);
+    width: min(480px, 90vw);
+    max-height: 70vh;
+    border-radius: var(--radius-xl);
+    border: 1.5px solid var(--color-border);
+    animation: none;
+  }
+  /* Hide drag handle on desktop */
+  .insight-modal .sheet-handle { display: none; }
+}
+.insight-modal-body { display: grid; gap: var(--space-2); }
+.insight-modal-empty {
+  text-align: center; padding: var(--space-8) var(--space-4);
+  color: var(--color-text-secondary); font-size: var(--text-sm);
+}
+.insight-modal-list { list-style: none; display: grid; gap: var(--space-2); }
+.insight-modal-task {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3); border-radius: var(--radius-lg);
+  background: var(--color-surface-raised); border: 1px solid var(--color-border);
+  transition: opacity var(--duration-fast);
+}
+.insight-modal-task.completed { opacity: 0.55; }
+/* Complete toggle */
+.insight-modal-toggle {
+  width: 22px; height: 22px; border-radius: var(--radius-full);
+  border: 2px solid var(--color-border); background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0;
+  font-size: var(--text-xs); color: var(--color-text-on-primary);
+  transition: background var(--duration-fast), border-color var(--duration-fast);
+}
+.insight-modal-toggle.checked {
+  background: var(--color-primary); border-color: var(--color-primary);
+}
+.insight-modal-title {
+  flex: 1; font-size: var(--text-sm); min-width: 0;
+  color: var(--color-text-primary); word-break: break-word;
+}
+.insight-modal-title.completed {
+  text-decoration: line-through; color: var(--color-text-secondary);
+}
+.insight-modal-meta {
+  display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+}
+.insight-modal-priority-dot {
+  width: 8px; height: 8px; border-radius: var(--radius-full); flex-shrink: 0;
+}
+.insight-modal-time {
+  font-size: var(--text-xs); color: var(--color-text-tertiary);
+}
+/* Make insight cards interactive */
+.insight-card[type='button'] {
+  cursor: pointer; text-align: left; width: 100%;
+  transition: filter var(--duration-fast), transform var(--duration-fast);
+}
+.insight-card[type='button']:hover { filter: brightness(0.96); transform: translateY(-1px); }
+.insight-card[type='button']:active { transform: translateY(0); filter: brightness(0.92); }
+.insight-card[type='button']:focus-visible {
+  outline: 2px solid var(--color-primary); outline-offset: 2px;
+}
+
 /* ─── Insights page ──────────────────────────────── */
 .insights-stats-grid {
   display: grid;
