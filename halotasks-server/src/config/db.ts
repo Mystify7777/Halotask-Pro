@@ -42,9 +42,25 @@ export const connectDB = async () => {
       throw error;
     }
 
-    dns.setServers(fallbackServers);
-    await mongoose.connect(mongoUri);
+    // dns.setServers() is a permanent process-wide mutation — it changes the
+    // DNS resolver for ALL subsequent lookups in this process, not just this
+    // connection. Save the current servers first and always restore them in the
+    // finally block so the mutation is scoped to this one connection attempt.
+    const previousServers = dns.getServers();
+    console.warn(
+      '[DB] SRV DNS resolution failed. Retrying with fallback servers: ' +
+      fallbackServers.join(', '),
+    );
+
+    try {
+      dns.setServers(fallbackServers);
+      await mongoose.connect(mongoUri);
+    } finally {
+      // Restore original DNS servers whether the retry succeeded or failed.
+      // This prevents the fallback DNS from leaking into email, API calls, etc.
+      dns.setServers(previousServers);
+    }
   }
 
-  console.log('MongoDB connected');
+  console.log('[DB] MongoDB connected');
 };

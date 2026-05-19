@@ -4,6 +4,18 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-19",
+      "category": "Ops",
+      "title": "Harden MongoDB DNS fallback and add production-grade startup/shutdown",
+      "description": "Enhanced db.ts to save and restore DNS servers, preventing fallback DNS from leaking into email/API calls elsewhere in process. Added startup validation to server.ts that fail-fasts on missing JWT_SECRET and MONGO_URI. Registered global uncaughtException and unhandledRejection handlers before DB connect. Implemented graceful shutdown on SIGTERM/SIGINT: stops accepting new connections, waits for in-flight requests, closes MongoDB, with 10-second force-exit timeout. Enhanced logging throughout for visibility.",
+      "files": [
+        "halotasks-server/src/config/db.ts",
+        "halotasks-server/src/server.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-18",
       "category": "Security",
       "title": "Harden password reset code generation and error handling",
