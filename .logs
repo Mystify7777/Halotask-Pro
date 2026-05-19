@@ -5,6 +5,22 @@
   "entries": [
     {
       "date": "2026-05-19",
+      "category": "Backend",
+      "title": "Implement tree API endpoints with anti-cheat validation and client-side sync",
+      "description": "Added treeState nested schema to User model with XP, leaves, streak tracking, health/stage enums, and awardedTaskIds array. Created tree.controller.ts with getTree() and patchTree() endpoints featuring anti-cheat XP validation (append-only check), enum validation for health/stage, and clean $set builder with Math.max guards. Created tree.routes.ts with requireAuth middleware. Enhanced app.ts with resolveOrigin() function that fails-closed in production when CLIENT_ORIGIN not set, provides localhost fallbacks in dev, added express.json({ limit: '1mb' }) to prevent memory exhaustion, and upgraded error handler with isDev branching (surface errors in dev, generic messages in production). On client: created treeService.ts with getTree() and patchTree() API methods, upgraded treeStorage.ts to local-first with server sync: localStorage migration to IndexedDB, merge strategy (higher XP wins, union awardedTaskIds), fire-and-forget server persistence, and offline-first source of truth.",
+      "files": [
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/controllers/tree.controller.ts",
+        "halotasks-server/src/routes/tree.routes.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-client/src/services/treeService.ts",
+        "halotasks-client/src/growth/treeStorage.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-19",
       "category": "Ops",
       "title": "Harden MongoDB DNS fallback and add production-grade startup/shutdown",
       "description": "Enhanced db.ts to save and restore DNS servers, preventing fallback DNS from leaking into email/API calls elsewhere in process. Added startup validation to server.ts that fail-fasts on missing JWT_SECRET and MONGO_URI. Registered global uncaughtException and unhandledRejection handlers before DB connect. Implemented graceful shutdown on SIGTERM/SIGINT: stops accepting new connections, waits for in-flight requests, closes MongoDB, with 10-second force-exit timeout. Enhanced logging throughout for visibility.",
