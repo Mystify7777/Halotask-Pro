@@ -5,7 +5,7 @@
 
 > You can use this credential to visit in user mode. <br>
 > email : `aryan.k.dev.mystify@gmail.com` <br>
-> pass : `q1w2e3r4!`
+> pass : `q1w2e3r4`
 
 HaloTaskPro is a modern productivity application built for people who want more than a checklist.
 
