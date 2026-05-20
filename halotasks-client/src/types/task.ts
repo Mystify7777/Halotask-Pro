@@ -13,6 +13,7 @@ export type Task = {
   reminderSent: boolean;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string | null;
   pendingSync?: boolean;
 };
 

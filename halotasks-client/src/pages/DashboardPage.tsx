@@ -8,6 +8,7 @@ import DashboardToolbar from '../components/dashboard/DashboardToolbar';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
+import CompletedSection from '../components/dashboard/CompletedSection';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
@@ -328,6 +329,12 @@ export default function DashboardPage() {
               emptyStateMessage={taskEmptyState.message}
             />
           }
+        />
+
+        <CompletedSection
+          tasks={tasksHook.tasks.filter((task) => task.completed)}
+          onToggleTask={tasksHook.handleToggleTask}
+          onDeleteTask={tasksHook.handleDeleteTask}
         />
       </div>
 
