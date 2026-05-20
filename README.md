@@ -1,6 +1,12 @@
 # 🌟 HaloTaskPro
 
-⚠️⚠️ Due to some conflict between smtp and resend, the password reset flow and forget password isn't working for now as it requires an otp. I am trying to look for a workaround that doesn't requires me investing, I am broke..
+>⚠️⚠️ Due to some conflict between smtp and resend, the password reset flow and forget password isn't working for now as it requires an otp. I am trying to look for a workaround that doesn't requires me investing, I am broke..
+
+
+> You can use this credential to visit in user mode. <br>
+> email : `aryan.k.dev.mystify@gmail.com` <br>
+> pass : `q1w2e3r4!`
+
 HaloTaskPro is a modern productivity application built for people who want more than a checklist.
 
 It helps users **capture tasks, stay focused, work offline, recover from interruptions, and build consistency over time**. Instead of being another place to dump unfinished intentions, it's designed to actively support execution.
