@@ -10,6 +10,7 @@ import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 import { setCachedTasks } from '../offline/cache';
+import { updateTodaySnapshot } from '../offline/history';
 import type { TaskEditState } from '../components/dashboard/types';
 import type { SyncStatus } from './useDashboardSync';
 
@@ -95,6 +96,7 @@ export function useDashboardTasks({
     setTasks((current) => {
       const next = updater(current);
       void setCachedTasks(next);
+      void updateTodaySnapshot(next); // keep 7-day history in sync
       return next;
     });
   };
