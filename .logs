@@ -334,7 +334,7 @@
       "date": "2026-05-21",
       "category": "Feature",
       "title": "Add 7-day local history snapshots and Insights week chart",
-      "description": "Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks). Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current. Enhanced `InsightsPage` to load and render the 7-day history chart with per-day details.",
+      "description": "Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks). Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current. Enhanced `InsightsPage` to load and render the 7-day history chart with per-day details. Also added week-history CSS to halotasks-client/src/styles/app.css.",
       "files": [
         "halotasks-client/src/offline/history.ts",
         "halotasks-client/src/hooks/useDashboardTasks.ts",
