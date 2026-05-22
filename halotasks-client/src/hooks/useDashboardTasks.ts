@@ -18,6 +18,12 @@ type AddTagResult = {
   message: string | null;
 };
 
+/** Returns today's date as YYYY-MM-DD in local time (not UTC). */
+const getTodayDateString = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
   completed?: boolean;
   dueDate?: string | null;
@@ -53,10 +59,10 @@ export function useDashboardTasks({
 
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [dueDate, setDueDate] = useState('');
-  const [createTags, setCreateTags] = useState<string[]>([]);
+  const [dueDate, setDueDate] = useState(getTodayDateString);
+  const [createTags, setCreateTags] = useState<string[]>(['personal']);
   const [createTagInput, setCreateTagInput] = useState('');
-  const [estimatedMinutes, setEstimatedMinutes] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState('30');
 
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -209,10 +215,10 @@ export function useDashboardTasks({
         setStatusInfo('Task saved offline. Pending sync.');
         setTitle('');
         setPriority('medium');
-        setDueDate('');
-        setCreateTags([]);
+        setDueDate(getTodayDateString());
+        setCreateTags(['personal']);
         setCreateTagInput('');
-        setEstimatedMinutes('');
+        setEstimatedMinutes('30');
         return;
       }
 
@@ -221,10 +227,10 @@ export function useDashboardTasks({
       persistTasks((current) => [{ ...response.task, pendingSync: false }, ...current]);
       setTitle('');
       setPriority('medium');
-      setDueDate('');
-      setCreateTags([]);
+      setDueDate(getTodayDateString());
+      setCreateTags(['personal']);
       setCreateTagInput('');
-      setEstimatedMinutes('');
+      setEstimatedMinutes('30');
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
