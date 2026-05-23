@@ -25,6 +25,10 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-23] - Frontend - 2305: focus task title input on desktop; pass autoFocus/inputRef through forms: Added `autoFocus` and `inputRef` props to `TaskFormFields` and `TaskCreateForm`; passed `autoFocus` from `TaskCreateSheet`; added `titleInputRef` in `DashboardPage` and wired the desktop Add action to focus the sidebar title input.
+
+[2026-05-23] - Bugfix - 2305: fix input ref typing for titleInputRef: Corrected `RefObject` typing to allow `null` for `inputRef` props in `TaskFormFields` and `TaskCreateForm` to match `useRef(null)` signature and prevent TypeScript errors during build.
+
 [2026-05-20] - Feature - Add completed task history section and completedAt tracking: Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.
 
 [2026-05-21] - Feature - Add 7-day local history snapshots and Insights week chart: Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks). Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current. Enhanced `InsightsPage` to display the 7-day history chart with per-day details. Added corresponding `week-history` CSS to `halotasks-client/src/styles/app.css`.

@@ -4,7 +4,32 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
-      "date": "2026-05-20",
+      "date": "2026-05-23",
+      "category": "Frontend",
+      "title": "2305: focus task title input on desktop; pass autoFocus/inputRef through forms",
+      "description": "Add `autoFocus` and `inputRef` props to TaskFormFields and TaskCreateForm; pass `autoFocus` from TaskCreateSheet; add `titleInputRef` in DashboardPage and focus the sidebar title input on desktop Add action.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Bugfix",
+      "title": "2305: fix input ref typing for titleInputRef",
+      "description": "Correct `RefObject` typing to allow `null` for `inputRef` props in TaskFormFields and TaskCreateForm to match `useRef(null)` signature and prevent TypeScript errors during build.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
       "category": "Feature",
       "title": "Add completed task history section and completedAt tracking",
       "description": "Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.",
@@ -345,5 +370,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-21T00:00:00Z"
+  "lastUpdated": "2026-05-23T12:00:00Z"
 }
