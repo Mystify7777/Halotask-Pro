@@ -273,11 +273,14 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .toolbar-filters { display: grid; gap: var(--space-3); }
 .toolbar-meta-wrap {
   display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms ease;
+  max-height: 0;
+  transition: max-height 200ms ease;
   overflow: hidden;
 }
-.toolbar-meta-wrap--open { grid-template-rows: 1fr; }
+.toolbar-meta-wrap--open {
+  max-height: 400px;
+  overflow: visible;
+}
 .toolbar-meta-inner { min-height: 0; }
 .toolbar-meta {
   display: flex; align-items: center; justify-content: space-between;
