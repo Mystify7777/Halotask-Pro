@@ -133,6 +133,17 @@ export default function DashboardPage() {
     setStatusInfo,
   });
 
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleAddTask = () => {
+    const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+    if (isDesktop) {
+      titleInputRef.current?.focus();
+      return;
+    }
+    setIsSheetOpen(true);
+  };
+
   useEffect(() => {
     tasksRef.current = tasksHook.tasks;
   }, [tasksHook.tasks]);
@@ -195,6 +206,7 @@ export default function DashboardPage() {
               onTagInputChange={tasksHook.setCreateTagInput}
               onAddTag={tasksHook.addCreateTag}
               onRemoveTag={tasksHook.removeCreateTag}
+              inputRef={titleInputRef}
             />
           </>
         }
@@ -206,18 +218,18 @@ export default function DashboardPage() {
       <div className="main-column">
       <DashboardToolbar
         filters={
-          <TaskFilters
+            <TaskFilters
             search={tasksHook.search}
             filterMode={tasksHook.filterMode}
             priorityFilter={tasksHook.priorityFilter}
             sortBy={tasksHook.sortBy}
             tagFilter={tasksHook.tagFilter}
-            onSearchChange={tasksHook.setSearch}
-            onFilterModeChange={tasksHook.setFilterMode}
-            onPriorityFilterChange={tasksHook.setPriorityFilter}
-            onSortByChange={tasksHook.setSortBy}
-            onClearTagFilter={() => tasksHook.setTagFilter(null)}
-            onAddTask={() => setIsSheetOpen(true)}
+              onSearchChange={tasksHook.setSearch}
+              onFilterModeChange={tasksHook.setFilterMode}
+              onPriorityFilterChange={tasksHook.setPriorityFilter}
+              onSortByChange={tasksHook.setSortBy}
+              onClearTagFilter={() => tasksHook.setTagFilter(null)}
+              onAddTask={handleAddTask}
           />
         }
         syncArea={

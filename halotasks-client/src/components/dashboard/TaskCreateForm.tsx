@@ -1,4 +1,4 @@
-import { FormEvent } from 'react';
+import { FormEvent, RefObject } from 'react';
 import { Priority } from '../../types/task';
 import TaskFormFields from './TaskFormFields';
 
@@ -15,6 +15,8 @@ type TaskCreateFormProps = {
   tags: string[];
   tagInput: string;
   tagSuggestions: string[];
+  autoFocus?: boolean;
+  inputRef?: RefObject<HTMLInputElement>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTitleChange: (value: string) => void;
   onPriorityChange: (value: Priority) => void;
@@ -34,6 +36,8 @@ export default function TaskCreateForm({
   tags,
   tagInput,
   tagSuggestions,
+  autoFocus,
+  inputRef,
   onSubmit,
   onTitleChange,
   onPriorityChange,
@@ -53,6 +57,8 @@ export default function TaskCreateForm({
         tags={tags}
         tagInput={tagInput}
         tagSuggestions={tagSuggestions}
+        autoFocus={autoFocus}
+        inputRef={inputRef}
         onTitleChange={onTitleChange}
         onPriorityChange={onPriorityChange}
         onDueDateChange={onDueDateChange}

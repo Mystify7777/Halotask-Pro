@@ -96,7 +96,7 @@ export default function TaskCreateSheet({
         </div>
 
         <div className="sheet-body">
-          <TaskCreateForm {...formProps} />
+          <TaskCreateForm {...formProps} autoFocus inputRef={undefined} />
         </div>
       </div>
     </>
