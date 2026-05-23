@@ -372,6 +372,7 @@ export default function DashboardPage() {
         onTagInputChange={tasksHook.setCreateTagInput}
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
+        inputRef={titleInputRef}
       />
 
       {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}

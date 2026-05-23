@@ -1,4 +1,4 @@
-import { useEffect, useRef, type FormEvent } from 'react';
+import { useEffect, useRef, type FormEvent, type RefObject } from 'react';
 import { Priority } from '../../types/task';
 import TaskCreateForm from './TaskCreateForm';
 
@@ -24,6 +24,7 @@ type TaskCreateSheetProps = {
   onTagInputChange: (value: string) => void;
   onAddTag: (tag: string) => AddTagResult;
   onRemoveTag: (tag: string) => void;
+  inputRef?: RefObject<HTMLInputElement | null>;
 };
 
 export default function TaskCreateSheet({
@@ -96,7 +97,7 @@ export default function TaskCreateSheet({
         </div>
 
         <div className="sheet-body">
-          <TaskCreateForm {...formProps} autoFocus inputRef={undefined} />
+          <TaskCreateForm {...formProps} autoFocus inputRef={formProps.inputRef} />
         </div>
       </div>
     </>
