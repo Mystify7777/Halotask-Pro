@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { ReminderSettings as ReminderSettingsType, BufferMinutes } from '../../reminders/settings';
 import { getNotificationPermissionStatus, isNotificationSupported } from '../../reminders/permissions';
 
@@ -51,12 +52,27 @@ export default function ReminderSettings({
   onToggleOpen,
   onSettingsChange,
 }: ReminderSettingsProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        onToggleOpen();
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [isOpen, onToggleOpen]);
+
   const updateSettings = (partial: Partial<ReminderSettingsType>) => {
     onSettingsChange({ ...settings, ...partial });
   };
 
   return (
-    <div className="reminder-settings-wrap">
+    <div className="reminder-settings-wrap" ref={wrapRef}>
       <button type="button" className="ghost-btn reminder-settings-btn" onClick={onToggleOpen}>
         Reminder Settings
       </button>
