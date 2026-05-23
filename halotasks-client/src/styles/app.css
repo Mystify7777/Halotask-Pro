@@ -697,6 +697,19 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   .fab { display: none; }
   /* On desktop the FAB is anchored to the edge of the shell — no extra right padding needed */
   .main-grid { padding-right: var(--space-4); }
+
+  /* Assistance v3 desktop layout adjustments:
+     - Increase sidebar width to give TaskCreateForm more room
+     - Use desktop-specific main padding to avoid mobile padding leaking in
+     - Hide redundant + New task primary CTA in toolbar on desktop
+  */
+  .dashboard-page {
+    grid-template-columns: 300px 1fr; /* widened sidebar */
+  }
+  .main-grid {
+    padding: var(--space-5) var(--space-5) var(--space-6);
+  }
+  .filter-segment-actions .btn-primary { display: none; }
 }
 .sidebar-title {
   font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--color-text-tertiary);
