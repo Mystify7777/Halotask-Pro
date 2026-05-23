@@ -302,6 +302,7 @@ export default function DashboardPage() {
               onClearSelection={tasksHook.clearSelection}
               onMarkSelectedComplete={tasksHook.handleMarkSelectedComplete}
               onDeleteSelected={tasksHook.handleDeleteSelected}
+              onCopySelected={tasksHook.handleCopySelected}
             />
           ) : null
         }

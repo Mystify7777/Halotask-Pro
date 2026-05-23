@@ -581,6 +581,51 @@ export function useDashboardTasks({
     }
   };
 
+  const handleCopySelected = async () => {
+    setStatusError(null);
+    setStatusInfo(null);
+
+    if (selectedVisibleIds.length === 0) {
+      setStatusInfo('No tasks selected to copy.');
+      return;
+    }
+
+    const selectedTasks = sortedTasks.filter((task) => selectedVisibleIds.includes(task._id));
+
+    const lines = selectedTasks
+      .map((t) => {
+        const priorityLabel = t.priority;
+        const title = t.title;
+        const due = t.dueDate ? `due: ${new Date(t.dueDate).toLocaleDateString()}` : null;
+        const minutes = t.estimatedMinutes ? `~${t.estimatedMinutes}m` : null;
+        const tags = (t.tags ?? []).map((tag) => `#${tag}`).join(' ');
+
+        const parts: string[] = [];
+        parts.push(`• [${priorityLabel}] ${title}`);
+
+        const meta: string[] = [];
+        if (due) meta.push(due);
+        if (minutes) meta.push(minutes);
+
+        if (meta.length > 0) parts.push(`(${meta.join(', ')})`);
+        if (tags) parts.push(tags);
+
+        return parts.join(' ');
+      })
+      .join('\n');
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(lines);
+        setStatusInfo(`Copied ${selectedTasks.length} task${selectedTasks.length === 1 ? '' : 's'}`);
+      } else {
+        setStatusError('Clipboard API not available in this environment.');
+      }
+    } catch (err) {
+      setStatusError('Unable to copy to clipboard. Please allow clipboard permissions.');
+    }
+  };
+
   const handleStartEditing = (task: Task) => {
     setEditingTaskId(task._id);
     setEditState({
@@ -722,6 +767,7 @@ export function useDashboardTasks({
     handleDeleteTask,
     handleClearCompleted,
     handleMarkSelectedComplete,
+    handleCopySelected,
     handleDeleteSelected,
     handleStartEditing,
     handleCancelEditing,

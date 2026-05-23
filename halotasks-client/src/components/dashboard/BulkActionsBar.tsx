@@ -6,6 +6,7 @@ type BulkActionsBarProps = {
   onClearSelection: () => void;
   onMarkSelectedComplete: () => void;
   onDeleteSelected: () => void;
+  onCopySelected?: () => void;
 };
 
 export default function BulkActionsBar({
@@ -16,6 +17,7 @@ export default function BulkActionsBar({
   onClearSelection,
   onMarkSelectedComplete,
   onDeleteSelected,
+  onCopySelected,
 }: BulkActionsBarProps) {
   return (
     <div className="bulk-actions-bar" role="toolbar" aria-label="Bulk task actions">
@@ -31,6 +33,14 @@ export default function BulkActionsBar({
           disabled={loading || allVisibleSelected}
         >
           Select all
+        </button>
+        <button
+          type="button"
+          className="ghost-btn btn-sm"
+          onClick={onCopySelected}
+          disabled={loading || !onCopySelected}
+        >
+          Copy
         </button>
         <button
           type="button"
