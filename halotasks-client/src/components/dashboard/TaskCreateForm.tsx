@@ -16,7 +16,7 @@ type TaskCreateFormProps = {
   tagInput: string;
   tagSuggestions: string[];
   autoFocus?: boolean;
-  inputRef?: RefObject<HTMLInputElement>;
+  inputRef?: RefObject<HTMLInputElement | null>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTitleChange: (value: string) => void;
   onPriorityChange: (value: Priority) => void;

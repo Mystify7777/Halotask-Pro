@@ -16,7 +16,7 @@ type TaskFormFieldsProps = {
   tagInput: string;
   tagSuggestions: string[];
   autoFocus?: boolean;
-  inputRef?: RefObject<HTMLInputElement>;
+  inputRef?: RefObject<HTMLInputElement | null>;
   onTitleChange: (value: string) => void;
   onPriorityChange: (value: Priority) => void;
   onDueDateChange: (value: string) => void;
