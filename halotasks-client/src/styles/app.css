@@ -313,14 +313,36 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .segment-btn {
   background: transparent; color: var(--color-text-secondary);
   border: none; border-radius: 0;
-  padding: var(--space-2) var(--space-4); font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-3); font-size: var(--text-xs);
   font-weight: var(--weight-semibold); cursor: pointer; flex: 1;
+  min-width: 52px; white-space: nowrap;
   transition: background-color var(--duration-fast), color var(--duration-fast);
 }
 .segment-btn + .segment-btn { border-left: 1.5px solid var(--color-border); }
 .segment-btn.active {
   background: var(--color-primary); color: var(--color-text-on-primary);
 }
+
+/* ─── Filter toggle + collapsible advanced filters ─────────── */
+.filter-segment-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+.filter-toggle-btn { position: relative; white-space: nowrap; }
+.filter-toggle-btn--active { color: var(--color-primary); }
+
+.filter-active-dot {
+  display: inline-block; width: 6px; height: 6px;
+  background: var(--color-primary); border-radius: 50%;
+  margin-left: var(--space-1); vertical-align: middle;
+}
+
+.filter-advanced {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease;
+  overflow: hidden;
+}
+.filter-advanced--open { grid-template-rows: 1fr; }
+.filter-advanced-inner { min-height: 0; display: grid; gap: var(--space-2); }
 
 /* ─── Bulk actions ────────────────────────────────────────── */
 .bulk-actions-btns { display: flex; gap: var(--space-2); flex-wrap: wrap; }
@@ -1012,9 +1034,26 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   animation: slideUp var(--duration-normal) var(--ease-out);
   outline: none; /* tabIndex=-1 focus ring suppressed; sheet is labelled */
 }
-/* Hide the sheet entirely on desktop — sidebar form is used instead */
+/* On desktop: convert bottom sheet -> centered modal dialog */
 @media (min-width: 768px) {
-  .task-create-sheet, .sheet-backdrop { display: none; }
+  .sheet-backdrop { display: block; }
+  .task-create-sheet {
+    bottom: auto; left: 50%; top: 8vh;
+    transform: translateX(-50%);
+    width: min(520px, 90vw);
+    border-radius: var(--radius-2xl);
+    border: 1.5px solid var(--color-border);
+    max-height: 82dvh;
+    animation: sheetModalIn var(--duration-normal) var(--ease-out);
+  }
+  @keyframes sheetModalIn {
+    from { opacity: 0; transform: translateX(-50%) scale(0.96); }
+    to   { opacity: 1; transform: translateX(-50%) scale(1);    }
+  }
+}
+/* Hide + New task shortcut on mobile — FAB covers it */
+@media (max-width: 767px) {
+  .filter-segment-actions .btn-primary { display: none; }
 }
 .sheet-handle {
   width: 36px; height: 4px; border-radius: var(--radius-full);

@@ -43,6 +43,25 @@
       "status": "completed"
     },
     {
+      "date": "2026-05-23",
+      "category": "Feature",
+      "title": "2305/v6: add server-backed 7-day history sync and responsive task-sheet/filter updates",
+      "description": "Applied v6 updates across client and server: added collapsible advanced filter CSS and non-squishing segment tabs, switched desktop TaskCreateSheet from hidden to centered modal while hiding toolbar '+ New task' CTA on mobile, changed Dashboard add-task action to always open the sheet, preserved completed-today counts by snapshotting before clear-completed deletes, synced local history snapshots to server via new historyService, and added authenticated /api/history endpoints with DayHistory model, controller, routes, and app wiring.",
+      "files": [
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/offline/history.ts",
+        "halotasks-client/src/services/historyService.ts",
+        "halotasks-server/src/models/DayHistory.model.ts",
+        "halotasks-server/src/controllers/history.controller.ts",
+        "halotasks-server/src/routes/history.routes.ts",
+        "halotasks-server/src/app.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "category": "Feature",
       "title": "Add completed task history section and completedAt tracking",
       "description": "Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.",
@@ -383,5 +402,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-23T12:30:00Z"
+  "lastUpdated": "2026-05-23T13:10:00Z"
 }

@@ -8,6 +8,7 @@
 
 import { offlineDb } from './db';
 import { Task } from '../types/task';
+import { historyService } from '../services/historyService';
 
 const HISTORY_KEY = 'task_history';
 const MAX_DAYS    = 7;
@@ -71,6 +72,10 @@ export const updateTodaySnapshot = async (tasks: Task[]): Promise<void> => {
 
     const updated = [...pruned, entry].sort((a, b) => a.date.localeCompare(b.date));
     await offlineDb.set(HISTORY_KEY, updated);
+
+    // Persist to server so history survives clear-completed and device switches.
+    // Fire-and-forget — historyService swallows errors internally.
+    void historyService.upsertToday(entry);
   } catch (err) {
     console.warn('[history] Failed to update snapshot:', err);
   }

@@ -3,6 +3,7 @@ import express from 'express';
 import authRoutes from './routes/auth.routes';
 import taskRoutes from './routes/task.routes';
 import treeRoutes from './routes/tree.routes';
+import historyRoutes from './routes/history.routes';
 
 // ── CORS origin resolution ─────────────────────────────────────────────────────────────
 // Fails CLOSED in production when CLIENT_ORIGIN is not set — no env var means
@@ -45,6 +46,7 @@ app.get('/', (_req, res) => {
 app.use('/api/auth',  authRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/tree',  treeRoutes);
+app.use('/api/history', historyRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

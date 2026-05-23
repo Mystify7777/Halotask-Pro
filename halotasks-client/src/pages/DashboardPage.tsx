@@ -136,11 +136,6 @@ export default function DashboardPage() {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleAddTask = () => {
-    const isDesktop = window.matchMedia('(min-width: 768px)').matches;
-    if (isDesktop) {
-      titleInputRef.current?.focus();
-      return;
-    }
     setIsSheetOpen(true);
   };
 

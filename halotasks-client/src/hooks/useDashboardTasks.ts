@@ -342,6 +342,9 @@ export function useDashboardTasks({
       return;
     }
 
+    // Snapshot BEFORE deletion so "Completed Today" count survives clear
+    await updateTodaySnapshot(tasks);
+
     if (!isOnline) {
       try {
         await Promise.all(
