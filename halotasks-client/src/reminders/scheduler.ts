@@ -16,6 +16,25 @@ type ReminderSchedulerOptions = {
   intervalMs?: number;
 };
 
+const SESSION_KEY = 'halotask_notified';
+
+const loadFiredKeys = (): Set<string> => {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const saveFiredKeys = (keys: Set<string>): void => {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify([...keys]));
+  } catch {
+    // ignore storage failures
+  }
+};
+
 export const createReminderScheduler = ({
   getTasks,
   getSettings,
@@ -23,7 +42,7 @@ export const createReminderScheduler = ({
   intervalMs = 60_000,
 }: ReminderSchedulerOptions) => {
   let timer: number | null = null;
-  const notifiedInSession = new Set<string>();
+  const notifiedInSession = loadFiredKeys();
 
   const makeKey = (task: Task, type: ReminderType) => {
     const duePart = task.dueDate ?? 'no-due-date';
@@ -37,6 +56,7 @@ export const createReminderScheduler = ({
     }
 
     notifiedInSession.add(key);
+    saveFiredKeys(notifiedInSession);
     onReminder({ task, type });
   };
 

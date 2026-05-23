@@ -62,6 +62,21 @@
       "status": "completed"
     },
     {
+      "date": "2026-05-23",
+      "category": "Feature",
+      "title": "2305/v7: keep Add Task visible, collapse toolbar metadata, and persist reminder session state",
+      "description": "Applied v7 updates across client UI and reminders: restored the Add Task CTA on all viewports, removed the desktop sheet modal conversion so the task sheet stays a bottom sheet everywhere, added a collapsible toolbar-meta section driven by controlled filtersExpanded state, updated reminder checkbox layout and accent styling, and persisted fired reminder keys in sessionStorage for the current browser tab session.",
+      "files": [
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/components/dashboard/TaskFilters.tsx",
+        "halotasks-client/src/components/dashboard/DashboardToolbar.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/reminders/scheduler.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "category": "Feature",
       "title": "Add completed task history section and completedAt tracking",
       "description": "Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.",
@@ -402,5 +417,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-23T13:10:00Z"
+  "lastUpdated": "2026-05-23T13:40:00Z"
 }

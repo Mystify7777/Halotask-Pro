@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Priority } from '../../types/task';
 import { FilterMode } from '../../hooks/useTaskFilters';
 import { TASK_SORT_OPTIONS, TaskSortOption } from '../../hooks/useTaskSorting';
@@ -9,11 +8,13 @@ type TaskFiltersProps = {
   priorityFilter: 'all' | Priority;
   sortBy: TaskSortOption;
   tagFilter: string | null;
+  filtersExpanded: boolean;
   onSearchChange: (value: string) => void;
   onFilterModeChange: (value: FilterMode) => void;
   onPriorityFilterChange: (value: 'all' | Priority) => void;
   onSortByChange: (value: TaskSortOption) => void;
   onClearTagFilter: () => void;
+  onFiltersExpandedChange: (value: boolean) => void;
   onAddTask?: () => void;
 };
 
@@ -29,15 +30,15 @@ export default function TaskFilters({
   priorityFilter,
   sortBy,
   tagFilter,
+  filtersExpanded,
   onSearchChange,
   onFilterModeChange,
   onPriorityFilterChange,
   onSortByChange,
   onClearTagFilter,
+  onFiltersExpandedChange,
   onAddTask,
 }: TaskFiltersProps) {
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
-
   const hasActiveFilters =
     priorityFilter !== 'all' ||
     sortBy !== 'dueSoonest' ||
@@ -74,7 +75,7 @@ export default function TaskFilters({
           <button
             type="button"
             className={`ghost-btn btn-sm filter-toggle-btn${hasActiveFilters ? ' filter-toggle-btn--active' : ''}`}
-            onClick={() => setFiltersExpanded((prev) => !prev)}
+            onClick={() => onFiltersExpandedChange(!filtersExpanded)}
             aria-expanded={filtersExpanded}
             aria-controls="filter-advanced-panel"
           >

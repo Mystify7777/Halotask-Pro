@@ -92,6 +92,7 @@ export default function DashboardPage() {
 
   const location = useLocation();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [isGrowthSheetOpen, setIsGrowthSheetOpen] = useState(false);
 
   // Register orb-tap handler — AppLayout calls this when the orb is tapped.
@@ -219,14 +220,17 @@ export default function DashboardPage() {
             priorityFilter={tasksHook.priorityFilter}
             sortBy={tasksHook.sortBy}
             tagFilter={tasksHook.tagFilter}
+            filtersExpanded={filtersExpanded}
               onSearchChange={tasksHook.setSearch}
               onFilterModeChange={tasksHook.setFilterMode}
               onPriorityFilterChange={tasksHook.setPriorityFilter}
               onSortByChange={tasksHook.setSortBy}
               onClearTagFilter={() => tasksHook.setTagFilter(null)}
+              onFiltersExpandedChange={setFiltersExpanded}
               onAddTask={handleAddTask}
           />
         }
+        isFiltersExpanded={filtersExpanded}
         syncArea={
           <div className="sync-status-row">
             <p className={`sync-status ${sync.syncStatus}`}>
