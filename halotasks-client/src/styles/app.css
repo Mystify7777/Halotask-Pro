@@ -306,6 +306,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   display: flex; border: 1.5px solid var(--color-border);
   border-radius: var(--radius-lg); overflow: hidden; width: fit-content;
 }
+
+/* Allow the toolbar primary CTA to size naturally on mobile so the + New task button fits inline. 
+   Desktop still hides this button via the min-width:768px media block. */
+.filter-segment-actions .btn-primary { width: auto; border-radius: var(--radius-md); }
 .segment-btn {
   background: transparent; color: var(--color-text-secondary);
   border: none; border-radius: 0;
@@ -580,10 +584,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   width: var(--fab-size); height: var(--fab-size);
   border-radius: var(--radius-full); background: var(--color-fab-bg);
   color: var(--color-fab-text); border: none; box-shadow: var(--shadow-fab);
-  font-size: var(--text-2xl); z-index: var(--z-orb);
-  transition: background-color var(--duration-theme) var(--ease-in-out), transform var(--duration-fast) var(--ease-spring);
+  z-index: var(--z-orb);
+  display: grid; place-items: center; /* more reliable centering for SVGs on iOS */
+  transition: background-color var(--duration-theme) var(--ease-in-out), transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast);
 }
-.fab:active { transform: scale(0.9); }
+
+.fab:hover { filter: brightness(1.06); transform: scale(1.06); box-shadow: var(--shadow-fab), 0 0 0 6px color-mix(in srgb, var(--color-fab-bg) 22%, transparent); }
+.fab:active { filter: brightness(0.95); transform: scale(0.92); box-shadow: var(--shadow-fab); }
 
 /* ─── Growth tree orb ─────────────────────────────────────── */
 .orb-wrap {

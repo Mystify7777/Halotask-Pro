@@ -30,6 +30,19 @@
       "status": "completed"
     },
     {
+      "date": "2026-05-23",
+      "category": "Frontend",
+      "title": "2305: FAB SVG and interaction improvements; toolbar CTA sizing on mobile",
+      "description": "Replace FAB text with a crisp SVG crosshair-plus, center SVG reliably via grid layout, add hover ring glow and improved active press feedback; allow toolbar primary CTA to size naturally on mobile so the '+ New task' button fits inline.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/AppLayout.module.css",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
       "category": "Feature",
       "title": "Add completed task history section and completedAt tracking",
       "description": "Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.",
@@ -370,5 +383,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-23T12:00:00Z"
+  "lastUpdated": "2026-05-23T12:30:00Z"
 }

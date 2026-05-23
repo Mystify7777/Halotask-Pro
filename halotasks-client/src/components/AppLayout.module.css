@@ -100,8 +100,5 @@
 }
 
 /* FAB label */
-.fab {
-  font-size: 2rem;
-  font-weight: var(--weight-normal);
-  line-height: 1;
-}
+.fab svg { flex-shrink: 0; pointer-events: none; }
+
