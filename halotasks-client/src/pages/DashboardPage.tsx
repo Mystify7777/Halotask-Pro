@@ -19,6 +19,7 @@ import TaskList from '../components/dashboard/TaskList';
 import { getStageDescription, getStageProgressForXp } from '../growth/treeLogic';
 import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
 import { useDashboardReminders } from '../hooks/useDashboardReminders';
+import { useAiTaskCreation } from '../hooks/useAiTaskCreation';
 import { useDashboardSync } from '../hooks/useDashboardSync';
 import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
@@ -134,6 +135,13 @@ export default function DashboardPage() {
     processGrowthForCompletion,
     setStatusError,
     setStatusInfo,
+  });
+
+  const ai = useAiTaskCreation({
+    persistTasks: tasksHook.persistTasks,
+    isOnline,
+    setStatusInfo,
+    setStatusError,
   });
 
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -381,6 +389,18 @@ export default function DashboardPage() {
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
         inputRef={titleInputRef}
+        aiPhase={ai.aiPhase}
+        aiPrompt={ai.aiPrompt}
+        aiDrafts={ai.aiDrafts}
+        aiError={ai.aiError}
+        aiCreatedCount={ai.aiCreatedCount}
+        aiTotalDrafts={ai.aiTotalDrafts}
+        onAiOpen={ai.openAi}
+        onAiClose={ai.closeAi}
+        onAiPromptChange={ai.setAiPrompt}
+        onAiParse={ai.parsePrompt}
+        onAiRemoveDraft={ai.removeDraft}
+        onAiConfirm={ai.createAll}
       />
 
       {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}

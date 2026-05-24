@@ -6,6 +6,23 @@
     {
       "date": "2026-05-24",
       "category": "Feature",
+      "title": "2405: add AI task creation with Gemini parsing and draft preview flow",
+      "description": "Add a Gemini-powered AI task parser hook, AI-aware task form wiring, draft preview/confirmation UI, and sequential live task creation that persists tasks into the current list.",
+      "files": [
+        "halotasks-client/src/hooks/useAiTaskCreation.ts",
+        "halotasks-client/src/components/dashboard/AiTaskInput.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-24",
+      "category": "Feature",
       "title": "2405: add cold-start Task Tapper overlay for slow server wakes",
       "description": "Bump the API timeout to 60s, add a 3s cold-start timer in dashboard sync, and mount a full-screen Task Tapper overlay that auto-dismisses once the server responds.",
       "files": [
