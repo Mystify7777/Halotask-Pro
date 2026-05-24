@@ -12,7 +12,7 @@ export const getApiErrorMessage = (error: unknown, fallback = 'Something went wr
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000',
-  timeout: 10_000,
+  timeout: 60_000,
   headers: {
     'Content-Type': 'application/json',
   },

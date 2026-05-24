@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-24] - Feature - 2405: add cold-start Task Tapper overlay for slow server wakes: Bumped the API timeout to 60s, added a 3s cold-start timer in dashboard sync, and mounted a full-screen Task Tapper overlay that auto-dismisses once the server responds.
+
 [2026-05-23] - Bugfix - 2305: switch toolbar meta collapse to max-height with open overflow visibility: Replaced the toolbar meta wrapper's grid-template-rows collapse with a max-height transition and open-state overflow: visible so the reminder dropdown can escape the container while the meta block remains collapsible.
 
 [2026-05-23] - Frontend - 2305: focus task title input on desktop; pass autoFocus/inputRef through forms: Added `autoFocus` and `inputRef` props to `TaskFormFields` and `TaskCreateForm`; passed `autoFocus` from `TaskCreateSheet`; added `titleInputRef` in `DashboardPage` and wired the desktop Add action to focus the sidebar title input.

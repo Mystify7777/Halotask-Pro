@@ -4,6 +4,21 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-24",
+      "category": "Feature",
+      "title": "2405: add cold-start Task Tapper overlay for slow server wakes",
+      "description": "Bump the API timeout to 60s, add a 3s cold-start timer in dashboard sync, and mount a full-screen Task Tapper overlay that auto-dismisses once the server responds.",
+      "files": [
+        "halotasks-client/src/services/api.ts",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.tsx",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.module.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-23",
       "category": "Bugfix",
       "title": "2305: switch toolbar meta collapse to max-height with open overflow visibility",

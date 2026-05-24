@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
 import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
 import { processSyncQueue } from '../offline/queueProcessor';
@@ -29,6 +29,8 @@ export function useDashboardSync({
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
   const [retryingSync, setRetryingSync] = useState(false);
+  const [isColdStart, setIsColdStart] = useState(false);
+  const coldStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshPendingQueueCount = async () => {
     const queued = await getSyncQueue();
@@ -106,6 +108,14 @@ export function useDashboardSync({
       return;
     }
 
+    if (coldStartTimerRef.current) {
+      clearTimeout(coldStartTimerRef.current);
+    }
+
+    coldStartTimerRef.current = setTimeout(() => {
+      setIsColdStart(true);
+    }, 3000);
+
     try {
       setStatusError(null);
 
@@ -126,9 +136,23 @@ export function useDashboardSync({
         setStatusError(axiosError.response?.data?.message ?? 'Unable to load tasks');
       }
     } finally {
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current);
+        coldStartTimerRef.current = null;
+      }
+      setIsColdStart(false);
       setLoadingTasks(false);
     }
   };
+
+  useEffect(
+    () => () => {
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     setLoadingTasks(true);
@@ -172,6 +196,7 @@ export function useDashboardSync({
     lastSyncAt,
     pendingQueueCount,
     retryingSync,
+    isColdStart,
     refreshPendingQueueCount,
     handleRetrySync,
   };
