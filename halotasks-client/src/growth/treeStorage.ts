@@ -1,131 +1,170 @@
 /**
  * Growth Tree Storage
- * 
- * Handles localStorage persistence and serialization.
- * Local-first for now, can sync to backend later.
+ *
+ * Local-first with server sync:
+ *   - On init: fetch from server, merge with local (higher XP wins),
+ *     union awardedTaskIds from both sources.
+ *   - On save: update local cache + IndexedDB immediately,
+ *     push to server as fire-and-forget.
+ *
+ * This means offline usage always works — local state is the source of truth
+ * during a session, and server acts as the cross-device persistence layer.
  */
 
+import { offlineDb } from '../offline/db';
 import { TreeState, TreeStateJSON } from './treeTypes';
 import { createInitialTreeState, updateStreakState } from './treeLogic';
+import { treeService } from '../services/treeService';
 
-const STORAGE_KEY = 'halotask:growth_tree';
+const IDB_KEY        = 'growth_tree';
+const LS_MIGRATE_KEY = 'halotask:growth_tree'; // legacy localStorage key
 
-/**
- * Serialize TreeState to JSON
- */
-const serializeState = (state: TreeState): TreeStateJSON => {
+// ── Serialisation ──────────────────────────────────────────────────────────
+
+const serialize = (state: TreeState): TreeStateJSON => ({
+  xp:               state.xp,
+  leaves:           state.leaves,
+  streakDays:       state.streakDays,
+  lastActiveDate:   state.lastActiveDate,
+  health:           state.health,
+  stage:            state.stage,
+  lastCalculatedAt: state.lastCalculatedAt,
+  awardedTaskIds:   Array.from(state.awardedTaskIds),
+});
+
+const deserialize = (json: TreeStateJSON): TreeState => ({
+  xp:               json.xp,
+  leaves:           json.leaves,
+  streakDays:       json.streakDays,
+  lastActiveDate:   json.lastActiveDate,
+  health:           json.health,
+  stage:            json.stage,
+  lastCalculatedAt: json.lastCalculatedAt,
+  awardedTaskIds:   new Set(json.awardedTaskIds),
+});
+
+// ── Merge strategy ─────────────────────────────────────────────────────────
+// "Higher XP wins" — takes the state with more progress, then unions
+// awardedTaskIds from both sources to prevent double-awarding on either device.
+
+const mergeStates = (local: TreeState, server: TreeState): TreeState => {
+  const winner = server.xp > local.xp ? server : local;
   return {
-    xp: state.xp,
-    leaves: state.leaves,
-    streakDays: state.streakDays,
-    lastActiveDate: state.lastActiveDate,
-    health: state.health,
-    stage: state.stage,
-    lastCalculatedAt: state.lastCalculatedAt,
-    awardedTaskIds: Array.from(state.awardedTaskIds),
+    ...winner,
+    // Union task IDs so neither device can re-award already-completed tasks
+    awardedTaskIds: new Set([...local.awardedTaskIds, ...server.awardedTaskIds]),
   };
 };
 
-/**
- * Deserialize JSON to TreeState
- */
-const deserializeState = (json: TreeStateJSON): TreeState => {
-  return {
-    xp: json.xp,
-    leaves: json.leaves,
-    streakDays: json.streakDays,
-    lastActiveDate: json.lastActiveDate,
-    health: json.health,
-    stage: json.stage,
-    lastCalculatedAt: json.lastCalculatedAt,
-    awardedTaskIds: new Set(json.awardedTaskIds),
-  };
-};
+// ── In-memory cache ────────────────────────────────────────────────────────
 
-/**
- * Load tree state from localStorage
- * 
- * Returns fresh state if missing or corrupted.
- * Automatically updates streak on load.
- */
-export const loadTreeState = (): TreeState => {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      return createInitialTreeState();
-    }
-
-    const json = JSON.parse(stored) as TreeStateJSON;
-    let state = deserializeState(json);
-
-    // Recalculate streak on load (in case days passed while offline)
-    state = updateStreakState(state);
-
-    return state;
-  } catch (error) {
-    console.warn('[GrowthTree] Failed to load state from storage, using defaults', error);
-    return createInitialTreeState();
-  }
-};
-
-/**
- * Save tree state to localStorage
- */
-export const saveTreeState = (state: TreeState): void => {
-  try {
-    const json = serializeState(state);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(json));
-  } catch (error) {
-    console.warn('[GrowthTree] Failed to save state to storage', error);
-  }
-};
-
-/**
- * Initialize tree storage on app start.
- *
- * The current implementation is synchronous, but this wrapper keeps the hook
- * contract ready for future async migration work.
- */
-export const initTreeStorage = async (): Promise<TreeState> => {
-  const initialState = getTreeState();
-  setTreeState(initialState);
-  return initialState;
-};
-
-/**
- * Clear all growth data (for testing or reset)
- */
-export const clearTreeState = (): void => {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (error) {
-    console.warn('[GrowthTree] Failed to clear storage', error);
-  }
-};
-
-/**
- * Get current tree state, with auto-load if not already loaded
- */
 let cachedState: TreeState | null = null;
 
+// ── Init ───────────────────────────────────────────────────────────────────
+
+/**
+ * initTreeStorage — call once on app start.
+ *
+ * 1. Migrate any legacy localStorage entry to IndexedDB.
+ * 2. Load local state from IndexedDB.
+ * 3. Fetch server state and merge (higher XP wins).
+ * 4. If local was ahead, push the merged state back to the server.
+ * 5. Run streak recalculation (days may have passed while app was closed).
+ */
+export const initTreeStorage = async (): Promise<TreeState> => {
+  // ── Step 1: localStorage migration ──────────────────────────────────────
+  try {
+    const legacyRaw = localStorage.getItem(LS_MIGRATE_KEY);
+    if (legacyRaw) {
+      const legacyJson = JSON.parse(legacyRaw) as TreeStateJSON;
+      const existing = await offlineDb.get<TreeStateJSON>(IDB_KEY);
+      if (!existing) await offlineDb.set(IDB_KEY, legacyJson);
+      localStorage.removeItem(LS_MIGRATE_KEY);
+    }
+  } catch {
+    // Corrupted legacy data — ignore
+  }
+
+  // ── Step 2: Load local state ─────────────────────────────────────────────
+  let localState: TreeState;
+  try {
+    const stored = await offlineDb.get<TreeStateJSON>(IDB_KEY);
+    localState = stored ? deserialize(stored) : createInitialTreeState();
+  } catch {
+    localState = createInitialTreeState();
+  }
+
+  // ── Step 3: Fetch server state and merge ─────────────────────────────────
+  let mergedState = localState;
+  try {
+    const serverJson = await treeService.getTree();
+    if (serverJson) {
+      const serverState = deserialize(serverJson);
+      mergedState = mergeStates(localState, serverState);
+
+      // ── Step 4: Push merged state back if local was ahead ───────────────
+      if (localState.xp > serverState.xp) {
+        treeService.patchTree(serialize(mergedState)).catch((err) => {
+          console.warn('[treeStorage] Failed to push local state to server:', err);
+        });
+      }
+    }
+  } catch (err) {
+    // Server unreachable or not authenticated — continue with local state
+    console.warn('[treeStorage] Could not fetch server state, using local only:', err);
+  }
+
+  // ── Step 5: Run streak recalculation ─────────────────────────────────────
+  mergedState = updateStreakState(mergedState);
+
+  cachedState = mergedState;
+
+  // Persist merged state to IndexedDB
+  offlineDb.set(IDB_KEY, serialize(mergedState)).catch(() => {});
+
+  return mergedState;
+};
+
+// ── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * getTreeState — synchronous read from in-memory cache.
+ * Returns initial state if called before initTreeStorage settles.
+ */
 export const getTreeState = (): TreeState => {
   if (!cachedState) {
-    cachedState = loadTreeState();
+    console.warn('[treeStorage] getTreeState called before initTreeStorage');
+    return createInitialTreeState();
   }
   return cachedState;
 };
 
 /**
- * Update cached state and persist
+ * setTreeState — update cache immediately, persist to IndexedDB and server.
+ * Both persistence calls are fire-and-forget so React state updates stay sync.
  */
 export const setTreeState = (newState: TreeState): void => {
   cachedState = newState;
-  saveTreeState(newState);
+  const json = serialize(newState);
+
+  // Local persistence
+  offlineDb.set(IDB_KEY, json).catch((err) => {
+    console.warn('[treeStorage] Failed to persist to IndexedDB:', err);
+  });
+
+  // Server persistence — fire-and-forget
+  treeService.patchTree(json).catch((err) => {
+    console.warn('[treeStorage] Failed to push state to server:', err);
+  });
 };
 
-/**
- * Reset cache (for testing)
- */
+/** clearTreeState — wipes IndexedDB cache and resets in-memory state. */
+export const clearTreeState = async (): Promise<void> => {
+  cachedState = null;
+  await offlineDb.remove(IDB_KEY);
+};
+
+/** resetCache — for testing only. */
 export const resetCache = (): void => {
   cachedState = null;
 };

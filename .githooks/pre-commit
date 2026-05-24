@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Pre-commit Hook: Require changelog update
+# Install: git config core.hooksPath .githooks && chmod +x .githooks/pre-commit
+
+STAGED=$(git diff --cached --name-only)
+
+echo "$STAGED" | grep -qE '^\.logs$|^docs/logs.md$'
+if [ $? -eq 0 ]; then
+  # changelog updated in staged files — allow commit
+  exit 0
+fi
+
+echo "\n✋ Commit blocked: please include a changelog update before committing."
+echo "Stage either .logs or docs/logs.md (or run: node scripts/add-changelog.js) and try again.\n"
+exit 1

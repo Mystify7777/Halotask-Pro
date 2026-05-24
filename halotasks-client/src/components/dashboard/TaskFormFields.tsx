@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, RefObject } from 'react';
 import { Priority } from '../../types/task';
 import { SUGGESTED_TAGS } from '../../utils/tagHelpers';
 import TagInput from '../shared/TagInput';
@@ -15,6 +15,8 @@ type TaskFormFieldsProps = {
   tags: string[];
   tagInput: string;
   tagSuggestions: string[];
+  autoFocus?: boolean;
+  inputRef?: RefObject<HTMLInputElement | null>;
   onTitleChange: (value: string) => void;
   onPriorityChange: (value: Priority) => void;
   onDueDateChange: (value: string) => void;
@@ -33,6 +35,8 @@ export default function TaskFormFields({
   tags,
   tagInput,
   tagSuggestions,
+  autoFocus,
+  inputRef,
   onTitleChange,
   onPriorityChange,
   onDueDateChange,
@@ -49,6 +53,8 @@ export default function TaskFormFields({
         placeholder="Add a task title"
         value={title}
         onChange={(event) => onTitleChange(event.target.value)}
+        ref={inputRef}
+        autoFocus={autoFocus}
         aria-label="Task title"
         required
       />

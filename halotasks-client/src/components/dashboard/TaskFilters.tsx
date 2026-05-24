@@ -8,11 +8,13 @@ type TaskFiltersProps = {
   priorityFilter: 'all' | Priority;
   sortBy: TaskSortOption;
   tagFilter: string | null;
+  filtersExpanded: boolean;
   onSearchChange: (value: string) => void;
   onFilterModeChange: (value: FilterMode) => void;
   onPriorityFilterChange: (value: 'all' | Priority) => void;
   onSortByChange: (value: TaskSortOption) => void;
   onClearTagFilter: () => void;
+  onFiltersExpandedChange: (value: boolean) => void;
   onAddTask?: () => void;
 };
 
@@ -28,13 +30,20 @@ export default function TaskFilters({
   priorityFilter,
   sortBy,
   tagFilter,
+  filtersExpanded,
   onSearchChange,
   onFilterModeChange,
   onPriorityFilterChange,
   onSortByChange,
   onClearTagFilter,
+  onFiltersExpandedChange,
   onAddTask,
 }: TaskFiltersProps) {
+  const hasActiveFilters =
+    priorityFilter !== 'all' ||
+    sortBy !== 'dueSoonest' ||
+    tagFilter !== null;
+
   return (
     <div className="filters-block" role="search" aria-label="Filter and search tasks">
       <input
@@ -62,51 +71,75 @@ export default function TaskFilters({
           ))}
         </div>
 
-        {onAddTask && (
+        <div className="filter-segment-actions">
           <button
             type="button"
-            className="btn-primary btn-sm"
-            onClick={onAddTask}
-            aria-label="Add new task"
+            className={`ghost-btn btn-sm filter-toggle-btn${hasActiveFilters ? ' filter-toggle-btn--active' : ''}`}
+            onClick={() => onFiltersExpandedChange(!filtersExpanded)}
+            aria-expanded={filtersExpanded}
+            aria-controls="filter-advanced-panel"
           >
-            + New task
+            {filtersExpanded ? '▲ Filters' : '▼ Filters'}
+            {hasActiveFilters && !filtersExpanded && (
+              <span className="filter-active-dot" aria-label="Active filters" />
+            )}
           </button>
-        )}
-      </div>
 
-      <div className="filter-row-selects">
-        <select
-          value={priorityFilter}
-          onChange={(event) => onPriorityFilterChange(event.target.value as 'all' | Priority)}
-          aria-label="Filter by priority"
-        >
-          <option value="all">All Priorities</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-
-        <select
-          value={sortBy}
-          onChange={(event) => onSortByChange(event.target.value as TaskSortOption)}
-          aria-label="Sort tasks by"
-        >
-          {TASK_SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              Sort: {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {tagFilter && (
-        <div className="active-filter-row" role="status" aria-live="polite">
-          <span className="active-filter-chip">#{tagFilter}</span>
-          <button type="button" className="ghost-btn btn-sm" onClick={onClearTagFilter}>
-            Clear filter
-          </button>
+          {onAddTask && (
+            <button
+              type="button"
+              className="btn-primary btn-sm"
+              onClick={onAddTask}
+              aria-label="Add new task"
+            >
+              + New task
+            </button>
+          )}
         </div>
-      )}
+      </div>
+
+      {/* Collapsible advanced filters */}
+      <div
+        id="filter-advanced-panel"
+        className={`filter-advanced${filtersExpanded ? ' filter-advanced--open' : ''}`}
+        aria-hidden={!filtersExpanded}
+      >
+        <div className="filter-advanced-inner">
+          <div className="filter-row-selects">
+            <select
+              value={priorityFilter}
+              onChange={(event) => onPriorityFilterChange(event.target.value as 'all' | Priority)}
+              aria-label="Filter by priority"
+            >
+              <option value="all">All Priorities</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(event) => onSortByChange(event.target.value as TaskSortOption)}
+              aria-label="Sort tasks by"
+            >
+              {TASK_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  Sort: {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {tagFilter && (
+            <div className="active-filter-row" role="status" aria-live="polite">
+              <span className="active-filter-chip">#{tagFilter}</span>
+              <button type="button" className="ghost-btn btn-sm" onClick={onClearTagFilter}>
+                Clear filter
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

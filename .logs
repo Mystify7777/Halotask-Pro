@@ -4,6 +4,134 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-23",
+      "category": "Bugfix",
+      "title": "2305: switch toolbar meta collapse to max-height with open overflow visibility",
+      "description": "Replace the toolbar meta wrapper's grid-template-rows collapse with a max-height transition and open-state overflow: visible so the reminder dropdown can escape the container while the meta block remains collapsible.",
+      "files": [
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Frontend",
+      "title": "2305: focus task title input on desktop; pass autoFocus/inputRef through forms",
+      "description": "Add `autoFocus` and `inputRef` props to TaskFormFields and TaskCreateForm; pass `autoFocus` from TaskCreateSheet; add `titleInputRef` in DashboardPage and focus the sidebar title input on desktop Add action.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Bugfix",
+      "title": "2305: fix input ref typing for titleInputRef",
+      "description": "Correct `RefObject` typing to allow `null` for `inputRef` props in TaskFormFields and TaskCreateForm to match `useRef(null)` signature and prevent TypeScript errors during build.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Frontend",
+      "title": "2305: FAB SVG and interaction improvements; toolbar CTA sizing on mobile",
+      "description": "Replace FAB text with a crisp SVG crosshair-plus, center SVG reliably via grid layout, add hover ring glow and improved active press feedback; allow toolbar primary CTA to size naturally on mobile so the '+ New task' button fits inline.",
+      "files": [
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/AppLayout.module.css",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Feature",
+      "title": "2305/v6: add server-backed 7-day history sync and responsive task-sheet/filter updates",
+      "description": "Applied v6 updates across client and server: added collapsible advanced filter CSS and non-squishing segment tabs, switched desktop TaskCreateSheet from hidden to centered modal while hiding toolbar '+ New task' CTA on mobile, changed Dashboard add-task action to always open the sheet, preserved completed-today counts by snapshotting before clear-completed deletes, synced local history snapshots to server via new historyService, and added authenticated /api/history endpoints with DayHistory model, controller, routes, and app wiring.",
+      "files": [
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/offline/history.ts",
+        "halotasks-client/src/services/historyService.ts",
+        "halotasks-server/src/models/DayHistory.model.ts",
+        "halotasks-server/src/controllers/history.controller.ts",
+        "halotasks-server/src/routes/history.routes.ts",
+        "halotasks-server/src/app.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-23",
+      "category": "Feature",
+      "title": "2305/v7: keep Add Task visible, collapse toolbar metadata, and persist reminder session state",
+      "description": "Applied v7 updates across client UI and reminders: restored the Add Task CTA on all viewports, removed the desktop sheet modal conversion so the task sheet stays a bottom sheet everywhere, added a collapsible toolbar-meta section driven by controlled filtersExpanded state, updated reminder checkbox layout and accent styling, and persisted fired reminder keys in sessionStorage for the current browser tab session.",
+      "files": [
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/components/dashboard/TaskFilters.tsx",
+        "halotasks-client/src/components/dashboard/DashboardToolbar.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/reminders/scheduler.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "category": "Feature",
+      "title": "Add completed task history section and completedAt tracking",
+      "description": "Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.",
+      "files": [
+        "halotasks-client/src/components/dashboard/CompletedSection.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/types/task.ts",
+        "halotasks-client/src/utils/taskInsights.ts",
+        "halotasks-client/src/styles/app.css",
+        "halotasks-server/src/models/Task.model.ts",
+        "halotasks-server/src/controllers/task.controller.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-19",
+      "category": "Backend",
+      "title": "Implement tree API endpoints with anti-cheat validation and client-side sync",
+      "description": "Added treeState nested schema to User model with XP, leaves, streak tracking, health/stage enums, and awardedTaskIds array. Created tree.controller.ts with getTree() and patchTree() endpoints featuring anti-cheat XP validation (append-only check), enum validation for health/stage, and clean $set builder with Math.max guards. Created tree.routes.ts with requireAuth middleware. Enhanced app.ts with resolveOrigin() function that fails-closed in production when CLIENT_ORIGIN not set, provides localhost fallbacks in dev, added express.json({ limit: '1mb' }) to prevent memory exhaustion, and upgraded error handler with isDev branching (surface errors in dev, generic messages in production). On client: created treeService.ts with getTree() and patchTree() API methods, upgraded treeStorage.ts to local-first with server sync: localStorage migration to IndexedDB, merge strategy (higher XP wins, union awardedTaskIds), fire-and-forget server persistence, and offline-first source of truth.",
+      "files": [
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/controllers/tree.controller.ts",
+        "halotasks-server/src/routes/tree.routes.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-client/src/services/treeService.ts",
+        "halotasks-client/src/growth/treeStorage.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-19",
+      "category": "Ops",
+      "title": "Harden MongoDB DNS fallback and add production-grade startup/shutdown",
+      "description": "Enhanced db.ts to save and restore DNS servers, preventing fallback DNS from leaking into email/API calls elsewhere in process. Added startup validation to server.ts that fail-fasts on missing JWT_SECRET and MONGO_URI. Registered global uncaughtException and unhandledRejection handlers before DB connect. Implemented graceful shutdown on SIGTERM/SIGINT: stops accepting new connections, waits for in-flight requests, closes MongoDB, with 10-second force-exit timeout. Enhanced logging throughout for visibility.",
+      "files": [
+        "halotasks-server/src/config/db.ts",
+        "halotasks-server/src/server.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-18",
       "category": "Security",
       "title": "Harden password reset code generation and error handling",
@@ -284,6 +412,21 @@
       "priority": "high",
       "status": "completed"
     }
+    ,
+    {
+      "date": "2026-05-21",
+      "category": "Feature",
+      "title": "Add 7-day local history snapshots and Insights week chart",
+      "description": "Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks). Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current. Enhanced `InsightsPage` to load and render the 7-day history chart with per-day details. Also added week-history CSS to halotasks-client/src/styles/app.css.",
+      "files": [
+        "halotasks-client/src/offline/history.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    }
   ],
-  "lastUpdated": "2026-05-14T00:00:00Z"
+  "lastUpdated": "2026-05-23T13:40:00Z"
 }

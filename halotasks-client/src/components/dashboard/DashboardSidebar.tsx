@@ -9,7 +9,7 @@ export default function DashboardSidebar({ taskPanel, growthPanel }: DashboardSi
   return (
     <div className="sidebar">
       <div className="panel">{taskPanel}</div>
-      <div className="panel">{growthPanel}</div>
+      {growthPanel != null ? <div className="panel">{growthPanel}</div> : null}
     </div>
   );
 }

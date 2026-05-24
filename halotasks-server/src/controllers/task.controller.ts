@@ -44,6 +44,7 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
       dueDate: payload.dueDate,
       estimatedMinutes: payload.estimatedMinutes ?? 0,
       reminderSent: payload.reminderSent ?? false,
+      completedAt: payload.completed ? new Date() : null,
     });
 
     return res.status(201).json({ task });
@@ -55,6 +56,16 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
 export const updateTask = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const payload = parseTaskBody(req.body as Record<string, unknown>);
+
+    const currentTask = await Task.findOne({ _id: req.params.id, userId: req.user?.id });
+
+    if (!currentTask) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    const nextCompleted = payload.completed ?? currentTask.completed;
+    const wasCompleted = currentTask.completed;
+
     const update = {
       ...(payload.title ? { title: payload.title } : {}),
       ...(payload.description !== undefined ? { description: payload.description } : {}),
@@ -64,6 +75,9 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       ...(payload.dueDate ? { dueDate: payload.dueDate } : {}),
       ...(payload.estimatedMinutes !== undefined ? { estimatedMinutes: payload.estimatedMinutes } : {}),
       ...(payload.reminderSent !== undefined ? { reminderSent: payload.reminderSent } : {}),
+      ...(payload.completed !== undefined
+        ? { completedAt: nextCompleted && !wasCompleted ? new Date() : nextCompleted ? currentTask.completedAt : null }
+        : {}),
     };
 
     const task = await Task.findOneAndUpdate(
@@ -71,10 +85,6 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       update,
       { returnDocument: 'after' },
     );
-
-    if (!task) {
-      return res.status(404).json({ message: 'Task not found' });
-    }
 
     return res.json({ task });
   } catch (error) {

@@ -10,11 +10,18 @@ import { Priority, Task, TaskCreatePayload } from '../types/task';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 import { setCachedTasks } from '../offline/cache';
+import { updateTodaySnapshot } from '../offline/history';
 import type { TaskEditState } from '../components/dashboard/types';
 import type { SyncStatus } from './useDashboardSync';
 
 type AddTagResult = {
   message: string | null;
+};
+
+/** Returns today's date as YYYY-MM-DD in local time (not UTC). */
+const getTodayDateString = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
@@ -52,10 +59,10 @@ export function useDashboardTasks({
 
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [dueDate, setDueDate] = useState('');
-  const [createTags, setCreateTags] = useState<string[]>([]);
+  const [dueDate, setDueDate] = useState(getTodayDateString);
+  const [createTags, setCreateTags] = useState<string[]>(['personal']);
   const [createTagInput, setCreateTagInput] = useState('');
-  const [estimatedMinutes, setEstimatedMinutes] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState('30');
 
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -95,6 +102,7 @@ export function useDashboardTasks({
     setTasks((current) => {
       const next = updater(current);
       void setCachedTasks(next);
+      void updateTodaySnapshot(next); // keep 7-day history in sync
       return next;
     });
   };
@@ -207,10 +215,10 @@ export function useDashboardTasks({
         setStatusInfo('Task saved offline. Pending sync.');
         setTitle('');
         setPriority('medium');
-        setDueDate('');
-        setCreateTags([]);
+        setDueDate(getTodayDateString());
+        setCreateTags(['personal']);
         setCreateTagInput('');
-        setEstimatedMinutes('');
+        setEstimatedMinutes('30');
         return;
       }
 
@@ -219,10 +227,10 @@ export function useDashboardTasks({
       persistTasks((current) => [{ ...response.task, pendingSync: false }, ...current]);
       setTitle('');
       setPriority('medium');
-      setDueDate('');
-      setCreateTags([]);
+      setDueDate(getTodayDateString());
+      setCreateTags(['personal']);
       setCreateTagInput('');
-      setEstimatedMinutes('');
+      setEstimatedMinutes('30');
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -333,6 +341,9 @@ export function useDashboardTasks({
       setStatusInfo('No completed tasks to clear.');
       return;
     }
+
+    // Snapshot BEFORE deletion so "Completed Today" count survives clear
+    await updateTodaySnapshot(tasks);
 
     if (!isOnline) {
       try {
@@ -573,6 +584,51 @@ export function useDashboardTasks({
     }
   };
 
+  const handleCopySelected = async () => {
+    setStatusError(null);
+    setStatusInfo(null);
+
+    if (selectedVisibleIds.length === 0) {
+      setStatusInfo('No tasks selected to copy.');
+      return;
+    }
+
+    const selectedTasks = sortedTasks.filter((task) => selectedVisibleIds.includes(task._id));
+
+    const lines = selectedTasks
+      .map((t) => {
+        const priorityLabel = t.priority;
+        const title = t.title;
+        const due = t.dueDate ? `due: ${new Date(t.dueDate).toLocaleDateString()}` : null;
+        const minutes = t.estimatedMinutes ? `~${t.estimatedMinutes}m` : null;
+        const tags = (t.tags ?? []).map((tag) => `#${tag}`).join(' ');
+
+        const parts: string[] = [];
+        parts.push(`• [${priorityLabel}] ${title}`);
+
+        const meta: string[] = [];
+        if (due) meta.push(due);
+        if (minutes) meta.push(minutes);
+
+        if (meta.length > 0) parts.push(`(${meta.join(', ')})`);
+        if (tags) parts.push(tags);
+
+        return parts.join(' ');
+      })
+      .join('\n');
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(lines);
+        setStatusInfo(`Copied ${selectedTasks.length} task${selectedTasks.length === 1 ? '' : 's'}`);
+      } else {
+        setStatusError('Clipboard API not available in this environment.');
+      }
+    } catch (err) {
+      setStatusError('Unable to copy to clipboard. Please allow clipboard permissions.');
+    }
+  };
+
   const handleStartEditing = (task: Task) => {
     setEditingTaskId(task._id);
     setEditState({
@@ -714,6 +770,7 @@ export function useDashboardTasks({
     handleDeleteTask,
     handleClearCompleted,
     handleMarkSelectedComplete,
+    handleCopySelected,
     handleDeleteSelected,
     handleStartEditing,
     handleCancelEditing,

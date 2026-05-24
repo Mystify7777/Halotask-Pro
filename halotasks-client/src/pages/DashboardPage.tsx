@@ -8,6 +8,7 @@ import DashboardToolbar from '../components/dashboard/DashboardToolbar';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
+import CompletedSection from '../components/dashboard/CompletedSection';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
@@ -91,6 +92,7 @@ export default function DashboardPage() {
 
   const location = useLocation();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [isGrowthSheetOpen, setIsGrowthSheetOpen] = useState(false);
 
   // Register orb-tap handler — AppLayout calls this when the orb is tapped.
@@ -131,6 +133,12 @@ export default function DashboardPage() {
     setStatusError,
     setStatusInfo,
   });
+
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleAddTask = () => {
+    setIsSheetOpen(true);
+  };
 
   useEffect(() => {
     tasksRef.current = tasksHook.tasks;
@@ -194,6 +202,7 @@ export default function DashboardPage() {
               onTagInputChange={tasksHook.setCreateTagInput}
               onAddTag={tasksHook.addCreateTag}
               onRemoveTag={tasksHook.removeCreateTag}
+              inputRef={titleInputRef}
             />
           </>
         }
@@ -205,20 +214,23 @@ export default function DashboardPage() {
       <div className="main-column">
       <DashboardToolbar
         filters={
-          <TaskFilters
+            <TaskFilters
             search={tasksHook.search}
             filterMode={tasksHook.filterMode}
             priorityFilter={tasksHook.priorityFilter}
             sortBy={tasksHook.sortBy}
             tagFilter={tasksHook.tagFilter}
-            onSearchChange={tasksHook.setSearch}
-            onFilterModeChange={tasksHook.setFilterMode}
-            onPriorityFilterChange={tasksHook.setPriorityFilter}
-            onSortByChange={tasksHook.setSortBy}
-            onClearTagFilter={() => tasksHook.setTagFilter(null)}
-            onAddTask={() => setIsSheetOpen(true)}
+            filtersExpanded={filtersExpanded}
+              onSearchChange={tasksHook.setSearch}
+              onFilterModeChange={tasksHook.setFilterMode}
+              onPriorityFilterChange={tasksHook.setPriorityFilter}
+              onSortByChange={tasksHook.setSortBy}
+              onClearTagFilter={() => tasksHook.setTagFilter(null)}
+              onFiltersExpandedChange={setFiltersExpanded}
+              onAddTask={handleAddTask}
           />
         }
+        isFiltersExpanded={filtersExpanded}
         syncArea={
           <div className="sync-status-row">
             <p className={`sync-status ${sync.syncStatus}`}>
@@ -289,6 +301,7 @@ export default function DashboardPage() {
               onClearSelection={tasksHook.clearSelection}
               onMarkSelectedComplete={tasksHook.handleMarkSelectedComplete}
               onDeleteSelected={tasksHook.handleDeleteSelected}
+              onCopySelected={tasksHook.handleCopySelected}
             />
           ) : null
         }
@@ -329,6 +342,12 @@ export default function DashboardPage() {
             />
           }
         />
+
+        <CompletedSection
+          tasks={tasksHook.tasks.filter((task) => task.completed)}
+          onToggleTask={tasksHook.handleToggleTask}
+          onDeleteTask={tasksHook.handleDeleteTask}
+        />
       </div>
 
       </div> {/* end main-column */}
@@ -353,6 +372,7 @@ export default function DashboardPage() {
         onTagInputChange={tasksHook.setCreateTagInput}
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
+        inputRef={titleInputRef}
       />
 
       {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}

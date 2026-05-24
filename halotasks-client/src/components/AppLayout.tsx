@@ -186,7 +186,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
           navigate('/dashboard', { state: { openCreate: true } });
         }}
       >
-        +
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M10 3v14M3 10h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
 
       <nav className="bottom-nav" aria-label="Main navigation">

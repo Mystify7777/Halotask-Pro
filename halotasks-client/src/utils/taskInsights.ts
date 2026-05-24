@@ -88,12 +88,12 @@ export const getCompletedToday = (tasks: Task[]) => {
       return false;
     }
 
-    const updatedDate = parseTaskDate(task.updatedAt);
-    if (!updatedDate) {
+    const completionDate = parseTaskDate(task.completedAt ?? task.updatedAt);
+    if (!completionDate) {
       return false;
     }
 
-    return getDayKey(updatedDate) === todayKey;
+    return getDayKey(completionDate) === todayKey;
   });
 };
 
@@ -107,7 +107,7 @@ export const getEstimatedWorkload = (tasks: Task[]) => {
 
 /**
  * Total estimated minutes of tasks marked completed today.
- * Uses updatedAt as a proxy for completedAt until the server adds that field.
+ * Prefers completedAt and falls back to updatedAt for older records.
  */
 export const getWorkDoneToday = (tasks: Task[]): number => {
   return getCompletedToday(tasks).reduce(
