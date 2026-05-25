@@ -24,6 +24,7 @@ type TaskFormFieldsProps = {
   onTagInputChange: (value: string) => void;
   onAddTag: (tag: string) => AddTagResult;
   onRemoveTag: (tag: string) => void;
+  aiButton?: ReactNode;
   children?: ReactNode;
 };
 
@@ -44,20 +45,24 @@ export default function TaskFormFields({
   onTagInputChange,
   onAddTag,
   onRemoveTag,
+  aiButton,
   children,
 }: TaskFormFieldsProps) {
   return (
     <>
-      <input
-        type="text"
-        placeholder="Add a task title"
-        value={title}
-        onChange={(event) => onTitleChange(event.target.value)}
-        ref={inputRef}
-        autoFocus={autoFocus}
-        aria-label="Task title"
-        required
-      />
+      <div className="title-input-row">
+        <input
+          type="text"
+          placeholder="Add a task title"
+          value={title}
+          onChange={(event) => onTitleChange(event.target.value)}
+          ref={inputRef}
+          autoFocus={autoFocus}
+          aria-label="Task title"
+          required
+        />
+        {aiButton}
+      </div>
 
       <div className="form-row-2col">
         <label className="form-field-label">

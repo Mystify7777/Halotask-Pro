@@ -4,6 +4,78 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-25",
+      "category": "Frontend",
+      "title": "2405: add title bar image and favicon",
+      "description": "Added a custom title bar image and browser favicon; updated header layout and CSS; added favicon link in index.html.",
+      "files": [
+        "halotasks-client/public/title_image.png",
+        "halotasks-client/public/favicon.png",
+        "halotasks-client/index.html",
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/AppLayout.module.css"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-25",
+      "category": "Feature",
+      "title": "2405: add PWA installability and Web Push relay support",
+      "description": "Add the PWA manifest, service worker, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.",
+      "files": [
+        "halotasks-client/index.html",
+        "halotasks-client/public/manifest.json",
+        "halotasks-client/public/sw.js",
+        "halotasks-client/public/icon-192.png",
+        "halotasks-client/public/icon-512.png",
+        "halotasks-client/src/hooks/usePushSubscription.ts",
+        "halotasks-client/src/hooks/useDashboardReminders.ts",
+        "halotasks-client/src/reminders/notification.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/controllers/push.controller.ts",
+        "halotasks-server/src/routes/push.routes.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/package.json",
+        "halotasks-server/scripts/generate-vapid.js"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-24",
+      "category": "Feature",
+      "title": "2405: add AI task creation with Gemini parsing and draft preview flow",
+      "description": "Add a Gemini-powered AI task parser hook, AI-aware task form wiring, draft preview/confirmation UI, and sequential live task creation that persists tasks into the current list.",
+      "files": [
+        "halotasks-client/src/hooks/useAiTaskCreation.ts",
+        "halotasks-client/src/components/dashboard/AiTaskInput.tsx",
+        "halotasks-client/src/components/dashboard/TaskFormFields.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateForm.tsx",
+        "halotasks-client/src/components/dashboard/TaskCreateSheet.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-24",
+      "category": "Feature",
+      "title": "2405: add cold-start Task Tapper overlay for slow server wakes",
+      "description": "Bump the API timeout to 60s, add a 3s cold-start timer in dashboard sync, and mount a full-screen Task Tapper overlay that auto-dismisses once the server responds.",
+      "files": [
+        "halotasks-client/src/services/api.ts",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.tsx",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.module.css"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-23",
       "category": "Bugfix",
       "title": "2305: switch toolbar meta collapse to max-height with open overflow visibility",

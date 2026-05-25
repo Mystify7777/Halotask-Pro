@@ -12,15 +12,18 @@ import CompletedSection from '../components/dashboard/CompletedSection';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
+import ColdStartOverlay from '../components/dashboard/ColdStartOverlay';
 import { useRegisterOrbTap, useUpdateOrbData } from '../components/AppLayout';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
 import { getStageDescription, getStageProgressForXp } from '../growth/treeLogic';
 import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
 import { useDashboardReminders } from '../hooks/useDashboardReminders';
+import { useAiTaskCreation } from '../hooks/useAiTaskCreation';
 import { useDashboardSync } from '../hooks/useDashboardSync';
 import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
+import { registerSW } from '../hooks/usePushSubscription';
 import { useNetworkStatus } from '../offline/network';
 import type { Task } from '../types/task';
 
@@ -78,8 +81,13 @@ function getTaskEmptyStateContent({
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [showColdStart, setShowColdStart] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    void registerSW();
+  }, []);
 
   const tasksRef = useRef<Task[]>([]);
   const syncBridgeRef = useRef<{
@@ -134,6 +142,13 @@ export default function DashboardPage() {
     setStatusInfo,
   });
 
+  const ai = useAiTaskCreation({
+    persistTasks: tasksHook.persistTasks,
+    isOnline,
+    setStatusInfo,
+    setStatusError,
+  });
+
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleAddTask = () => {
@@ -155,6 +170,12 @@ export default function DashboardPage() {
 
   syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;
   syncBridgeRef.current.refreshPendingQueueCount = sync.refreshPendingQueueCount;
+
+  useEffect(() => {
+    if (sync.isColdStart) {
+      setShowColdStart(true);
+    }
+  }, [sync.isColdStart]);
 
   const reminders = useDashboardReminders({
     getTasks: () => tasksRef.current,
@@ -373,6 +394,18 @@ export default function DashboardPage() {
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
         inputRef={titleInputRef}
+        aiPhase={ai.aiPhase}
+        aiPrompt={ai.aiPrompt}
+        aiDrafts={ai.aiDrafts}
+        aiError={ai.aiError}
+        aiCreatedCount={ai.aiCreatedCount}
+        aiTotalDrafts={ai.aiTotalDrafts}
+        onAiOpen={ai.openAi}
+        onAiClose={ai.closeAi}
+        onAiPromptChange={ai.setAiPrompt}
+        onAiParse={ai.parsePrompt}
+        onAiRemoveDraft={ai.removeDraft}
+        onAiConfirm={ai.createAll}
       />
 
       {/* Mobile-only sheet — CSS hides it at 768px+ where sidebar form is used */}
@@ -382,6 +415,10 @@ export default function DashboardPage() {
           onClose={() => setIsGrowthSheetOpen(false)}
           treeState={treeState}
         />
+      )}
+
+      {showColdStart && (
+        <ColdStartOverlay active={sync.isColdStart} onExited={() => setShowColdStart(false)} />
       )}
     </section>
   );
