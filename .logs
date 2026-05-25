@@ -4,6 +4,31 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-05-25",
+      "category": "Feature",
+      "title": "2405: add PWA installability and Web Push relay support",
+      "description": "Add the PWA manifest, service worker, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.",
+      "files": [
+        "halotasks-client/index.html",
+        "halotasks-client/public/manifest.json",
+        "halotasks-client/public/sw.js",
+        "halotasks-client/public/icon-192.png",
+        "halotasks-client/public/icon-512.png",
+        "halotasks-client/src/hooks/usePushSubscription.ts",
+        "halotasks-client/src/hooks/useDashboardReminders.ts",
+        "halotasks-client/src/reminders/notification.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/controllers/push.controller.ts",
+        "halotasks-server/src/routes/push.routes.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/package.json",
+        "halotasks-server/scripts/generate-vapid.js"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-24",
       "category": "Feature",
       "title": "2405: add AI task creation with Gemini parsing and draft preview flow",
