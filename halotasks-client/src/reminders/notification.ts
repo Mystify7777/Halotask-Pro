@@ -2,6 +2,12 @@ import { Task } from '../types/task';
 
 type ReminderNotificationType = 'due-soon' | 'overdue' | 'work-session-soon' | 'start-now';
 
+export type ReminderNotificationPayload = {
+  title: string;
+  body: string;
+  tag: string;
+};
+
 const formatTime = (value?: string) => {
   if (!value) {
     return '';
@@ -55,6 +61,16 @@ const buildBody = (task: Task, type: ReminderNotificationType) => {
   return `${task.title} is now overdue.`;
 };
 
+export const getReminderPayload = (task: Task, type: ReminderNotificationType): ReminderNotificationPayload => {
+  const duePart = task.dueDate ?? 'no-due-date';
+
+  return {
+    title: buildTitle(type),
+    body: buildBody(task, type),
+    tag: `halotask-${type}-${task._id}-${duePart}`,
+  };
+};
+
 export const sendReminderNotification = (task: Task, type: ReminderNotificationType) => {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return;
@@ -64,10 +80,10 @@ export const sendReminderNotification = (task: Task, type: ReminderNotificationT
     return;
   }
 
-  const duePart = task.dueDate ?? 'no-due-date';
+  const payload = getReminderPayload(task, type);
 
-  new Notification(buildTitle(type), {
-    body: buildBody(task, type),
-    tag: `halotask-${type}-${task._id}-${duePart}`,
+  new Notification(payload.title, {
+    body: payload.body,
+    tag: payload.tag,
   });
 };

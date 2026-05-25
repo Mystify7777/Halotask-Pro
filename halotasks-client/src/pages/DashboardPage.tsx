@@ -23,6 +23,7 @@ import { useAiTaskCreation } from '../hooks/useAiTaskCreation';
 import { useDashboardSync } from '../hooks/useDashboardSync';
 import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
+import { registerSW } from '../hooks/usePushSubscription';
 import { useNetworkStatus } from '../offline/network';
 import type { Task } from '../types/task';
 
@@ -83,6 +84,10 @@ export default function DashboardPage() {
   const [showColdStart, setShowColdStart] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    void registerSW();
+  }, []);
 
   const tasksRef = useRef<Task[]>([]);
   const syncBridgeRef = useRef<{

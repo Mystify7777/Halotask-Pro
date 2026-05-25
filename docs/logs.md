@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-25] - Feature - 2405: add PWA installability and Web Push relay support: Added the PWA manifest, service worker, theme/meta tags, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.
+
 [2026-05-24] - Feature - 2405: add AI task creation with Gemini parsing and draft preview flow: Added a new AI task parser hook powered by Gemini 2.0 Flash, AI-aware task form wiring, draft preview/confirmation UI, and sequential task creation that persists new tasks into the live list.
 
 [2026-05-24] - Feature - 2405: add cold-start Task Tapper overlay for slow server wakes: Bumped the API timeout to 60s, added a 3s cold-start timer in dashboard sync, and mounted a full-screen Task Tapper overlay that auto-dismisses once the server responds.

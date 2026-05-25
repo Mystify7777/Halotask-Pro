@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { sendReminderNotification } from '../reminders/notification';
+import { getReminderPayload, sendReminderNotification } from '../reminders/notification';
 import {
   getNotificationPermissionStatus,
   isNotificationSupported,
@@ -7,6 +7,7 @@ import {
 } from '../reminders/permissions';
 import { createReminderScheduler } from '../reminders/scheduler';
 import { getReminderSettings, ReminderSettings as ReminderSettingsType, saveReminderSettings } from '../reminders/settings';
+import { relayToServer, subscribePush } from './usePushSubscription';
 import type { Task } from '../types/task';
 
 type UseDashboardRemindersArgs = {
@@ -48,6 +49,7 @@ export function useDashboardReminders({
         getSettings: () => reminderSettingsRef.current,
         onReminder: ({ task, type }) => {
           sendReminderNotification(task, type);
+          void relayToServer(getReminderPayload(task, type));
         },
         intervalMs: 60_000,
       });
@@ -64,6 +66,12 @@ export function useDashboardReminders({
     };
   }, [getTasks, notificationPermission, remindersSupported]);
 
+  useEffect(() => {
+    if (notificationPermission === 'granted') {
+      void subscribePush();
+    }
+  }, [notificationPermission]);
+
   const handleEnableReminders = async () => {
     const permission = await requestNotificationPermission();
     setNotificationPermission(permission);
@@ -71,6 +79,7 @@ export function useDashboardReminders({
     if (permission === 'granted') {
       setStatusInfo('Reminder notifications enabled.');
       setStatusError(null);
+      void subscribePush();
     } else if (permission === 'denied') {
       setStatusError('Notifications are blocked. Enable browser notifications for reminder alerts.');
     }

@@ -17,7 +17,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.4.1",
     "nodemailer": "^6.9.7",
-    "resend": "^6.12.1"
+    "resend": "^6.12.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -27,6 +28,7 @@
     "@types/nodemailer": "^6.4.14",
     "@types/node": "^25.6.0",
     "@types/supertest": "^7.2.0",
+    "@types/web-push": "^3.6.4",
     "mongodb-memory-server": "^11.0.1",
     "supertest": "^7.2.2",
     "ts-node-dev": "^2.0.0",

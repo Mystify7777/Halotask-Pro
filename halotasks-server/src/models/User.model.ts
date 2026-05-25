@@ -1,5 +1,31 @@
 import { Schema, model } from 'mongoose';
 
+const pushSubscriptionSchema = new Schema(
+  {
+    endpoint: {
+      type: String,
+      required: true,
+    },
+    expirationTime: {
+      type: Number,
+      default: null,
+    },
+    keys: {
+      p256dh: {
+        type: String,
+        required: true,
+      },
+      auth: {
+        type: String,
+        required: true,
+      },
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const userSchema = new Schema(
   {
     name: {
@@ -25,6 +51,10 @@ const userSchema = new Schema(
     resetPasswordExpiresAt: {
       type: Date,
       required: false,
+    },
+    pushSubscriptions: {
+      type: [pushSubscriptionSchema],
+      default: [],
     },
     treeState: {
       xp:               { type: Number,  default: 0 },
