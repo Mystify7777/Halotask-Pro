@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-25] - Frontend - 2405: add title bar image and favicon: Added a custom title bar image and browser favicon, updated header layout and CSS, and wired favicon link for improved tab rendering.
+
 [2026-05-25] - Feature - 2405: add PWA installability and Web Push relay support: Added the PWA manifest, service worker, theme/meta tags, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.
 
 [2026-05-24] - Feature - 2405: add AI task creation with Gemini parsing and draft preview flow: Added a new AI task parser hook powered by Gemini 2.0 Flash, AI-aware task form wiring, draft preview/confirmation UI, and sequential task creation that persists new tasks into the live list.

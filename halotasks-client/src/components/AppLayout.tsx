@@ -118,7 +118,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <div className={`app-shell ${styles.shell}`}>
       <header className={`top-nav ${styles.header}`}>
         <div className="brand">
-          <span className={styles.brandMark} aria-hidden="true">🌱</span>
+          <img src="/title_image.png" alt="HaloTasks" className={styles.titleImage} />
           <div>
             <h1 className={styles.brandName}>halotask</h1>
             <p className={styles.brandGreeting}>{greeting}{user?.name ? `, ${user.name.split(' ')[0]}` : ''} 👋</p>

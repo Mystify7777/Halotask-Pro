@@ -5,6 +5,21 @@
   "entries": [
     {
       "date": "2026-05-25",
+      "category": "Frontend",
+      "title": "2405: add title bar image and favicon",
+      "description": "Added a custom title bar image and browser favicon; updated header layout and CSS; added favicon link in index.html.",
+      "files": [
+        "halotasks-client/public/title_image.png",
+        "halotasks-client/public/favicon.png",
+        "halotasks-client/index.html",
+        "halotasks-client/src/components/AppLayout.tsx",
+        "halotasks-client/src/components/AppLayout.module.css"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-25",
       "category": "Feature",
       "title": "2405: add PWA installability and Web Push relay support",
       "description": "Add the PWA manifest, service worker, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.",

@@ -11,6 +11,20 @@
   padding: var(--space-3) var(--space-5);
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.titleImage {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 .brandMark {
   font-size: 1.6rem;
   line-height: 1;
