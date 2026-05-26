@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import { hasCompletedOnboarding, isSessionTokenValid } from '../utils/authSession';
 import styles from './AuthPages.module.css';
 
 type StrengthLevel = 0 | 1 | 2 | 3;
@@ -42,7 +42,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
+      navigate(hasCompletedOnboarding() ? '/dashboard' : '/onboarding', { replace: true });
     }
   }, [token, navigate]);
 
@@ -64,7 +64,7 @@ export default function RegisterPage() {
     try {
       const result = await authService.register({ name: name.trim(), email: email.trim(), password });
       setAuth(result);
-      navigate('/dashboard', { replace: true });
+      navigate('/onboarding', { replace: true });
     } catch (err) {
       const axiosErr = err as AxiosError<{ message?: string }>;
       setError(axiosErr.response?.data?.message ?? 'Registration failed. Please try again.');

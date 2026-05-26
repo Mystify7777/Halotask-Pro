@@ -9,6 +9,7 @@ import HomePage from './pages/HomePage';
 import InsightsPage from './pages/InsightsPage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
+import OnboardingPage from './pages/OnboardingPage';
 import RegisterPage from './pages/RegisterPage';
 import RemindersPage from './pages/RemindersPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -36,6 +37,14 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <OnboardingPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={
