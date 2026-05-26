@@ -37,3 +37,13 @@ export const markKnownUser = (): void => {
 export const isKnownUser = (): boolean => {
   return localStorage.getItem(KNOWN_USER_KEY) === 'true';
 };
+
+const ONBOARDING_KEY = 'halotasks_onboarding_done';
+
+export const markOnboardingDone = (): void => {
+  localStorage.setItem(ONBOARDING_KEY, 'true');
+};
+
+export const hasCompletedOnboarding = (): boolean => {
+  return localStorage.getItem(ONBOARDING_KEY) === 'true';
+};
