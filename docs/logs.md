@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-26] - Bugfix - 2605: preserve completed-task history when clearing completed items: Added a skipSnapshot option to task persistence so clear-completed no longer overwrites the pre-delete weekly snapshot, keeping Completed Today history intact.
+
 [2026-05-26] - Feature - 2605: rewrite insights page with weekly summary and task drill-downs: Replaced the insights overview with a full analytics page, added clickable task stat cards that open the shared InsightModal, enabled optimistic task toggling from the modal, surfaced tag breakdowns and day-of-week patterns, and added weekly summary chips for streak, week total, work done, and best day.
 
 [2026-05-26] - Feature - 2605: add five-step onboarding flow and onboarding gate: Added a full-screen onboarding page with five steps, onboarding completion session flags, protected /onboarding routing, register redirect, and authenticated entry gating.

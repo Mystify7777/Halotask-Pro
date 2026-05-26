@@ -5,6 +5,17 @@
   "entries": [
     {
       "date": "2026-05-26",
+      "category": "Bugfix",
+      "title": "2605: preserve completed-task history when clearing completed items",
+      "description": "Add a skipSnapshot option to task persistence so clear-completed no longer overwrites the pre-delete weekly snapshot, keeping Completed Today history intact.",
+      "files": [
+        "halotasks-client/src/hooks/useDashboardTasks.ts"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-26",
       "category": "Feature",
       "title": "2605: rewrite insights page with weekly summary and task drill-downs",
       "description": "Replace the insights overview with a full analytics page, add clickable task stat cards that open the shared InsightModal, enable optimistic task toggling from the modal, surface tag breakdowns and day-of-week patterns, and add weekly summary chips for streak, week total, work done, and best day.",

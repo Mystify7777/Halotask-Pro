@@ -98,11 +98,13 @@ export function useDashboardTasks({
   const selectedVisibleIds = selectedIds.filter((id) => visibleTaskIds.includes(id));
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleIds.length === visibleTaskIds.length;
 
-  const persistTasks = (updater: (current: Task[]) => Task[]) => {
+  const persistTasks = (updater: (current: Task[]) => Task[], skipSnapshot = false) => {
     setTasks((current) => {
       const next = updater(current);
       void setCachedTasks(next);
-      void updateTodaySnapshot(next); // keep 7-day history in sync
+      if (!skipSnapshot) {
+        void updateTodaySnapshot(next); // keep 7-day history in sync
+      }
       return next;
     });
   };
@@ -361,7 +363,7 @@ export function useDashboardTasks({
         return;
       }
 
-      persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
+      persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)), true);
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
       setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'} offline.`);
@@ -386,7 +388,7 @@ export function useDashboardTasks({
       });
 
       if (deletedIds.length > 0) {
-        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)), true);
       }
 
       setBulkFailedTaskIds(failedIds);
