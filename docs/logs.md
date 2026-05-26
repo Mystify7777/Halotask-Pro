@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-05-26] - Feature - 2605: rewrite insights page with weekly summary and task drill-downs: Replaced the insights overview with a full analytics page, added clickable task stat cards that open the shared InsightModal, enabled optimistic task toggling from the modal, surfaced tag breakdowns and day-of-week patterns, and added weekly summary chips for streak, week total, work done, and best day.
+
 [2026-05-26] - Feature - 2605: add five-step onboarding flow and onboarding gate: Added a full-screen onboarding page with five steps, onboarding completion session flags, protected /onboarding routing, register redirect, and authenticated entry gating.
 
 [2026-05-25] - Frontend - 2405: add title bar image and favicon: Added a custom title bar image and browser favicon, updated header layout and CSS, and wired favicon link for improved tab rendering.
