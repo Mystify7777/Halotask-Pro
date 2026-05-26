@@ -392,6 +392,9 @@ export default function InsightsPage() {
   const completedTodayList = useMemo(() => getCompletedToday(tasks), [tasks]);
   const workloadMins = useMemo(() => getEstimatedWorkload(tasks), [tasks]);
   const workDoneMins = useMemo(() => getWorkDoneToday(tasks), [tasks]);
+  const todayHistory = history[history.length - 1] ?? null;
+  const completedTodayCount = todayHistory?.completedCount ?? completedTodayList.length;
+  const workDoneTodayMins = todayHistory?.workDoneMinutes ?? workDoneMins;
 
   const workloadLabel = workloadMins >= 60
     ? `${Math.floor(workloadMins / 60)}h ${workloadMins % 60}m`
@@ -400,6 +403,10 @@ export default function InsightsPage() {
   const workDoneLabel = workDoneMins >= 60
     ? `${Math.floor(workDoneMins / 60)}h ${workDoneMins % 60}m`
     : `${workDoneMins}m`;
+
+  const workDoneTodayLabel = workDoneTodayMins >= 60
+    ? `${Math.floor(workDoneTodayMins / 60)}h ${workDoneTodayMins % 60}m`
+    : `${workDoneTodayMins}m`;
 
   const modalConfig: Record<Exclude<ModalKey, null>, { title: string; tasks: Task[]; emptyMessage: string }> = {
     overdue: { title: 'Overdue tasks', tasks: overdueList, emptyMessage: 'No overdue tasks - great work!' },
@@ -452,12 +459,12 @@ export default function InsightsPage() {
             <StatCard
               icon="✅"
               label="Completed today"
-              value={completedTodayList.length}
+              value={completedTodayCount}
               variant="completed"
-              onClick={completedTodayList.length > 0 ? () => setModal('completed') : undefined}
+              onClick={completedTodayCount > 0 ? () => setModal('completed') : undefined}
             />
             <StatCard icon="⏱️" label="Workload" value={workloadLabel} variant="workload" />
-            <StatCard icon="📋" label="Work done today" value={workDoneLabel} variant="work-done" />
+            <StatCard icon="📋" label="Work done today" value={workDoneTodayLabel} variant="work-done" />
           </div>
         )}
       </section>

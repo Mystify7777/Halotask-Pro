@@ -24,6 +24,7 @@ import { useDashboardSync } from '../hooks/useDashboardSync';
 import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
 import { registerSW } from '../hooks/usePushSubscription';
+import { getWeekHistory, type HistoryEntry } from '../offline/history';
 import { useNetworkStatus } from '../offline/network';
 import type { Task } from '../types/task';
 
@@ -84,6 +85,7 @@ export default function DashboardPage() {
   const [showColdStart, setShowColdStart] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+  const [todayHistory, setTodayHistory] = useState<HistoryEntry | null>(null);
 
   useEffect(() => {
     void registerSW();
@@ -157,6 +159,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
     tasksRef.current = tasksHook.tasks;
+  }, [tasksHook.tasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getWeekHistory().then((history) => {
+      if (cancelled) {
+        return;
+      }
+
+      setTodayHistory(history.length > 0 ? history[history.length - 1] : null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [tasksHook.tasks]);
 
   const sync = useDashboardSync({
@@ -336,7 +354,7 @@ export default function DashboardPage() {
 
       <div className="panel">
         <DashboardContent
-          smartSections={<SmartSections tasks={tasksHook.tasks} onToggleTask={tasksHook.handleToggleTask} />}
+          smartSections={<SmartSections tasks={tasksHook.tasks} onToggleTask={tasksHook.handleToggleTask} todayHistory={todayHistory} />}
           taskList={
             <TaskList
               tasks={tasksHook.sortedTasks}

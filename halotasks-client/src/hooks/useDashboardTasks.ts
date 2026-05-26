@@ -1,4 +1,4 @@
-import { FormEvent, RefObject, useEffect, useState } from 'react';
+import { FormEvent, RefObject, useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
 import { useTaskFilters, FilterMode } from './useTaskFilters';
 import { useTaskSelection } from './useTaskSelection';
@@ -65,7 +65,7 @@ export function useDashboardTasks({
   const [estimatedMinutes, setEstimatedMinutes] = useState('30');
 
   const [search, setSearch] = useState('');
-  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [filterMode, setFilterMode] = useState<FilterMode>('active');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [sortBy, setSortBy] = useState<TaskSortOption>('dueSoonest');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -74,6 +74,11 @@ export function useDashboardTasks({
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
+  const latestTasksRef = useRef(tasks);
+
+  useEffect(() => {
+    latestTasksRef.current = tasks;
+  }, [tasks]);
 
   const { selectedIds, toggleSelect, clearSelection, selectAll, retainOnly } = useTaskSelection();
 
@@ -98,11 +103,13 @@ export function useDashboardTasks({
   const selectedVisibleIds = selectedIds.filter((id) => visibleTaskIds.includes(id));
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleIds.length === visibleTaskIds.length;
 
-  const persistTasks = (updater: (current: Task[]) => Task[]) => {
+  const persistTasks = (updater: (current: Task[]) => Task[], skipSnapshot = false) => {
     setTasks((current) => {
       const next = updater(current);
       void setCachedTasks(next);
-      void updateTodaySnapshot(next); // keep 7-day history in sync
+      if (!skipSnapshot) {
+        void updateTodaySnapshot(next); // keep 7-day history in sync
+      }
       return next;
     });
   };
@@ -335,15 +342,19 @@ export function useDashboardTasks({
     setStatusInfo(null);
     setBulkFailedTaskIds([]);
 
-    const completedIds = tasks.filter((task) => task.completed).map((task) => task._id);
+    const currentTasks = latestTasksRef.current;
+    const completedIds = currentTasks.filter((task) => task.completed).map((task) => task._id);
 
     if (completedIds.length === 0) {
       setStatusInfo('No completed tasks to clear.');
       return;
     }
 
-    // Snapshot BEFORE deletion so "Completed Today" count survives clear
-    await updateTodaySnapshot(tasks);
+    // Snapshot BEFORE deletion so "Completed Today" count survives clear.
+    // Read the current tasks state synchronously via setTasks to avoid a
+    // race where the passed-in `tasks` value may be stale if the user
+    // completed items and immediately hit Clear Completed.
+    await updateTodaySnapshot(currentTasks);
 
     if (!isOnline) {
       try {
@@ -361,7 +372,7 @@ export function useDashboardTasks({
         return;
       }
 
-      persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)));
+      persistTasks((current) => current.filter((task) => !completedIds.includes(task._id)), true);
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
       setStatusInfo(`Cleared ${completedIds.length} completed task${completedIds.length === 1 ? '' : 's'} offline.`);
@@ -386,7 +397,7 @@ export function useDashboardTasks({
       });
 
       if (deletedIds.length > 0) {
-        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)));
+        persistTasks((current) => current.filter((task) => !deletedIds.includes(task._id)), true);
       }
 
       setBulkFailedTaskIds(failedIds);

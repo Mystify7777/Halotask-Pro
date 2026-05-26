@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Task } from '../../types/task';
+import type { HistoryEntry } from '../../offline/history';
 import {
   getCompletedToday,
   getDueTodayTasks,
@@ -13,6 +14,7 @@ import InsightModal from './InsightModal';
 type SmartSectionsProps = {
   tasks: Task[];
   onToggleTask: (task: Task) => void;
+  todayHistory?: HistoryEntry | null;
 };
 
 type InsightCardVariant =
@@ -56,7 +58,7 @@ const formatMinutes = (mins: number): string =>
 
 const PRIORITY_RANK = { high: 3, medium: 2, low: 1 } as const;
 
-export default function SmartSections({ tasks, onToggleTask }: SmartSectionsProps) {
+export default function SmartSections({ tasks, onToggleTask, todayHistory }: SmartSectionsProps) {
   const [openModal, setOpenModal] = useState<ModalKey>(null);
 
   // ── Derived counts for card display ──────────────────────────────────────
@@ -65,6 +67,8 @@ export default function SmartSections({ tasks, onToggleTask }: SmartSectionsProp
   const completedTodayTasks = getCompletedToday(tasks);
   const workloadMinutes     = getEstimatedWorkload(tasks);
   const workDoneMinutes     = getWorkDoneToday(tasks);
+  const completedTodayCount = todayHistory?.completedCount ?? completedTodayTasks.length;
+  const workDoneTodayCount = todayHistory?.workDoneMinutes ?? workDoneMinutes;
 
   // ── Task subsets for each modal (sorted) ──────────────────────────────────
   const modalTasks: Record<InsightCardVariant, Task[]> = {
@@ -77,7 +81,7 @@ export default function SmartSections({ tasks, onToggleTask }: SmartSectionsProp
     'upcoming': getUpcomingTasks(tasks, Number.MAX_SAFE_INTEGER).sort(
       (a, b) => new Date(a.dueDate ?? 0).getTime() - new Date(b.dueDate ?? 0).getTime(),
     ),
-    'completed': [...completedTodayTasks].sort(
+        'completed': [...completedTodayTasks].sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     ),
     'workload': tasks
@@ -106,9 +110,9 @@ export default function SmartSections({ tasks, onToggleTask }: SmartSectionsProp
         <InsightCard icon="⚠️" label="Overdue"         value={overdueTasks.length}              variant="overdue"   onClick={() => open('overdue')}   />
         <InsightCard icon="📅" label="Due Today"        value={dueTodayTasks.length}             variant="due-today" onClick={() => open('due-today')} />
         <InsightCard icon="🔜" label="Upcoming"         value={getUpcomingTasks(tasks).length}   variant="upcoming"  onClick={() => open('upcoming')}  />
-        <InsightCard icon="✅" label="Completed Today"  value={completedTodayTasks.length}       variant="completed" onClick={() => open('completed')} />
+        <InsightCard icon="✅" label="Completed Today"  value={completedTodayCount}             variant="completed" onClick={() => open('completed')} />
         <InsightCard icon="⏱️" label="Workload Today"   value={formatMinutes(workloadMinutes)}   variant="workload"  onClick={() => open('workload')}  />
-        <InsightCard icon="💪" label="Work Done Today"  value={formatMinutes(workDoneMinutes)}   variant="work-done" onClick={() => open('work-done')} />
+        <InsightCard icon="💪" label="Work Done Today"  value={formatMinutes(workDoneTodayCount)} variant="work-done" onClick={() => open('work-done')} />
       </section>
 
       {openModal && (

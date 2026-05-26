@@ -5,6 +5,41 @@
   "entries": [
     {
       "date": "2026-05-26",
+      "category": "Bugfix",
+      "title": "2605: align insights cards with persisted completed history",
+      "description": "Update the Insights page to read Completed Today and Work Done Today from the same persisted daily history snapshot used by the dashboard, so clear-completed no longer causes a mismatch between pages.",
+      "files": [
+        "halotasks-client/src/pages/InsightsPage.tsx"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-26",
+      "category": "Bugfix",
+      "title": "2605: preserve Completed Today after clearing finished tasks",
+      "description": "Switch the dashboard productivity snapshot to the persisted day history entry and read the latest committed task state before snapshotting during clear-completed, so clearing finished tasks no longer zeros the Completed Today and Work Done Today cards.",
+      "files": [
+        "halotasks-client/src/components/dashboard/SmartSections.tsx",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-26",
+      "category": "Bugfix",
+      "title": "2605: preserve completed-task history when clearing completed items",
+      "description": "Add a skipSnapshot option to task persistence so clear-completed no longer overwrites the pre-delete weekly snapshot, keeping Completed Today history intact.",
+      "files": [
+        "halotasks-client/src/hooks/useDashboardTasks.ts"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-26",
       "category": "Feature",
       "title": "2605: rewrite insights page with weekly summary and task drill-downs",
       "description": "Replace the insights overview with a full analytics page, add clickable task stat cards that open the shared InsightModal, enable optimistic task toggling from the modal, surface tag breakdowns and day-of-week patterns, and add weekly summary chips for streak, week total, work done, and best day.",
