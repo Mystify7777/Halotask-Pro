@@ -6,6 +6,17 @@
     {
       "date": "2026-05-26",
       "category": "Bugfix",
+      "title": "2605: align insights cards with persisted completed history",
+      "description": "Update the Insights page to read Completed Today and Work Done Today from the same persisted daily history snapshot used by the dashboard, so clear-completed no longer causes a mismatch between pages.",
+      "files": [
+        "halotasks-client/src/pages/InsightsPage.tsx"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-26",
+      "category": "Bugfix",
       "title": "2605: preserve Completed Today after clearing finished tasks",
       "description": "Switch the dashboard productivity snapshot to the persisted day history entry and read the latest committed task state before snapshotting during clear-completed, so clearing finished tasks no longer zeros the Completed Today and Work Done Today cards.",
       "files": [
