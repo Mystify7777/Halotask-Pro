@@ -15,7 +15,8 @@ export interface AiTaskDraft {
   description: string;
 }
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const VALID_PRIORITIES: Priority[] = ['low', 'medium', 'high'];
 
 function buildPrompt(input: string): string {
@@ -82,10 +83,10 @@ export function useAiTaskCreation({
       return;
     }
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+    const apiKey = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
 
     if (!apiKey) {
-      setAiError('No Gemini API key found. Add VITE_GEMINI_API_KEY to your .env file and restart the dev server.');
+      setAiError('No Groq API key found. Add VITE_GROQ_API_KEY to your .env file and restart the dev server.');
       return;
     }
 
@@ -93,25 +94,30 @@ export function useAiTaskCreation({
     setAiError(null);
 
     try {
-      const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+      const response = await fetch(GROQ_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: buildPrompt(prompt) }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+          model: GROQ_MODEL,
+          messages: [{ role: 'user', content: buildPrompt(prompt) }],
+          temperature: 0.2,
+          max_tokens: 1024,
         }),
       });
 
       if (!response.ok) {
         const errorData = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(errorData?.error?.message ?? `Gemini error ${response.status}`);
+        throw new Error(errorData?.error?.message ?? `Groq error ${response.status}`);
       }
 
       const data = (await response.json()) as {
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        choices?: { message?: { content?: string } }[];
       };
 
-      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+      const raw = data?.choices?.[0]?.message?.content ?? '[]';
       const clean = raw.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(clean) as Partial<AiTaskDraft>[];
 
