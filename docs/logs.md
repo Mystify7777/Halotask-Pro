@@ -25,6 +25,8 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
+[2026-09-26] - Bugfix - 2609: fix cold-start overlay completion and add manual dismiss: Replaced the settled-request-only completion signal with a genuine success/error outcome so the overlay never claims the server is ready after a failed request, fixed a race that let the entrance animation override a manual dismiss, and added a keyboard-accessible manual close button. Added Vitest + Testing Library coverage for the automatic and manual completion paths.
+
 [2026-05-26] - Bugfix - 2605: align insights cards with persisted completed history: Updated the Insights page to read Completed Today and Work Done Today from the same persisted daily history snapshot used by the dashboard, so clear-completed no longer causes a mismatch between pages.
 
 [2026-05-26] - Bugfix - 2605: preserve Completed Today after clearing finished tasks: Switched the dashboard productivity snapshot to use the persisted day history entry and tightened the clear-completed flow to read the latest committed task state before snapshotting, so clearing finished tasks no longer zeroes the Completed Today and Work Done Today cards.

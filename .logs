@@ -4,6 +4,25 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-09-26",
+      "category": "Bugfix",
+      "title": "2609: fix cold-start overlay completion and add manual dismiss",
+      "description": "Replaced the settled-request-only completion signal with a genuine success/error outcome so the cold-start overlay never claims the server is ready after a failed request, fixed a race where the entrance animation could stomp a manual dismiss, and added a keyboard-accessible manual close button so users are never stuck waiting on the Task Tapper screen. Added Vitest + Testing Library coverage for the automatic and manual completion paths.",
+      "files": [
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.tsx",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.module.css",
+        "halotasks-client/src/components/dashboard/ColdStartOverlay.test.tsx",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/hooks/useDashboardSync.test.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/test/setup.ts",
+        "halotasks-client/vite.config.ts",
+        "halotasks-client/package.json"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-05-26",
       "category": "Bugfix",
       "title": "2605: align insights cards with persisted completed history",

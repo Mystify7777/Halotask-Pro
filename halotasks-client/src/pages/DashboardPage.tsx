@@ -190,10 +190,10 @@ export default function DashboardPage() {
   syncBridgeRef.current.refreshPendingQueueCount = sync.refreshPendingQueueCount;
 
   useEffect(() => {
-    if (sync.isColdStart) {
+    if (sync.coldStartPhase === 'waking') {
       setShowColdStart(true);
     }
-  }, [sync.isColdStart]);
+  }, [sync.coldStartPhase]);
 
   const reminders = useDashboardReminders({
     getTasks: () => tasksRef.current,
@@ -436,7 +436,13 @@ export default function DashboardPage() {
       )}
 
       {showColdStart && (
-        <ColdStartOverlay active={sync.isColdStart} onExited={() => setShowColdStart(false)} />
+        <ColdStartOverlay
+          outcome={
+            sync.coldStartPhase === 'waking' ? 'waking' : sync.coldStartPhase === 'ready' ? 'ready' : 'error'
+          }
+          onExited={() => setShowColdStart(false)}
+          onDismiss={() => setShowColdStart(false)}
+        />
       )}
     </section>
   );
