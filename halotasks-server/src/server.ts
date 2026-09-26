@@ -2,6 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
+import { getResetTokenTtlMinutes } from './config/env';
 
 // ── Startup validation ─────────────────────────────────────────────────────
 // Fail fast on missing critical env vars — better to refuse to start than to
@@ -10,6 +11,15 @@ const REQUIRED_ENV = ['JWT_SECRET', 'MONGO_URI'] as const;
 const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
 if (missing.length > 0) {
   console.error(`[Server] Missing required environment variables: ${missing.join(', ')}`);
+  process.exit(1);
+}
+
+// A malformed RESET_TOKEN_TTL_MINUTES would otherwise silently produce
+// reset tokens that expire immediately (or never) — fail fast instead.
+try {
+  getResetTokenTtlMinutes();
+} catch (error) {
+  console.error(`[Server] ${error instanceof Error ? error.message : 'Invalid RESET_TOKEN_TTL_MINUTES configuration'}`);
   process.exit(1);
 }
 

@@ -5,6 +5,23 @@
   "entries": [
     {
       "date": "2026-09-26",
+      "category": "Backend",
+      "title": "2609: harden authentication and password recovery security",
+      "description": "Made registration and reset-password validation consistent (shared password-minimum, email-format, and name normalization/validation rules across register, login, forgot-password, and reset-password), and RESET_TOKEN_TTL_MINUTES is now validated at server startup so a malformed value fails fast instead of silently producing reset tokens that expire immediately or never. Confirmed reset codes already use crypto.randomInt (not Math.random) and that reset codes are never logged when a configured email transport fails. Added unit tests for the new validators/config parsing and integration tests for the register-validation and forgot/reset-password round trip.",
+      "files": [
+        "halotasks-server/src/config/env.ts",
+        "halotasks-server/src/utils/validators.ts",
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/src/server.ts",
+        "halotasks-server/tests/env.test.ts",
+        "halotasks-server/tests/validators.test.ts",
+        "halotasks-server/tests/api.routes.test.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-09-26",
       "category": "Bugfix",
       "title": "2609: fix cold-start overlay completion and add manual dismiss",
       "description": "Replaced the settled-request-only completion signal with a genuine success/error outcome so the cold-start overlay never claims the server is ready after a failed request, fixed a race where the entrance animation could stomp a manual dismiss, and added a keyboard-accessible manual close button so users are never stuck waiting on the Task Tapper screen. Added Vitest + Testing Library coverage for the automatic and manual completion paths.",

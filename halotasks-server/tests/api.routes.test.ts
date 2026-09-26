@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import request from 'supertest';
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import app from '../src/app';
 import Task from '../src/models/Task.model';
@@ -212,5 +212,101 @@ describe('HaloTasks API routes', () => {
 
     const remainingForeignTask = await Task.findById(foreignTaskId);
     expect(remainingForeignTask).not.toBeNull();
+  });
+
+  it('rejects registration with a password shorter than the minimum length', async () => {
+    const response = await registerUser({ name: 'Short Pass', email: 'shortpass@mail.com', password: '123' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('at least');
+
+    const user = await User.findOne({ email: 'shortpass@mail.com' });
+    expect(user).toBeNull();
+  });
+
+  it('rejects registration with a malformed email address', async () => {
+    const response = await registerUser({ name: 'Bad Email', email: 'not-an-email', password: '123456' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('valid email');
+  });
+
+  it('normalizes a name with extra internal whitespace on registration', async () => {
+    const response = await registerUser({ name: '  Aryan   K  ', email: 'aryan@mail.com', password: '123456' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.user.name).toBe('Aryan K');
+
+    const user = await User.findOne({ email: 'aryan@mail.com' });
+    expect(user?.name).toBe('Aryan K');
+  });
+
+  it('rejects registration with a name that is empty after trimming', async () => {
+    const response = await registerUser({ name: '   ', email: 'blankname@mail.com', password: '123456' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('name');
+  });
+
+  it('completes the forgot-password -> reset-password round trip using the demo-mode logged code', async () => {
+    await registerUser({ name: 'Reset User', email: 'reset@mail.com', password: 'old-password' });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    const forgotResponse = await request(app).post('/api/auth/forgot-password').send({ email: 'reset@mail.com' });
+    expect(forgotResponse.status).toBe(200);
+    expect(forgotResponse.body.message).toContain('a reset link has been sent');
+
+    const demoLogCall = infoSpy.mock.calls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('DEMO MODE'),
+    );
+    expect(demoLogCall).toBeDefined();
+
+    const match = /code for .*?: (\d{6})/.exec(demoLogCall?.[0] as string);
+    expect(match).not.toBeNull();
+    const resetCode = match![1];
+    infoSpy.mockRestore();
+
+    const wrongCodeResponse = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ email: 'reset@mail.com', token: '000000', password: 'new-password' });
+    expect(wrongCodeResponse.status).toBe(400);
+
+    const shortPasswordResponse = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ email: 'reset@mail.com', token: resetCode, password: '123' });
+    expect(shortPasswordResponse.status).toBe(400);
+
+    const goodResetResponse = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ email: 'reset@mail.com', token: resetCode, password: 'new-password' });
+    expect(goodResetResponse.status).toBe(200);
+
+    const loginWithNewPassword = await loginUser({ email: 'reset@mail.com', password: 'new-password' });
+    expect(loginWithNewPassword.status).toBe(200);
+
+    const loginWithOldPassword = await loginUser({ email: 'reset@mail.com', password: 'old-password' });
+    expect(loginWithOldPassword.status).toBe(401);
+
+    // The code is single-use — reusing it after a successful reset must fail.
+    const reuseResponse = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ email: 'reset@mail.com', token: resetCode, password: 'another-password' });
+    expect(reuseResponse.status).toBe(400);
+  });
+
+  it('returns the same neutral message for forgot-password whether or not the account exists', async () => {
+    await registerUser({ name: 'Exists', email: 'exists@mail.com', password: '123456' });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const knownResponse = await request(app).post('/api/auth/forgot-password').send({ email: 'exists@mail.com' });
+    const unknownResponse = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'nobody@mail.com' });
+    infoSpy.mockRestore();
+
+    expect(knownResponse.status).toBe(200);
+    expect(unknownResponse.status).toBe(200);
+    expect(knownResponse.body.message).toBe(unknownResponse.body.message);
   });
 });

@@ -5,8 +5,16 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
 import User from '../models/User.model';
+import { getResetTokenTtlMinutes } from '../config/env';
+import {
+  PASSWORD_MIN_LENGTH,
+  isValidEmail,
+  isValidName,
+  isValidPassword,
+  normalizeEmail,
+  normalizeName,
+} from '../utils/validators';
 
-const RESET_TOKEN_TTL_MINUTES = Number(process.env.RESET_TOKEN_TTL_MINUTES ?? 20);
 const FORGOT_WINDOW_MS = 15 * 60 * 1000;
 const FORGOT_MAX_ATTEMPTS = 5;
 const neutralForgotMessage = 'If an account exists for this email, a reset link has been sent.';
@@ -81,21 +89,21 @@ const maskEmail = (email: string) => {
   return `${local.slice(0, 2)}***@${domain}`;
 };
 
-const buildResetEmailText = (resetCode: string) =>
+const buildResetEmailText = (resetCode: string, ttlMinutes: number) =>
   [
     'We received a request to reset your password.',
     '',
-    `Use the code below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
+    `Use the code below. It expires in ${ttlMinutes} minutes.`,
     '',
     `Code: ${resetCode}`,
     '',
     "If you didn't request this, you can ignore this email.",
   ].join('\n');
 
-const buildResetEmailHtml = (resetCode: string) => `
+const buildResetEmailHtml = (resetCode: string, ttlMinutes: number) => `
   <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
     <p>We received a request to reset your password.</p>
-    <p>Use the code below. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>
+    <p>Use the code below. It expires in ${ttlMinutes} minutes.</p>
     <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #0f4db2; margin: 16px 0;">
       ${resetCode}
     </p>
@@ -103,9 +111,9 @@ const buildResetEmailHtml = (resetCode: string) => `
   </div>
 `;
 
-const sendResetPasswordEmail = async (toEmail: string, resetCode: string): Promise<void> => {
-  const emailText = buildResetEmailText(resetCode);
-  const emailHtml = buildResetEmailHtml(resetCode);
+const sendResetPasswordEmail = async (toEmail: string, resetCode: string, ttlMinutes: number): Promise<void> => {
+  const emailText = buildResetEmailText(resetCode, ttlMinutes);
+  const emailHtml = buildResetEmailHtml(resetCode, ttlMinutes);
   const fromAddress = process.env.EMAIL_FROM || 'noreply@halotaskpro.com';
 
   // Try SMTP first (primary transport)
@@ -197,7 +205,23 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ message: 'name, email, and password are required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedName = normalizeName(name);
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!isValidName(normalizedName)) {
+      return res.status(400).json({ message: 'name must be between 1 and 100 characters' });
+    }
+
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'A valid email address is required' });
+    }
+
+    if (!isValidPassword(password)) {
+      return res
+        .status(400)
+        .json({ message: `password must be at least ${PASSWORD_MIN_LENGTH} characters long` });
+    }
+
     const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
@@ -206,7 +230,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({
-      name: name.trim(),
+      name: normalizedName,
       email: normalizedEmail,
       passwordHash,
     });
@@ -233,7 +257,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
       return res.status(400).json({ message: 'email and password are required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = normalizeEmail(email);
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
@@ -270,19 +294,20 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       return res.status(429).json({ message: 'Too many requests. Please try again later.' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = normalizeEmail(email);
     const user = await User.findOne({ email: normalizedEmail });
 
     if (user) {
+      const ttlMinutes = getResetTokenTtlMinutes();
       const resetCode = generateResetCode();
       const hashedCode = hashResetCode(resetCode);
-      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+      const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
       user.resetPasswordTokenHash = hashedCode;
       user.resetPasswordExpiresAt = expiresAt;
       await user.save();
 
-      await sendResetPasswordEmail(normalizedEmail, resetCode);
+      await sendResetPasswordEmail(normalizedEmail, resetCode, ttlMinutes);
     }
 
     return res.json({ message: neutralForgotMessage });
@@ -303,11 +328,13 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ message: 'email, token, and password are required' });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'password must be at least 6 characters long' });
+    if (!isValidPassword(password)) {
+      return res
+        .status(400)
+        .json({ message: `password must be at least ${PASSWORD_MIN_LENGTH} characters long` });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = normalizeEmail(email);
     const hashedToken = hashResetCode(token);
 
     const user = await User.findOne({
