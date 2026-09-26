@@ -25,7 +25,7 @@ node scripts/add-changelog.js
 
 ## Recent Updates
 
-[2026-09-26] - Backend - 2609: harden authentication and password recovery security: Made registration and reset-password validation consistent (shared password-minimum, email-format, and name rules across all auth endpoints), and added a startup check that fails fast on a malformed RESET_TOKEN_TTL_MINUTES instead of silently issuing tokens that expire immediately or never. Added unit and integration test coverage.
+[2026-09-26] - Backend - 2609: harden authentication and password recovery security: Made registration and reset-password validation consistent, added startup validation for RESET_TOKEN_TTL_MINUTES, and fixed demo-mode reset-code logging so it requires an explicit non-production opt-in rather than triggering on missing email transport. Added regression tests for the logging gate plus a tsconfig.test.json so tests/ is type-checked.
 
 [2026-09-26] - Bugfix - 2609: fix cold-start overlay completion and add manual dismiss: Replaced the settled-request-only completion signal with a genuine success/error outcome so the overlay never claims the server is ready after a failed request, fixed a race that let the entrance animation override a manual dismiss, and added a keyboard-accessible manual close button. Added Vitest + Testing Library coverage for the automatic and manual completion paths.
 

@@ -221,6 +221,10 @@ SMTP_PASS=<16-char-app-password>
 RESEND_API_KEY=re_XXXXXXXXX
 EMAIL_FROM=noreply@yourdomain.com
 RESET_TOKEN_TTL_MINUTES=20
+
+# Local dev only — logs the reset code when no email transport is configured.
+# Ignored when NODE_ENV=production, so it can never leak codes in prod.
+RESET_CODE_DEMO_MODE=true
 ```
 
 ### Frontend (.env)
