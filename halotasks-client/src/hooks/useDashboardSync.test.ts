@@ -24,7 +24,6 @@ vi.mock('../services/taskService', () => ({
 }));
 
 import { taskService } from '../services/taskService';
-import type { Task } from '../types/task';
 
 // Lets already-queued microtasks (the async chain inside loadTasks) settle
 // without advancing fake timers.
@@ -60,7 +59,7 @@ describe('useDashboardSync cold-start phase', () => {
   });
 
   it('only enters "waking" after 3s, and only reports "ready" once the request genuinely succeeds', async () => {
-    let resolveTasks: ((value: { tasks: Task[] }) => void) | undefined;
+    let resolveTasks: ((value: Awaited<ReturnType<typeof taskService.getTasks>>) => void) | undefined;
     vi.mocked(taskService.getTasks).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -82,7 +81,7 @@ describe('useDashboardSync cold-start phase', () => {
     expect(result.current.coldStartPhase).toBe('waking');
 
     await act(async () => {
-      resolveTasks?.({ tasks: [] });
+      resolveTasks?.({ tasks: [], page: 1, limit: 0, hasMore: false });
     });
     await flushMicrotasks();
 
@@ -116,7 +115,7 @@ describe('useDashboardSync cold-start phase', () => {
   });
 
   it('never enters "waking" at all for a fast, successful response', async () => {
-    vi.mocked(taskService.getTasks).mockResolvedValue({ tasks: [] });
+    vi.mocked(taskService.getTasks).mockResolvedValue({ tasks: [], page: 1, limit: 0, hasMore: false });
 
     const { result } = setupHook();
     await flushMicrotasks();

@@ -6,6 +6,27 @@
     {
       "date": "2026-09-26",
       "category": "Backend",
+      "title": "2609: harden task API validation and query boundaries",
+      "description": "Malformed task ids on PUT/DELETE now return 400 instead of a 500 from an unhandled Mongoose CastError. Task body validation (title, description, tags, priority, dueDate, estimatedMinutes) is centralized in taskValidators.ts and applied identically on create and update, so an empty/whitespace title or an invalid due date is rejected consistently regardless of endpoint (previously update silently dropped an empty title instead of rejecting it). Added length/count limits: title 200 chars, description 2000 chars, up to 20 tags of 50 chars each, estimatedMinutes 0-100000. GET /api/tasks is now paginated (default and max page size 200) with page/limit/total/hasMore added additively to the response. Fixed a real backward-compatibility gap found in review: the frontend's taskService.getTasks() previously assumed a single page had every task, which would have silently truncated any user with >200 tasks; it now transparently loops pages until hasMore is false (capped at 500 pages as a runaway-loop guard), so the paginated backend is invisible to the rest of the app. Also fixed estimatedMinutes accepting an empty string as 0 (Number('') === 0), tightened the pagination parser to use Number.isSafeInteger and to reject repeated/array query params (?page=2&page=999) instead of silently taking the first value. findOneAndUpdate now runs schema validators. Added unit tests for the validators/pagination parser/taskService pagination-consumption and integration tests for malformed ids, invalid dates, empty/over-length titles, invalid priority, tag limits, estimatedMinutes bounds (including the empty-string case), and pagination boundaries including ownership filtering. Follow-up from review: the client's 500-page safety ceiling now throws an explicit error instead of returning a silently truncated task list, and the aggregated result reports hasMore: false so its pagination metadata is internally consistent.",
+      "files": [
+        "halotasks-server/src/controllers/task.controller.ts",
+        "halotasks-server/src/utils/taskValidators.ts",
+        "halotasks-server/src/utils/pagination.ts",
+        "halotasks-server/tests/taskValidators.test.ts",
+        "halotasks-server/tests/pagination.test.ts",
+        "halotasks-server/tests/api.routes.test.ts",
+        "halotasks-client/src/services/taskService.ts",
+        "halotasks-client/src/services/taskService.test.ts",
+        "halotasks-client/src/types/task.ts",
+        "halotasks-client/src/hooks/useDashboardSync.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-09-26",
+      "category": "Backend",
       "title": "2609: harden authentication and password recovery security",
       "description": "Made registration and reset-password validation consistent (shared password-minimum, email-format, and name normalization/validation rules across register, login, forgot-password, and reset-password), and RESET_TOKEN_TTL_MINUTES is now validated at server startup so a malformed value fails fast instead of silently producing reset tokens that expire immediately or never. Confirmed reset codes already use crypto.randomInt (not Math.random) and that reset codes are never logged when a configured email transport fails. Added unit tests for the new validators/config parsing and integration tests for the register-validation and forgot/reset-password round trip.",
       "files": [

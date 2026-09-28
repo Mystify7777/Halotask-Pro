@@ -309,4 +309,241 @@ describe('HaloTasks API routes', () => {
     expect(unknownResponse.status).toBe(200);
     expect(knownResponse.body.message).toBe(unknownResponse.body.message);
   });
+
+  describe('task API validation and query boundaries', () => {
+    it('returns a 400 (not a 500) for a malformed task id on update and delete', async () => {
+      const user = (await registerUser({ name: 'Boundary User', email: 'boundary@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const updateResponse = await request(app)
+        .put('/api/tasks/not-a-valid-object-id')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ title: 'New title' });
+      expect(updateResponse.status).toBe(400);
+      expect(updateResponse.body.message).toContain('Invalid task id');
+
+      const deleteResponse = await request(app)
+        .delete('/api/tasks/also-not-valid')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(deleteResponse.status).toBe(400);
+      expect(deleteResponse.body.message).toContain('Invalid task id');
+    });
+
+    it('returns 404 (not 400) for a well-formed but non-existent task id', async () => {
+      const user = (await registerUser({ name: 'Ghost User', email: 'ghost@mail.com', password: '123456' }))
+        .body as AuthResult;
+      const wellFormedButMissingId = new mongoose.Types.ObjectId().toHexString();
+
+      const response = await request(app)
+        .put(`/api/tasks/${wellFormedButMissingId}`)
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ title: 'Ghost task' });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('rejects an invalid due date on create rather than persisting an Invalid Date', async () => {
+      const user = (await registerUser({ name: 'Date User', email: 'dateuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const response = await createTaskForUser(user.token, { title: 'Bad date task', dueDate: 'not-a-real-date' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toContain('dueDate');
+
+      const stored = await Task.findOne({ title: 'Bad date task' });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects an invalid due date on update', async () => {
+      const user = (await registerUser({ name: 'Date User 2', email: 'dateuser2@mail.com', password: '123456' }))
+        .body as AuthResult;
+      const created = await createTaskForUser(user.token, { title: 'Valid task' });
+      const taskId = created.body.task._id as string;
+
+      const response = await request(app)
+        .put(`/api/tasks/${taskId}`)
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ dueDate: 'also-not-a-date' });
+
+      expect(response.status).toBe(400);
+
+      const stored = await Task.findById(taskId);
+      expect(stored?.dueDate).toBeUndefined();
+    });
+
+    it('rejects empty or whitespace-only titles consistently on both create and update', async () => {
+      const user = (await registerUser({ name: 'Title User', email: 'titleuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const createResponse = await createTaskForUser(user.token, { title: '   ' });
+      expect(createResponse.status).toBe(400);
+
+      const created = await createTaskForUser(user.token, { title: 'Real task' });
+      const taskId = created.body.task._id as string;
+
+      const updateResponse = await request(app)
+        .put(`/api/tasks/${taskId}`)
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ title: '   ' });
+
+      expect(updateResponse.status).toBe(400);
+
+      // Confirm the title in the DB was never silently blanked out.
+      const stored = await Task.findById(taskId);
+      expect(stored?.title).toBe('Real task');
+    });
+
+    it('rejects a title over the maximum length instead of silently truncating it', async () => {
+      const user = (await registerUser({ name: 'Long Title', email: 'longtitle@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const response = await createTaskForUser(user.token, { title: 'a'.repeat(500) });
+
+      expect(response.status).toBe(400);
+      const stored = await Task.findOne({ userId: new mongoose.Types.ObjectId(user.user.id) });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects an invalid priority value', async () => {
+      const user = (await registerUser({ name: 'Priority User', email: 'priorityuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const response = await createTaskForUser(user.token, { title: 'Task', priority: 'urgent' });
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects too many tags and an over-length tag', async () => {
+      const user = (await registerUser({ name: 'Tag User', email: 'taguser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const tooManyTags = await createTaskForUser(user.token, {
+        title: 'Task',
+        tags: Array.from({ length: 25 }, (_, i) => `tag${i}`),
+      });
+      expect(tooManyTags.status).toBe(400);
+
+      const overLengthTag = await createTaskForUser(user.token, { title: 'Task', tags: ['a'.repeat(100)] });
+      expect(overLengthTag.status).toBe(400);
+    });
+
+    it('rejects a negative or absurdly large estimatedMinutes', async () => {
+      const user = (await registerUser({ name: 'Minutes User', email: 'minutesuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const negative = await createTaskForUser(user.token, { title: 'Task', estimatedMinutes: -5 });
+      expect(negative.status).toBe(400);
+
+      const tooLarge = await createTaskForUser(user.token, { title: 'Task', estimatedMinutes: 999_999_999 });
+      expect(tooLarge.status).toBe(400);
+    });
+
+    it('rejects an empty string for estimatedMinutes rather than silently coercing it to zero', async () => {
+      const user = (
+        await registerUser({ name: 'Empty Minutes User', email: 'emptyminutes@mail.com', password: '123456' })
+      ).body as AuthResult;
+
+      const response = await createTaskForUser(user.token, { title: 'Task', estimatedMinutes: '' });
+      expect(response.status).toBe(400);
+
+      const stored = await Task.findOne({ title: 'Task', userId: new mongoose.Types.ObjectId(user.user.id) });
+      expect(stored).toBeNull();
+    });
+
+    it('paginates task listing with a default and a bounded maximum page size', async () => {
+      const user = (await registerUser({ name: 'Page User', email: 'pageuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      for (let i = 0; i < 5; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await createTaskForUser(user.token, { title: `Task ${i}` });
+      }
+
+      const firstPage = await request(app)
+        .get('/api/tasks?page=1&limit=2')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(firstPage.status).toBe(200);
+      expect(firstPage.body.tasks).toHaveLength(2);
+      expect(firstPage.body.page).toBe(1);
+      expect(firstPage.body.limit).toBe(2);
+      expect(firstPage.body.total).toBe(5);
+      expect(firstPage.body.hasMore).toBe(true);
+
+      const secondPage = await request(app)
+        .get('/api/tasks?page=2&limit=2')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(secondPage.body.tasks).toHaveLength(2);
+
+      const lastPage = await request(app)
+        .get('/api/tasks?page=3&limit=2')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(lastPage.body.tasks).toHaveLength(1);
+      expect(lastPage.body.hasMore).toBe(false);
+
+      // No page/limit at all — the pre-pagination contract — still returns
+      // every task the user has (well under the default page size).
+      const unpaginated = await request(app).get('/api/tasks').set('Authorization', `Bearer ${user.token}`);
+      expect(unpaginated.body.tasks).toHaveLength(5);
+    });
+
+    it('caps an oversized limit request rather than rejecting it', async () => {
+      const user = (await registerUser({ name: 'Cap User', email: 'capuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+      await createTaskForUser(user.token, { title: 'Only task' });
+
+      const response = await request(app)
+        .get('/api/tasks?limit=999999')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.limit).toBeLessThanOrEqual(200);
+    });
+
+    it('rejects a malformed pagination query deliberately instead of silently defaulting', async () => {
+      const user = (await registerUser({ name: 'Bad Page User', email: 'badpageuser@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      const badPage = await request(app).get('/api/tasks?page=abc').set('Authorization', `Bearer ${user.token}`);
+      expect(badPage.status).toBe(400);
+
+      const badLimit = await request(app).get('/api/tasks?limit=-1').set('Authorization', `Bearer ${user.token}`);
+      expect(badLimit.status).toBe(400);
+    });
+
+    it('pagination never bypasses ownership filtering', async () => {
+      const userOne = (await registerUser({ name: 'Owner One', email: 'ownerone@mail.com', password: '123456' }))
+        .body as AuthResult;
+      const userTwo = (await registerUser({ name: 'Owner Two', email: 'ownertwo@mail.com', password: '123456' }))
+        .body as AuthResult;
+
+      await createTaskForUser(userOne.token, { title: 'User one task' });
+      await createTaskForUser(userTwo.token, { title: 'User two task A' });
+      await createTaskForUser(userTwo.token, { title: 'User two task B' });
+
+      const userOneList = await request(app)
+        .get('/api/tasks?page=1&limit=50')
+        .set('Authorization', `Bearer ${userOne.token}`);
+
+      expect(userOneList.body.tasks).toHaveLength(1);
+      expect(userOneList.body.total).toBe(1);
+      expect(userOneList.body.tasks[0].title).toBe('User one task');
+    });
+
+    it('still allows a normal, valid task update to go through unchanged', async () => {
+      const user = (await registerUser({ name: 'Valid Update', email: 'validupdate@mail.com', password: '123456' }))
+        .body as AuthResult;
+      const created = await createTaskForUser(user.token, { title: 'Original title', priority: 'low' });
+      const taskId = created.body.task._id as string;
+
+      const response = await request(app)
+        .put(`/api/tasks/${taskId}`)
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ title: 'Updated title', priority: 'high', dueDate: '2026-12-01T00:00:00.000Z' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.task.title).toBe('Updated title');
+      expect(response.body.task.priority).toBe('high');
+    });
+  });
 });

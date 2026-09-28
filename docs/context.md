@@ -178,6 +178,35 @@ Reminder-related modules:
 - `reminders/scheduler.ts`
 - `reminders/settings.ts`
 
+## Task API Contract (Backend)
+
+`GET /api/tasks` is paginated (added when task-controller input validation was
+hardened):
+- Query params: `page` (1-indexed, default `1`) and `limit` (default `200`,
+  hard-capped at `200` regardless of what's requested — this is the bounded
+  maximum, not just a suggestion).
+- Response adds `page`, `limit`, `total`, `hasMore` alongside the existing
+  `tasks` array — additive, so a client that only reads `{ tasks }` still
+  works. The frontend's `taskService.getTasks()` (in
+  `halotasks-client/src/services/taskService.ts`) transparently loops pages
+  until `hasMore` is false and combines the results, so no caller anywhere
+  in the app needs to know pagination exists, and a user with more than 200
+  tasks is never silently truncated.
+- `page`/`limit` values that aren't positive integers are rejected with 400
+  rather than silently defaulted.
+
+`PUT /api/tasks/:id` and `DELETE /api/tasks/:id` validate `:id` as a Mongo
+ObjectId before querying — a malformed id now returns 400, not a 500 from an
+unhandled Mongoose CastError.
+
+Task body validation (`title`, `description`, `tags`, `priority`,
+`dueDate`, `estimatedMinutes`) is centralized in
+`halotasks-server/src/utils/taskValidators.ts` and applied identically on
+create and update, so an empty/whitespace title (or an invalid due date, or
+an out-of-range value) is rejected the same way regardless of which
+endpoint is called. See `docs/logs.md` for the full list of limits (title,
+description, tag length/count, estimated-minutes range).
+
 ## Documentation System
 
 The main documentation index is:

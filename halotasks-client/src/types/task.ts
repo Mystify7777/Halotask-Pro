@@ -19,6 +19,10 @@ export type Task = {
 
 export type TaskListResponse = {
   tasks: Task[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  hasMore?: boolean;
 };
 
 export type TaskCreatePayload = {
