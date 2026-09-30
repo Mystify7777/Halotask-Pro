@@ -4,6 +4,25 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-09-30",
+      "category": "Backend",
+      "title": "3009: harden server startup, shutdown, CORS, and request limits",
+      "description": "startServer() now has an explicit .catch() (previously `void startServer();` with no rejection handling), so a startup-specific failure like connectDB() rejecting gets a clear \"Failed to start server\" log and a non-zero exit instead of silently becoming an unhandled rejection. Extracted resolveOrigin() (CORS) into src/config/cors.ts and the startup-failure/graceful-shutdown logic into src/utils/processLifecycle.ts (exitWithFatalError(), createGracefulShutdown()) as standalone, dependency-injected functions so they're unit-testable without spawning a real process or opening a real HTTP/DB connection; behavior is unchanged (CORS still fails closed in production when CLIENT_ORIGIN is missing, dev still falls back to localhost, shutdown still closes the HTTP server before Mongoose with a 10s unref'd force-exit safety timer). Fixed a real bug found while extracting this: the global error handler in app.ts flattened every error to a generic 500, including body-parser's own express.json() errors for an oversized body (413, PayloadTooLargeError) or malformed JSON (400, SyntaxError) - both were being reported as 500 even though body-parser already knew the correct status. Added src/utils/httpErrors.ts (isPayloadTooLargeError(), isMalformedJsonBodyError()) with type guards verified empirically against the installed body-parser version, and the error handler now checks those first. Added unit tests for resolveOrigin(), exitWithFatalError()/createGracefulShutdown() (including force-exit-on-timeout, no-double-exit-on-a-second-signal, and resilience to closeServer/closeDb errors), and the httpErrors guards - none need MongoDB. Added tests/httpBoundary.test.ts, a supertest-based integration suite exercising the real CORS/body-limit/error-handler wiring end to end (also without MongoDB, by building a small app from the same middleware/resolver rather than importing src/app.ts directly, which would otherwise trigger a Mongoose \"Cannot overwrite model\" error when re-imported under different env vars in the same test run). Documented the 1MB request body limit and the CORS fail-closed behavior in README.md and docs/context.md.",
+      "files": [
+        "halotasks-server/src/config/cors.ts",
+        "halotasks-server/src/utils/processLifecycle.ts",
+        "halotasks-server/src/utils/httpErrors.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/src/server.ts",
+        "halotasks-server/tests/cors.test.ts",
+        "halotasks-server/tests/processLifecycle.test.ts",
+        "halotasks-server/tests/httpErrors.test.ts",
+        "halotasks-server/tests/httpBoundary.test.ts",
+        "README.md",
+        "docs/context.md"
+      ]
+    },
+    {
       "date": "2026-09-26",
       "category": "Backend",
       "title": "2609: harden task API validation and query boundaries",

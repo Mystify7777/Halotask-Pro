@@ -5,32 +5,8 @@ import pushRoutes from './routes/push.routes';
 import taskRoutes from './routes/task.routes';
 import treeRoutes from './routes/tree.routes';
 import historyRoutes from './routes/history.routes';
-
-// ── CORS origin resolution ─────────────────────────────────────────────────────────────
-// Fails CLOSED in production when CLIENT_ORIGIN is not set — no env var means
-// no cross-origin access rather than open-to-all-origins.
-// In development, falls back to common local dev ports so the app still works
-// without an .env file.
-const resolveOrigin = (): cors.CorsOptions['origin'] => {
-  const clientOrigin = process.env.CLIENT_ORIGIN;
-
-  if (clientOrigin) return clientOrigin;
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.warn(
-      '[CORS] CLIENT_ORIGIN not set — allowing localhost in development. ' +
-      'Set CLIENT_ORIGIN in .env for predictable behaviour.',
-    );
-    return ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
-  }
-
-  // Production: missing env var → reject all cross-origin requests
-  console.error(
-    '[CORS] CLIENT_ORIGIN is not set in production. ' +
-    'All cross-origin requests will be rejected.',
-  );
-  return false;
-};
+import { resolveOrigin } from './config/cors';
+import { isMalformedJsonBodyError, isPayloadTooLargeError } from './utils/httpErrors';
 
 const app = express();
 
@@ -59,6 +35,11 @@ app.use((req, res) => {
 // In production: log the full error internally, return a generic message to
 // the client — raw error.message can leak DB details, file paths, etc.
 // In development: surface the message for easier debugging.
+//
+// express.json() (body-parser) already determines the correct status for
+// request-body problems — 413 for an oversized body, 400 for malformed
+// JSON — but throws a regular Error, so without an explicit check here
+// those would fall through to a misleading generic 500.
 app.use(
   (
     error: unknown,
@@ -66,6 +47,16 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
+    if (isPayloadTooLargeError(error)) {
+      res.status(413).json({ message: 'Request body is too large' });
+      return;
+    }
+
+    if (isMalformedJsonBodyError(error)) {
+      res.status(400).json({ message: 'Request body is not valid JSON' });
+      return;
+    }
+
     const isDev = process.env.NODE_ENV !== 'production';
     console.error('[Server] Unhandled error:', error);
     const message =

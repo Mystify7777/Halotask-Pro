@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
 import { getResetTokenTtlMinutes } from './config/env';
+import { createGracefulShutdown, exitWithFatalError } from './utils/processLifecycle';
 
 // ── Startup validation ─────────────────────────────────────────────────────
 // Fail fast on missing critical env vars — better to refuse to start than to
@@ -10,8 +11,7 @@ import { getResetTokenTtlMinutes } from './config/env';
 const REQUIRED_ENV = ['JWT_SECRET', 'MONGO_URI'] as const;
 const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
 if (missing.length > 0) {
-  console.error(`[Server] Missing required environment variables: ${missing.join(', ')}`);
-  process.exit(1);
+  exitWithFatalError(`Missing required environment variables: ${missing.join(', ')}`);
 }
 
 // A malformed RESET_TOKEN_TTL_MINUTES would otherwise silently produce
@@ -19,8 +19,7 @@ if (missing.length > 0) {
 try {
   getResetTokenTtlMinutes();
 } catch (error) {
-  console.error(`[Server] ${error instanceof Error ? error.message : 'Invalid RESET_TOKEN_TTL_MINUTES configuration'}`);
-  process.exit(1);
+  exitWithFatalError('Invalid RESET_TOKEN_TTL_MINUTES configuration', error);
 }
 
 const port = Number(process.env.PORT ?? 5000);
@@ -28,13 +27,11 @@ const port = Number(process.env.PORT ?? 5000);
 // ── Global crash handlers ──────────────────────────────────────────────────
 // Must be registered before startServer() so they cover the DB connect phase.
 process.on('uncaughtException', (error: Error) => {
-  console.error('[Server] Uncaught exception — shutting down:', error);
-  process.exit(1);
+  exitWithFatalError('Uncaught exception — shutting down', error);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-  console.error('[Server] Unhandled promise rejection — shutting down:', reason);
-  process.exit(1);
+  exitWithFatalError('Unhandled promise rejection — shutting down', reason);
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
@@ -48,31 +45,16 @@ const startServer = async () => {
   // ── Graceful shutdown ────────────────────────────────────────────────────
   // Stop accepting new connections, wait for in-flight requests to finish,
   // then close the MongoDB connection before exiting.
-  const shutdown = async (signal: string) => {
-    console.log(`[Server] ${signal} received — shutting down gracefully`);
-
-    // Force-exit if shutdown takes longer than 10 seconds
-    const forceExit = setTimeout(() => {
-      console.error('[Server] Graceful shutdown timed out — forcing exit');
-      process.exit(1);
-    }, 10_000);
-    forceExit.unref(); // don't keep the event loop alive just for this timer
-
-    server.close(async () => {
-      console.log('[Server] HTTP server closed');
-      try {
-        await mongoose.connection.close();
-        console.log('[Server] MongoDB connection closed');
-      } catch (err) {
-        console.error('[Server] Error closing MongoDB connection:', err);
-      }
-      clearTimeout(forceExit);
-      process.exit(0);
-    });
-  };
+  const shutdown = createGracefulShutdown({
+    closeServer: (callback) => server.close((error) => callback(error)),
+    closeDb: () => mongoose.connection.close(),
+  });
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT',  () => void shutdown('SIGINT'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 };
 
-void startServer();
+// Startup-specific failures (e.g. the DB connection failing) get a clear,
+// specific log message here rather than falling through to the generic
+// uncaughtException/unhandledRejection handlers above.
+startServer().catch((error) => exitWithFatalError('Failed to start server', error));

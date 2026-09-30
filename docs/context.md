@@ -207,6 +207,41 @@ an out-of-range value) is rejected the same way regardless of which
 endpoint is called. See `docs/logs.md` for the full list of limits (title,
 description, tag length/count, estimated-minutes range).
 
+## Server Lifecycle, CORS, and Request Limits (Backend)
+
+The server's startup, shutdown, CORS, and request-body-size behavior is
+deliberately explicit rather than left to Express/Node defaults:
+
+- `src/server.ts` validates required env vars (`JWT_SECRET`, `MONGO_URI`)
+  and `RESET_TOKEN_TTL_MINUTES` before starting, and exits non-zero via
+  `exitWithFatalError()` (in `src/utils/processLifecycle.ts`) on failure —
+  including when `connectDB()` itself fails, via an explicit
+  `startServer().catch(...)` rather than relying on the generic
+  `uncaughtException`/`unhandledRejection` handlers to catch it.
+- SIGTERM/SIGINT are handled by `createGracefulShutdown()` (same file):
+  stop accepting new connections and let in-flight requests finish, then
+  close the Mongoose connection, then exit 0. A 10s unref'd force-exit
+  timer is a safety net if closing hangs; a second shutdown signal while
+  one is already in progress is a no-op rather than double-running the
+  sequence.
+- CORS origin resolution lives in `src/config/cors.ts` (`resolveOrigin()`):
+  `CLIENT_ORIGIN` set → used as-is. Unset in development → falls back to
+  the fixed localhost dev ports. Unset in production → returns `false`
+  (rejects all cross-origin requests) — missing config can never silently
+  become permissive/wildcard.
+- `express.json({ limit: '1mb' })` bounds request body size. The global
+  error handler in `src/app.ts` checks `src/utils/httpErrors.ts`'s type
+  guards first, so an oversized body returns 413 and malformed JSON
+  returns 400 — both correctly, instead of falling through to a generic
+  500 (body-parser already knows the right status; the handler just has
+  to not discard it).
+- Covered by `tests/processLifecycle.test.ts`, `tests/cors.test.ts`,
+  `tests/httpErrors.test.ts` (pure unit tests, no DB) and
+  `tests/httpBoundary.test.ts` (supertest against a minimal app built
+  from the same middleware/resolver, avoiding the Mongoose
+  model-registration issue that comes from re-importing `src/app.ts`
+  under different env vars in the same test run).
+
 ## Documentation System
 
 The main documentation index is:

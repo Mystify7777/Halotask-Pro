@@ -211,6 +211,9 @@ MONGO_DNS_SERVERS=8.8.8.8,1.1.1.1
 
 # Auth
 JWT_SECRET=<generate-with-openssl-rand-base64-32>
+# Required in production — if unset, CORS fails closed (rejects all
+# cross-origin requests) rather than falling back to something permissive.
+# In development, an unset value falls back to the standard local dev ports.
 CLIENT_ORIGIN=http://localhost:5173
 
 # Email & Password Reset
@@ -294,9 +297,14 @@ HaloTaskPro is a full-stack portfolio project showcasing:
 - Reset tokens expire after 20 minutes (configurable)
 - Reset tokens are hashed before storage (not readable in DB)
 - Password reset is single-use (token deleted after use)
-- CORS restricted to single origin per environment
+- CORS restricted to single origin per environment; fails closed (rejects all
+  cross-origin requests) if `CLIENT_ORIGIN` is missing in production
+- Request bodies are capped at 1MB (`express.json({ limit: '1mb' })`);
+  oversized bodies get a 413, malformed JSON gets a 400
 - Rate limiting on forgot-password endpoint
 - Neutral error messages prevent email enumeration
+- Graceful shutdown on SIGTERM/SIGINT — HTTP server and MongoDB connection
+  are closed cleanly before the process exits
 
 ---
 
