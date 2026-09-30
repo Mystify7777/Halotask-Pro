@@ -5,6 +5,21 @@
   "entries": [
     {
       "date": "2026-09-30",
+      "category": "Bugfix",
+      "title": "3009: isolate Growth Tree client state per authenticated user (Issue #30)",
+      "description": "Fixed an account-to-account contamination bug in the client Growth Tree persistence layer: state lived under one global IndexedDB key (growth_tree) with an owner-less module-level cache, so after logout/login on a shared browser user A's local XP and awardedTaskIds could be merged into user B's state and pushed to B's server record. treeStorage.ts now keys IndexedDB records as growth_tree:<userId> (user id from useAuthStore, via the existing offlineDb; no schema change) and the in-memory cache records its owner, so getTreeState() never returns another user's state. initTreeStorage() throws TreeIdentityError when there is no authenticated user and discards its result (no cache write, IndexedDB write or server push) if the user changes while it is awaiting local or server state; setTreeState() throws unless init has completed for the current user. Legacy unscoped data (growth_tree in IndexedDB, halotask:growth_tree in localStorage) has no provable owner, so it is never read or migrated and is deleted on init; the server copy is the recovery path for progress that was successfully synchronized. clearAuth() intentionally does not clear Growth Tree state: owner-scoped keys and cache already prevent cross-user reads, and wiping on logout or 401 would destroy the previous user's unsynced offline progress. useDashboardGrowth re-initialises when the user id changes and skips awards on identity mismatch; InsightsPage now handles an init rejection explicitly (logs and shows no tree while the rest of the page loads). Reward rules, XP values, streak/health rules, stage thresholds and merge semantics are unchanged. Added 13 regression tests (two users on shared storage, logout/login cycles, higher local XP vs lower server XP, awardedTaskIds isolation, mid-init account switch, no-user failure, legacy purge, single-user/offline/merge behaviour). Full client suite (29 tests), tsc -b and vite build pass. Known follow-up: the global tasks cache in offline/cache.ts has the same cross-user bug class and is not addressed here.",
+      "files": [
+        "halotasks-client/src/growth/treeStorage.ts",
+        "halotasks-client/src/growth/treeStorage.test.ts",
+        "halotasks-client/src/hooks/useDashboardGrowth.ts",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-09-30",
       "category": "Backend",
       "title": "3009: harden server startup, shutdown, CORS, and request limits",
       "description": "startServer() now has an explicit .catch() (previously `void startServer();` with no rejection handling), so a startup-specific failure like connectDB() rejecting gets a clear \"Failed to start server\" log and a non-zero exit instead of silently becoming an unhandled rejection. Extracted resolveOrigin() (CORS) into src/config/cors.ts and the startup-failure/graceful-shutdown logic into src/utils/processLifecycle.ts (exitWithFatalError(), createGracefulShutdown()) as standalone, dependency-injected functions so they're unit-testable without spawning a real process or opening a real HTTP/DB connection; behavior is unchanged (CORS still fails closed in production when CLIENT_ORIGIN is missing, dev still falls back to localhost, shutdown still closes the HTTP server before Mongoose with a 10s unref'd force-exit safety timer). Fixed a real bug found while extracting this: the global error handler in app.ts flattened every error to a generic 500, including body-parser's own express.json() errors for an oversized body (413, PayloadTooLargeError) or malformed JSON (400, SyntaxError) - both were being reported as 500 even though body-parser already knew the correct status. Added src/utils/httpErrors.ts (isPayloadTooLargeError(), isMalformedJsonBodyError()) with type guards verified empirically against the installed body-parser version, and the error handler now checks those first. Added unit tests for resolveOrigin(), exitWithFatalError()/createGracefulShutdown() (including force-exit-on-timeout, no-double-exit-on-a-second-signal, and resilience to closeServer/closeDb errors), and the httpErrors guards - none need MongoDB. Added tests/httpBoundary.test.ts, a supertest-based integration suite exercising the real CORS/body-limit/error-handler wiring end to end (also without MongoDB, by building a small app from the same middleware/resolver rather than importing src/app.ts directly, which would otherwise trigger a Mongoose \"Cannot overwrite model\" error when re-imported under different env vars in the same test run). Documented the 1MB request body limit and the CORS fail-closed behavior in README.md and docs/context.md.",
@@ -639,5 +654,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-05-23T13:40:00Z"
+  "lastUpdated": "2026-09-30T02:52:29Z"
 }

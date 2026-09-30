@@ -114,6 +114,19 @@ Important orb behavior:
 - Desktop tap behavior falls back to tooltip interaction to avoid scroll-lock issues
 - Orb data is derived from tree state so the display reflects live XP/progress/stage data
 
+### Growth Tree storage contract (user-scoped, Issue #30)
+
+Client Growth Tree persistence (`growth/treeStorage.ts`) is strictly per-user:
+
+- Identity: `useAuthStore.getState().user.id`. It comes from the same login response as the token the API client sends, so the server updates the same user the client keys locally.
+- IndexedDB key: `growth_tree:<userId>` (via `offlineDb`; no new store or DB version).
+- In-memory cache records its owner. `getTreeState()` never returns another user's cache (returns initial state instead); `setTreeState()` throws `TreeIdentityError` unless `initTreeStorage()` has completed for the current user.
+- `initTreeStorage()` throws `TreeIdentityError` when no user is authenticated, and discards its result (no cache write, no IndexedDB write, no server push) if the authenticated user changes while it is awaiting local or server state. Callers must handle the rejection (`useDashboardGrowth` and `InsightsPage` both do: log and show no tree).
+- Merge rules (higher XP wins, union of `awardedTaskIds`) are unchanged and now only ever combine one user's local record with that same user's server record.
+- `clearAuth()` deliberately does not clear Growth Tree state. Owner-scoped keys and cache already prevent cross-user reads, and wiping on logout or 401 would destroy the previous user's unsynced offline progress. Consequence: a user's tree record remains in that browser's IndexedDB until they log in again or `clearTreeState()` is called.
+
+Legacy unscoped data decision: the old global IndexedDB key `growth_tree` and localStorage key `halotask:growth_tree` recorded no owner, so they are never read or migrated to whichever user logs in next. `initTreeStorage()` deletes both. The server copy (whatever was successfully synchronized) is the recovery path for the real owner; progress that was never successfully synchronized under the old code is lost.
+
 ## Offline Architecture
 
 The app is built to tolerate network interruption.

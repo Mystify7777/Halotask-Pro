@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import InsightModal from '../components/dashboard/InsightModal';
-import { initTreeStorage } from '../growth/treeStorage';
+import { initTreeStorage, TreeIdentityError } from '../growth/treeStorage';
 import { getWeekHistory, type HistoryEntry, type WeekHistory } from '../offline/history';
 import { getCachedTasks } from '../offline/cache';
 import { taskService } from '../services/taskService';
@@ -343,8 +343,24 @@ export default function InsightsPage() {
   useEffect(() => {
     let cancelled = false;
 
+    // initTreeStorage() rejects with TreeIdentityError when there is no authenticated
+    // user or the account changed mid-init. Show no tree rather than a stale or
+    // shared one; the rest of the page still loads.
+    async function loadTree(): Promise<TreeState | null> {
+      try {
+        return await initTreeStorage();
+      } catch (err) {
+        if (err instanceof TreeIdentityError) {
+          console.warn('[InsightsPage] Growth Tree init skipped:', err.message);
+        } else {
+          console.error('[InsightsPage] Growth Tree init failed:', err);
+        }
+        return null;
+      }
+    }
+
     async function load() {
-      const [tree, hist] = await Promise.all([initTreeStorage(), getWeekHistory()]);
+      const [tree, hist] = await Promise.all([loadTree(), getWeekHistory()]);
 
       if (!cancelled) {
         setTreeState(tree);
