@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { aiService, type ParsedAiTask } from '../services/aiService';
+import { getApiErrorMessage } from '../services/api';
 import { taskService } from '../services/taskService';
 import type { Priority, Task, TaskCreatePayload } from '../types/task';
 import { sanitizeTags } from '../utils/tagHelpers';
@@ -15,30 +17,7 @@ export interface AiTaskDraft {
   description: string;
 }
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const VALID_PRIORITIES: Priority[] = ['low', 'medium', 'high'];
-
-function buildPrompt(input: string): string {
-  const today = new Date().toISOString().split('T')[0];
-
-  return `You are a task parser. Today is ${today}.
-
-Parse the following text into a JSON array of task objects. Each object must include:
-- "title"             — string, concise action phrase (required)
-- "priority"          — "low" | "medium" | "high" (infer from urgency; default "medium")
-- "dueDate"           — ISO date "YYYY-MM-DD" resolving relative terms like "tomorrow" or "next Friday" against today; omit entirely if not mentioned
-- "estimatedMinutes"  — number, infer from context; omit if unclear
-- "tags"              — string array with at least one tag inferred from context
-- "description"       — any extra detail not captured in the title; empty string if none
-
-Rules:
-• Split compound inputs into separate tasks.
-• Return ONLY a valid JSON array — no markdown fences, no prose, no explanation.
-• If the text contains no actionable tasks, return [].
-
-Text: "${input.replace(/"/g, '\\"')}"`;
-}
 
 type UseAiTaskCreationArgs = {
   persistTasks: (updater: (prev: Task[]) => Task[]) => void;
@@ -83,45 +62,13 @@ export function useAiTaskCreation({
       return;
     }
 
-    const apiKey = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
-
-    if (!apiKey) {
-      setAiError('No Groq API key found. Add VITE_GROQ_API_KEY to your .env file and restart the dev server.');
-      return;
-    }
-
     setPhase('parsing');
     setAiError(null);
 
     try {
-      const response = await fetch(GROQ_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages: [{ role: 'user', content: buildPrompt(prompt) }],
-          temperature: 0.2,
-          max_tokens: 1024,
-        }),
-      });
+      const parsed: ParsedAiTask[] = await aiService.parseTasks(prompt.trim());
 
-      if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(errorData?.error?.message ?? `Groq error ${response.status}`);
-      }
-
-      const data = (await response.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-
-      const raw = data?.choices?.[0]?.message?.content ?? '[]';
-      const clean = raw.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean) as Partial<AiTaskDraft>[];
-
-      if (!Array.isArray(parsed) || parsed.length === 0) {
+      if (parsed.length === 0) {
         setAiError('Couldn\'t find any tasks in that input. Try being more specific, e.g. "Book dentist appointment next Tuesday, high priority."');
         setPhase('input');
         return;
@@ -140,7 +87,7 @@ export function useAiTaskCreation({
       setDrafts(withIds);
       setPhase('preview');
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'Failed to parse tasks. Please try again.');
+      setAiError(getApiErrorMessage(error, 'Failed to parse tasks. Please try again.'));
       setPhase('input');
     }
   };

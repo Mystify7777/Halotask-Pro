@@ -1,4 +1,5 @@
 import type { AiPhase, AiTaskDraft } from '../../hooks/useAiTaskCreation';
+import { AI_PROMPT_MAX_LENGTH } from '../../services/aiService';
 
 type AiTaskInputProps = {
   phase: AiPhase;
@@ -84,6 +85,7 @@ export default function AiTaskInput({
             onChange={(event) => onPromptChange(event.target.value)}
             disabled={isParsing}
             rows={4}
+            maxLength={AI_PROMPT_MAX_LENGTH}
             autoFocus
             aria-label="Describe your tasks"
           />

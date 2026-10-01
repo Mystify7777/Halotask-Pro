@@ -2,7 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
-import { getResetTokenTtlMinutes } from './config/env';
+import { getGroqApiKey, getResetTokenTtlMinutes } from './config/env';
 import { createGracefulShutdown, exitWithFatalError } from './utils/processLifecycle';
 
 // ── Startup validation ─────────────────────────────────────────────────────
@@ -20,6 +20,12 @@ try {
   getResetTokenTtlMinutes();
 } catch (error) {
   exitWithFatalError('Invalid RESET_TOKEN_TTL_MINUTES configuration', error);
+}
+
+// AI task creation is optional: without GROQ_API_KEY the endpoint answers 503 and the rest of the app
+// is unaffected, so warn (like missing VAPID keys) rather than refuse to start.
+if (!getGroqApiKey()) {
+  console.warn('[AI] GROQ_API_KEY not configured. AI task creation will be unavailable.');
 }
 
 const port = Number(process.env.PORT ?? 5000);

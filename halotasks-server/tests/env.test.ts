@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getResetTokenTtlMinutes } from '../src/config/env';
+import { getGroqApiKey, getResetTokenTtlMinutes } from '../src/config/env';
 
 const ORIGINAL_VALUE = process.env.RESET_TOKEN_TTL_MINUTES;
 
@@ -48,5 +48,17 @@ describe('getResetTokenTtlMinutes', () => {
   it('rejects a non-integer value', () => {
     process.env.RESET_TOKEN_TTL_MINUTES = '5.5';
     expect(() => getResetTokenTtlMinutes()).toThrow();
+  });
+});
+
+describe('getGroqApiKey', () => {
+  it('returns null when unset, empty or blank', () => {
+    expect(getGroqApiKey({})).toBeNull();
+    expect(getGroqApiKey({ GROQ_API_KEY: '' })).toBeNull();
+    expect(getGroqApiKey({ GROQ_API_KEY: '   ' })).toBeNull();
+  });
+
+  it('returns the trimmed key when configured', () => {
+    expect(getGroqApiKey({ GROQ_API_KEY: '  gsk_abc ' })).toBe('gsk_abc');
   });
 });

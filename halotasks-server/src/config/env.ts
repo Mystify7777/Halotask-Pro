@@ -29,3 +29,16 @@ export function getResetTokenTtlMinutes(): number {
 
   return parsed;
 }
+
+/**
+ * Server-only Groq credentials for AI task parsing (POST /api/ai/parse-tasks).
+ *
+ * The key lives ONLY in the server environment (GROQ_API_KEY) — never in a VITE_* variable, a
+ * response body, a log line, or an error message. Returns null when it is not configured so the
+ * endpoint can answer with a generic 503 instead of crashing or leaking configuration details.
+ */
+export function getGroqApiKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.GROQ_API_KEY;
+  if (raw === undefined || raw.trim() === '') return null;
+  return raw.trim();
+}

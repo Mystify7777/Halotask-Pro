@@ -228,6 +228,10 @@ RESET_TOKEN_TTL_MINUTES=20
 # Local dev only — logs the reset code when no email transport is configured.
 # Ignored when NODE_ENV=production, so it can never leak codes in prod.
 RESET_CODE_DEMO_MODE=true
+
+# AI task creation (Groq). SERVER-ONLY secret — the browser never sees it and there is no VITE_
+# equivalent. Leave unset to disable the feature (POST /api/ai/parse-tasks then answers 503).
+GROQ_API_KEY=
 ```
 
 ### Frontend (.env)

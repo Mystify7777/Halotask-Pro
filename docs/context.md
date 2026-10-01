@@ -299,6 +299,37 @@ replace. If two devices both pull and then push within the same short GET→PUT 
 overwrite a task the other just added. Closing that window needs an atomic server-side merge, which was
 not built here because it cannot be tested without MongoDB in this environment.
 
+## AI Task Creation (Issue #22)
+
+The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through
+`services/aiService.ts` (the shared `apiClient`, so it carries the normal Bearer token), and the
+backend owns the Groq key.
+
+- **Endpoint:** `POST /api/ai/parse-tasks` (`routes/ai.routes.ts` → `controllers/ai.controller.ts`),
+  behind the existing `requireAuth` middleware — no second auth mechanism.
+- **Request:** `{ prompt: string }`, non-empty after trimming, at most 2000 characters
+  (`AI_PROMPT_MAX_LENGTH`, mirrored by the textarea's `maxLength`). Other fields are ignored; the provider,
+  model, endpoint, temperature and `max_tokens` are server constants (`utils/groqClient.ts`) and cannot be
+  chosen by a caller. Validation runs **before** the provider is contacted.
+- **Response:** `200 { tasks: [{ title, priority, dueDate?, estimatedMinutes?, tags, description }] }`
+  (possibly empty). The server parses and sanitises the model output (`utils/aiTaskParser.ts`: at most 20
+  tasks, bounded title/description/tags, real `YYYY-MM-DD` dates, valid minutes, priority defaults to
+  `medium`); the client keeps its own defensive mapping to preview drafts, so the UX is unchanged.
+- **Errors (all generic messages):** `400` invalid request; `429` provider rate-limited; `502` provider
+  unavailable/auth failure/unexpected output; `504` provider timeout (20s); `503` `GROQ_API_KEY` not
+  configured. A provider 401/403 is deliberately mapped to 502, never forwarded as 401 — the client's
+  interceptor would otherwise log the user out. Provider error text is never returned or logged; logs hold
+  only a failure category and upstream status, never the key, the prompt or generated content.
+- **Config:** `GROQ_API_KEY` is read only on the server (`config/env.ts#getGroqApiKey`); it is documented in
+  `halotasks-server/.env.example`, `.env.production` and the README. `server.ts` warns (does not refuse to
+  start) when it is unset. `VITE_GROQ_API_KEY` was removed from the client env files and code; the client
+  build needs no provider secret, and `src/test/noClientSecrets.test.ts` fails if a provider reference or
+  key variable reappears in client source.
+- **Rate limiting:** no reusable limiter exists in the repo. Per the issue, none was built here; the endpoint
+  is bounded by authentication, the prompt cap, `max_tokens` and the timeout. Per-user/IP limiting is the
+  dependency on **Issue #23**.
+- Prompt "today" is the server's UTC date (the browser previously used the UTC date too).
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is

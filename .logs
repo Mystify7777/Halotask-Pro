@@ -6,6 +6,37 @@
     {
       "date": "2026-10-01",
       "category": "Bugfix",
+      "title": "3009: move AI task creation behind the authenticated backend (Issue #22)",
+      "description": "The browser called Groq directly with a Bearer key read from import.meta.env.VITE_GROQ_API_KEY, so the secret was shipped in the client bundle. AI parsing now goes through POST /api/ai/parse-tasks behind the existing requireAuth middleware. Request: { prompt } (non-empty after trimming, max 2000 chars; any provider/model/url/temperature fields are ignored because provider, model, endpoint and max_tokens are server constants). Response: 200 { tasks: [{ title, priority, dueDate?, estimatedMinutes?, tags, description }] }; the server runs the same parsing prompt and sanitises the model output (max 20 tasks, bounded title/description/tags, real YYYY-MM-DD dates, valid minutes), and the client keeps its draft mapping so the UX is unchanged. Validation runs before any provider call. Errors are generic: 400 invalid, 429 provider rate-limited, 502 provider unavailable/auth failure/bad output (a provider 401/403 is never forwarded as 401, which would log the user out), 504 timeout (20s), 503 GROQ_API_KEY not configured; provider text, the key, prompts and generated content are never returned or logged. The key lives only in the server-only GROQ_API_KEY (config/env.ts getGroqApiKey; documented in server .env.example, .env.production and README; server.ts warns when unset). VITE_GROQ_API_KEY was removed from client code and env files, and the client production bundle was scanned and contains no provider reference. Rate limiting: no reusable limiter exists; per the issue none was built, the endpoint is bounded by auth, prompt cap, max_tokens and timeout, and per-user limiting depends on Issue #23. Tests: 41 new server tests (39 in aiRoutes.test.ts with fetch mocked, 2 in env.test.ts) and 16 new client tests (aiService, hook, and a source scan that fails if a provider reference or key variable reappears). Known limits: tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox; no per-user rate limit until Issue #23; the prompt's 'today' is the server UTC date, as the browser's was.",
+      "files": [
+        "halotasks-server/src/routes/ai.routes.ts",
+        "halotasks-server/src/controllers/ai.controller.ts",
+        "halotasks-server/src/utils/aiTaskParser.ts",
+        "halotasks-server/src/utils/groqClient.ts",
+        "halotasks-server/src/config/env.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/src/server.ts",
+        "halotasks-server/.env.example",
+        "halotasks-server/.env.production",
+        "halotasks-server/tests/aiRoutes.test.ts",
+        "halotasks-server/tests/env.test.ts",
+        "halotasks-client/src/services/aiService.ts",
+        "halotasks-client/src/services/aiService.test.ts",
+        "halotasks-client/src/hooks/useAiTaskCreation.ts",
+        "halotasks-client/src/hooks/useAiTaskCreation.test.ts",
+        "halotasks-client/src/components/dashboard/AiTaskInput.tsx",
+        "halotasks-client/src/test/noClientSecrets.test.ts",
+        "halotasks-client/.env.example",
+        "halotasks-client/.env.production",
+        "README.md",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-10-01",
+      "category": "Bugfix",
       "title": "3009: fix History source of truth, date semantics, and sync reliability (Issue #31)",
       "description": "Client history lived only in one global IndexedDB key (task_history) shared by every account on the browser, getWeekHistory() never read the server so a cleared IndexedDB lost history even though snapshots had been pushed, failed pushes were swallowed and never retried, and the server built its GET window with toISOString() (UTC) while the client used local calendar days. The server also accepted any YYYY-MM-DD on PUT /api/history/today, coerced numbers with Number(x) || 0 and stored completedTasks with no shape or bounds. Model: the history of a day is the SET of completed tasks keyed by task id; count and minutes are recomputed from it, so reconciling cannot double-count. The server is the durable source of truth; IndexedDB (now per user: task_history:<userId>) is the offline cache and outbox. Every local change and the first read of a session run pull -> merge -> push: a pending local snapshot is merged into the server row as (server - tasks this device un-completed) U local by task id and is never allowed to replace the server row wholesale, so a device that was offline cannot erase tasks another device completed (server A,B,C + pending local A,B stays A,B,C and nothing is sent). A task is removed only when this device itself saw it stop being completed. pendingSync clears only when the exact pushed revision is acknowledged, transient failures are retried (throttled), a payload 400 is permanent but a DATE_* 400 is retried, bursts of edits coalesce, snapshots are applied in request order (fixed a race where the one-time legacy purge let a later snapshot jump the lock), and a push is skipped if the account changed. No timestamps are compared, so clock skew cannot reorder snapshots. Calendar days: ONE convention. A history date is the user's local calendar day = the calendar date of an instant shifted by the user's UTC offset. The client declares utcOffsetMinutes (-720..840) on every history request; the server validates 'today' from its clock plus that offset with NO clock-skew tolerance (exactly one date: yesterday and tomorrow are rejected; failures carry codes DATE_NOT_TODAY / DATE_OUT_OF_RANGE, which the client treats as retryable while other 400s stay permanent) and has no default offset and no UTC fallback (GET requires endDate and utcOffsetMinutes; calls without them are rejected). API: PUT /today accepts only today at the declared offset; PUT /:date is a bounded backfill (last 7 days, never future) required because snapshots are queued and pushed after their own day has ended (call path: reconcile -> pushEntry -> date === today ? PUT /today : PUT /:date). GET days must be a single integer 1-90 (rejected, not clamped); repeated/structured params, non-finite/negative/excessive numbers, malformed or duplicate completedTasks, oversized arrays and invalid/future dates are rejected with 400 (utils/historyValidators.ts); GET returns updatedAt (null for days with no record). Legacy: the old global task_history key has no provable owner, so it is discarded, never read, merged, pushed or assigned to whichever user logs in next; it is deleted on first use and server-persisted history is recoverable. Tests: 62 client history tests and 223 server history tests (Mongo-independent: mocked model with the real router and auth), including merge-by-id cases, a 1024-case union property test, UTC+14, UTC-12, India, Los Angeles (PDT and PST), DST transitions, midnight boundaries (cross-checked against Intl), legacy purge and user isolation. Growth Tree reward rules and the Growth Tree's own UTC streak date are unchanged. Known limits: tests/api.routes.test.ts needs MongoMemoryServer, which cannot download a binary in the sandbox; two devices that pull and push within the same short GET-PUT gap can still overwrite each other (closing it needs an atomic server-side merge, untestable here); the global tasks cache (offline/cache.ts) has the same cross-user bug class and is not addressed.",
       "files": [
