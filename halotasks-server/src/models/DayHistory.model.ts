@@ -3,7 +3,11 @@ import { Schema, model } from 'mongoose';
 /**
  * Stores one productivity snapshot per user per day.
  * The compound index on (userId + date) ensures upserts are fast and unique.
- * Old entries are NOT auto-deleted here — the client prunes to 7 days on read.
+ * Old entries are NOT auto-deleted here — readers request a bounded window.
+ *
+ * One document is the complete snapshot of a user's calendar day, replaced (never
+ * summed) on each write, so re-sending a snapshot cannot double-count work.
+ * Input bounds are enforced in utils/historyValidators.ts before anything is written.
  */
 
 const completedTaskSchema = new Schema(
@@ -22,7 +26,7 @@ const dayHistorySchema = new Schema(
       ref: 'User',
       required: true,
     },
-    /** YYYY-MM-DD local date string supplied by the client */
+    /** YYYY-MM-DD in the USER'S local timezone, supplied by the client (see utils/calendarDate.ts) */
     date: {
       type: String,
       required: true,

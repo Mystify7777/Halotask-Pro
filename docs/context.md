@@ -220,6 +220,85 @@ an out-of-range value) is rejected the same way regardless of which
 endpoint is called. See `docs/logs.md` for the full list of limits (title,
 description, tag length/count, estimated-minutes range).
 
+## History: Source of Truth, Calendar Days, and API (Issue #31)
+
+**Model.** The history of one calendar day is the **set of tasks completed that day, keyed by
+task id**. `completedCount` and `workDoneMinutes` are always recomputed from that set, never
+stored independently or added across sources, so reconciling the same data any number of times
+cannot double-count and two devices' sets combine by **union** without losing either side's tasks.
+The **server** (`DayHistory`, one row per user per day) is the durable cross-device source of truth.
+**Local IndexedDB** (`offline/history.ts`) is the offline-first cache and the outbox
+(`pendingSync`), scoped per user (`task_history:<userId>`).
+
+**Reconciliation** (`offline/history.ts`, the only code path that talks to the server). Every local
+change and the first history read of a session run **pull → merge → push**; per date in the 7-day
+window:
+1. Local entry `pendingSync` (unacknowledged work): `merged = (server tasks − tasks THIS device
+   un-completed) ∪ local tasks`, by task id. It is pushed only if it differs from the server row.
+   A pending snapshot **never replaces the server row wholesale**, so a device that was offline
+   cannot erase tasks another device completed (e.g. server `A,B,C` + pending local `A,B` stays
+   `A,B,C` and nothing is sent).
+2. Otherwise, if the server has a record, the server wins (recovers a cleared or new device and picks
+   up other devices' changes).
+3. Otherwise, if the device recorded work the server lacks, it is pushed (heals a server that missed it).
+
+`pendingSync` clears only when the server acknowledges the exact revision pushed, so an edit made
+during a push stays pending. Transient failures stay pending and are retried (throttled to one attempt
+per 15s); a 400 is treated as permanent for that payload. Bursts of edits coalesce into a follow-up
+sync, and local snapshots are applied in the order they were requested. Removals: a task leaves
+history only when this device itself saw it stop being completed (`removedTaskIds`, cleared on
+acknowledgement); a task this device never knew about is never treated as removed. No timestamps are
+compared, so device clock skew cannot reorder snapshots. Another device's changes arrive on the next
+load, not live.
+
+**Calendar days — one convention.** A history date is the user's **local** calendar day (`YYYY-MM-DD`),
+defined as *the calendar date of an instant shifted by the user's UTC offset*. The server cannot know a
+user's timezone, so the client declares it on **every** history request as `utcOffsetMinutes` (minutes
+east of UTC at that moment: India +330, Los Angeles −420 summer / −480 winter, UTC+14 → 840, UTC−12 →
+−720; integer, −720…840). The server evaluates "today" from its own clock plus that offset — never in
+UTC or its own timezone — and accepts a date only if it is **exactly** that one today — no clock-skew
+tolerance, so yesterday and tomorrow are always rejected (400 with code `DATE_NOT_TODAY`; backfill
+outside its window gets `DATE_OUT_OF_RANGE`). Because the device clock and server clock can differ by
+a few seconds, a push near local midnight can be rejected; the client treats `DATE_*` 400s as
+retryable (the snapshot stays pending and is re-sent with a fresh date decision), while any other 400
+is permanent for that payload. A date rejection never wipes local history. There is
+**no default offset and no UTC fallback**: a request without a valid offset is rejected. DST needs no
+special handling because the offset is a per-request fact. A wrong declared offset can only misplace the
+caller's own entries. Implementation: `halotasks-server/src/utils/calendarDate.ts` and the client's
+`utils/localDate.ts`. (The Growth Tree's own streak date, `growth/treeLogic.getTodayDate`, is still UTC;
+it is a separate feature and was deliberately left unchanged.)
+
+**API** (validators: `halotasks-server/src/utils/historyValidators.ts`; bad input → 400, nothing
+written, never coerced to zero):
+- `GET /api/history?days=N&endDate=YYYY-MM-DD&utcOffsetMinutes=M` — `endDate` and `utcOffsetMinutes`
+  are **required**; `endDate` must be today at that offset. `days` is one integer 1–90 (default 7;
+  out of range rejected, not clamped); repeated or structured params are rejected. Days without a
+  record return zeros with `updatedAt: null`, so "no record" differs from a genuinely empty day.
+- `PUT /api/history/today` — strictly today at the declared offset; historical and future dates are
+  rejected.
+- `PUT /api/history/:date` — bounded backfill: the last 7 days, never future; a body `date` must match
+  the path. **It is required by the sync contract, not extra surface:** snapshots are queued locally and
+  pushed later, so a snapshot recorded offline before midnight is delivered after its own day has ended,
+  when `PUT /today` (correctly) refuses it. Exact call path: `updateTodaySnapshot()` / `getWeekHistory()`
+  → `reconcile()` → `pushEntry()` → `date === today ? historyService.upsertToday (PUT /today) :
+  historyService.upsertForDate (PUT /:date)`.
+- Body `{ date, utcOffsetMinutes, completedCount, workDoneMinutes, completedTasks }`: `completedTasks` ≤ 500,
+  unique `taskId`s (1–64 chars of letters/digits/`-`/`_`), non-empty `title` ≤ 200, `estimatedMinutes`
+  finite 0–100000; `completedCount` must equal the array length and `workDoneMinutes` the sum of
+  `estimatedMinutes`. Unknown fields are dropped; the offset is validated, not stored.
+
+**Legacy unscoped history.** Before user scoping, history was stored under one global IndexedDB key
+(`task_history`) with no owner. **Ownership cannot be established, so that record is discarded, not
+migrated:** it is never read, never merged and never pushed, and it is deleted on first use, so it can
+never be assigned to whichever user logs in next. History that had reached the server is recoverable
+from there. Only history that existed solely in that global key (never successfully synchronized) is lost.
+Covered by regression tests in `offline/history.test.ts`.
+
+**Known limitation.** The merge happens on the client before a push, and the server applies a push as a
+replace. If two devices both pull and then push within the same short GET→PUT gap, the later push can
+overwrite a task the other just added. Closing that window needs an atomic server-side merge, which was
+not built here because it cannot be tested without MongoDB in this environment.
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is
