@@ -15,8 +15,6 @@ import {
   normalizeName,
 } from '../utils/validators';
 
-const FORGOT_WINDOW_MS = 15 * 60 * 1000;
-const FORGOT_MAX_ATTEMPTS = 5;
 const neutralForgotMessage = 'If an account exists for this email, a reset link has been sent.';
 const resetEmailSubject = 'Reset your HaloTaskPro password';
 
@@ -46,8 +44,6 @@ const createSmtpTransporter = () => {
 };
 
 const smtpTransporter = createSmtpTransporter();
-
-const forgotAttempts = new Map<string, { count: number; windowStart: number }>();
 
 const createAuthToken = (userId: string, email: string, name: string) => {
   const jwtSecret = process.env.JWT_SECRET;
@@ -175,24 +171,6 @@ const sendResetPasswordEmail = async (toEmail: string, resetCode: string, ttlMin
   }
 };
 
-const canAttemptForgotPassword = (key: string) => {
-  const now = Date.now();
-  const existing = forgotAttempts.get(key);
-
-  if (!existing || now - existing.windowStart > FORGOT_WINDOW_MS) {
-    forgotAttempts.set(key, { count: 1, windowStart: now });
-    return true;
-  }
-
-  if (existing.count >= FORGOT_MAX_ATTEMPTS) {
-    return false;
-  }
-
-  existing.count += 1;
-  forgotAttempts.set(key, existing);
-  return true;
-};
-
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body as {
@@ -287,11 +265,6 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
     if (!email) {
       return res.status(400).json({ message: 'email is required' });
-    }
-
-    const limiterKey = req.ip || 'unknown';
-    if (!canAttemptForgotPassword(limiterKey)) {
-      return res.status(429).json({ message: 'Too many requests. Please try again later.' });
     }
 
     const normalizedEmail = normalizeEmail(email);

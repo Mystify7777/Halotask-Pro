@@ -5,6 +5,8 @@ import request from 'supertest';
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import app from '../src/app';
+import { resetAllRateLimiters } from '../src/middleware/rateLimit';
+import '../src/middleware/rateLimiters';
 import Task from '../src/models/Task.model';
 import User from '../src/models/User.model';
 
@@ -50,6 +52,8 @@ describe('HaloTasks API routes', () => {
 
   beforeEach(async () => {
     setTestEnv();
+    // Every request here comes from one address; start each test with fresh rate-limit counters.
+    resetAllRateLimiters();
     await User.deleteMany({});
     await Task.deleteMany({});
   });

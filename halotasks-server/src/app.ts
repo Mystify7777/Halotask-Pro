@@ -7,9 +7,15 @@ import taskRoutes from './routes/task.routes';
 import treeRoutes from './routes/tree.routes';
 import historyRoutes from './routes/history.routes';
 import { resolveOrigin } from './config/cors';
+import { getTrustProxyHops } from './config/env';
 import { isMalformedJsonBodyError, isPayloadTooLargeError } from './utils/httpErrors';
 
 const app = express();
+
+// What req.ip means (and so every IP-keyed rate limit) depends on how many reverse proxies sit in
+// front of this process. Explicit and conservative: 0 hops (forwarded headers ignored) unless
+// TRUST_PROXY_HOPS says otherwise. See docs/context.md "Rate Limiting".
+app.set('trust proxy', getTrustProxyHops());
 
 app.use(cors({ origin: resolveOrigin(), credentials: true }));
 

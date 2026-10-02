@@ -330,6 +330,119 @@ backend owns the Groq key.
   dependency on **Issue #23**.
 - Prompt "today" is the server's UTC date (the browser previously used the UTC date too).
 
+## Rate Limiting (Issue #23)
+
+**Deployment assumption.** The backend runs as one long-lived Node process per deployment: Render is the
+primary and Railway the backup (README), the client is on Vercel. The repo has no cluster/pm2/replica/Docker
+configuration and nothing that runs two instances side by side. A process-local limiter is therefore
+sufficient *for this topology*; it is **not** globally authoritative and must be revisited if the API is ever
+scaled to several instances (see Known limitations). `docs/DEPLOYMENT.md` is referenced by the README but
+does not exist, so this is inferred from the repo, not from a deployment document.
+
+**Mechanism.** `middleware/rateLimit.ts` is a small fixed-window limiter; `config/rateLimits.ts` holds every
+number; `middleware/rateLimiters.ts` assembles the limiters applied in the routers. No dependency was added
+and no shared store (Redis or Mongo) is used. A limiter is a list of rules, each with its own counters; a
+request is refused (429) if *any* rule is exhausted, the check happens before anything is consumed (a refused
+request never uses up another rule's budget), and rules whose key cannot be derived (e.g. no e-mail in the
+body) are skipped. Rules marked *refund on success* count the attempt up front, so parallel requests cannot
+all slip under the limit, then give it back if the response is 2xx/3xx — only failed attempts keep their
+slot. Memory is bounded: see *Capacity* below.
+
+**Capacity (what happens when the store is full).** Each rule holds at most 20,000 distinct keys
+(`RATE_LIMIT_MAX_KEYS`). Expired buckets are reclaimed lazily (once per window normally, at most once per
+second while the store is full). A **live bucket is never evicted to make room**: evicting one would let
+anyone who can mint many unique keys (random e-mail addresses, say) reset another client's active limit.
+When a store is full of live buckets, a request whose key has *no* bucket is refused with the normal 429
+(`Retry-After` = time until the earliest live bucket expires), and nothing else is charged for that refused
+request. Requests for keys that already have a bucket are unaffected and keep accumulating and enforcing
+their limits; an expired-but-unswept bucket is reused in place, so it needs no extra capacity. The trade-off
+is deliberate: flooding a store is a denial of service against *new* keys for at most one window, not a
+bypass of existing limits. Failing open for new keys was rejected because an attacker could fill the store
+and then guess against a victim whose bucket does not yet exist. Filling a store costs an attacker many
+distinct sources: one IP can only create as many buckets per window as the IP rule allows (30 login, 5
+forgot-password, ...), so reaching 20,000 live account buckets needs on the order of hundreds to thousands of
+IPs. Because freed capacity is noticed by a throttled sweep, it can be seen up to one second late.
+
+**Limits** (fixed window; the (max+1)th request in a window gets 429):
+
+| Endpoint | Rule | Key | Max / window |
+|---|---|---|---|
+| `POST /api/auth/login` | IP | client IP | 30 / 15 min |
+| | account + IP (refund on success) | hashed e-mail + IP | 5 / 15 min |
+| | account, any IP (refund on success) | hashed e-mail | 30 / 60 min |
+| `POST /api/auth/register` | IP | client IP | 10 / 60 min |
+| `POST /api/auth/forgot-password` | IP | client IP | 5 / 15 min |
+| | account | hashed e-mail | 3 / 60 min |
+| `POST /api/auth/reset-password` | IP | client IP | 10 / 15 min |
+| | account (refund on success) | hashed e-mail | 5 / 15 min |
+| `POST /api/ai/parse-tasks` | user (after auth) | user id | 20 / 10 min |
+| | IP | client IP | 60 / 10 min |
+| `POST /api/push/relay` | user (after auth) | user id | 60 / 5 min |
+
+Why these dimensions: IP-only limits are bypassed by spreading requests over IPs; account-only limits let an
+attacker lock a victim out. Login therefore combines a per-IP limit (credential spraying), a per-(account, IP)
+limit (one source hammering one account, without locking the real owner out from another IP) and a high
+account-wide ceiling for distributed guessing — that last one *can* lock the owner out while an attack is
+running, which is the accepted cost. Register has no secret to guess (and e-mail existence is already visible
+through the existing 409), so it is IP-only. Reset-password guesses a 6-digit code valid ~20 minutes, hence the
+strict per-account bucket (at most ~10 guesses per code lifetime). Relay fans one call out to every device a
+user registered; the client calls it once per due reminder, so 60 per 5 minutes leaves room for bursts and
+multi-device users, and a refused relay degrades silently (the local notification has already fired).
+The #22 protections (prompt cap, `max_tokens`, 20 s timeout) are unchanged and not duplicated.
+
+**Not limited, deliberately:** task CRUD, tree, history and push subscribe/unsubscribe (authenticated, cheap,
+bounded by body size and per-route validation). Unauthenticated floods against other routes are out of scope.
+
+**Keys and privacy.** E-mail keys are the normalised address passed through a per-process random-salt HMAC;
+counters never hold an address, password, reset code, token or prompt, and nothing request-derived is logged.
+IP keys go through `normalizeIp` (Node's own `net` parsers, no dependency): every spelling of an IPv4-mapped IPv6
+address collapses to the IPv4 address; IPv6 is bucketed by /64 (compressed, uncompressed, leading-zero and
+mixed-case forms agree, and a zone id such as `%eth0` is ignored), so one machine cannot mint unlimited buckets
+from its address block; anything that is not a valid IP (missing, malformed, `host:port`, `[::1]`) goes to one
+shared `unknown` bucket rather than minting its own.
+
+**Client IP / proxies.** `app.set('trust proxy', TRUST_PROXY_HOPS)` (default **0**: `X-Forwarded-For` and
+every other forwarding header is ignored and the socket address is used). With N hops the N nearest
+addresses are trusted and the client is the entry just beyond them, so anything a caller prepends to
+`X-Forwarded-For` is never believed; `X-Real-IP`, `Forwarded`, `True-Client-IP` and `CF-Connecting-IP` are
+never read. A malformed value fails fast at startup. Configure it per environment:
+
+- **Local development: `TRUST_PROXY_HOPS=0`** (no proxy; also the default).
+- **Render: `TRUST_PROXY_HOPS=1`.** Render's proxy appends the real peer address and, per a Render community
+  thread (not official documentation), does not strip a caller-supplied `X-Forwarded-For`; that is why "trust
+  everything" (`true`) would be spoofable and an exact hop count is used.
+- **Railway: unverified — no value is claimed.** Railway staff state that its edge strips client-supplied
+  `X-Forwarded-For` and that "you may see another hop", but the number of hops was not confirmed here. Verify
+  on a Railway deployment before relying on IP limits there. Until then keep the value no higher than you can
+  prove: too low merges clients into a shared bucket (fail-closed), too high lets callers choose their own.
+
+Before this change `trust proxy` was unset, so
+behind a platform proxy `req.ip` was the proxy's address and the old forgot-password limiter was effectively
+one global bucket for all users. Production logs a warning when the value is 0.
+
+**429 contract.** `429 { "message": "Too many requests. Please try again later." }` plus `Retry-After: <whole
+seconds, >= 1>` (the longest remaining wait among exhausted rules). The same body is used by every limiter and
+names no rule, key or count; no `RateLimit-*` headers are sent. The client already shows the server `message`
+(login, forgot-password pages) and does not treat 429 as a logout (only 401 does).
+
+**Account enumeration.** Forgot-password still answers the neutral 200 for known and unknown addresses. Its
+address bucket counts the *submitted* address whether or not an account exists, so the point at which 429
+starts and the body are identical either way (covered by tests that run known and unknown addresses through
+the whole limit and compare). Login and reset-password buckets likewise count attempts for unknown accounts
+exactly like known ones. The rate limit never changes which of the existing messages is returned below the limit.
+
+**Replaced:** the in-controller `forgotAttempts` Map (5 / 15 min keyed on `req.ip`) was removed; the new
+forgot-password IP rule keeps the same numbers.
+
+**Known limitations.** State is per process and resets on restart (Render free tier spin-down included); with
+several instances each would allow its own full budget. Fixed windows allow up to 2× the limit across a
+window boundary. The account-wide login cap can be used to deny a specific owner for up to an hour. A shared
+store is the follow-up if the topology changes (the existing MongoDB could back a TTL-indexed counter
+collection; not built because it adds a database write to every login attempt and cannot be tested here
+without MongoMemoryServer). Outside this issue's scope, noticed during inspection: `POST /api/push/subscribe`
+accepts any endpoint URL and `relay` later makes the server POST to it (SSRF-shaped), and a user's
+subscription list is unbounded.
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is

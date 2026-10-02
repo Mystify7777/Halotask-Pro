@@ -42,3 +42,33 @@ export function getGroqApiKey(env: NodeJS.ProcessEnv = process.env): string | nu
   if (raw === undefined || raw.trim() === '') return null;
   return raw.trim();
 }
+
+const MAX_TRUST_PROXY_HOPS = 5;
+
+/**
+ * Number of reverse-proxy hops in front of this server whose X-Forwarded-For entry may be trusted
+ * (TRUST_PROXY_HOPS). It decides what `req.ip` is, and therefore every IP-keyed rate limit:
+ *   0 (default) — no proxy: forwarded headers are ignored entirely and the socket address is used.
+ *   N          — the N nearest hops are trusted; the client is the entry just beyond them, so
+ *                anything a caller prepends to X-Forwarded-For is never believed.
+ * Behind a platform proxy (Render, Railway) leaving this at 0 would put every user in one bucket,
+ * and setting it higher than the real hop count would let callers choose their own bucket — so it is
+ * explicit configuration, and a malformed value fails fast at startup instead of being guessed.
+ */
+export function getTrustProxyHops(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.TRUST_PROXY_HOPS;
+
+  if (raw === undefined || raw.trim() === '') {
+    return 0;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_TRUST_PROXY_HOPS) {
+    throw new Error(
+      `TRUST_PROXY_HOPS must be a whole number between 0 and ${MAX_TRUST_PROXY_HOPS} (got "${raw}")`,
+    );
+  }
+
+  return parsed;
+}

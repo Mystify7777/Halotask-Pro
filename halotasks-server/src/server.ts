@@ -2,7 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
-import { getGroqApiKey, getResetTokenTtlMinutes } from './config/env';
+import { getGroqApiKey, getResetTokenTtlMinutes, getTrustProxyHops } from './config/env';
 import { createGracefulShutdown, exitWithFatalError } from './utils/processLifecycle';
 
 // ── Startup validation ─────────────────────────────────────────────────────
@@ -26,6 +26,15 @@ try {
 // is unaffected, so warn (like missing VAPID keys) rather than refuse to start.
 if (!getGroqApiKey()) {
   console.warn('[AI] GROQ_API_KEY not configured. AI task creation will be unavailable.');
+}
+
+// app.ts already refuses to load with a malformed TRUST_PROXY_HOPS (it would silently mis-key every IP
+// rate limit). Here we only flag the misconfiguration that is valid but wrong behind a platform proxy.
+if (getTrustProxyHops() === 0 && process.env.NODE_ENV === 'production') {
+  console.warn(
+    '[RateLimit] TRUST_PROXY_HOPS is 0 in production: behind a platform proxy every client shares the ' +
+      "proxy's IP and therefore one IP rate-limit bucket. Set it to the number of proxy hops.",
+  );
 }
 
 const port = Number(process.env.PORT ?? 5000);

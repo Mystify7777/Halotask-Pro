@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import aiRoutes from '../src/routes/ai.routes';
+import { resetAllRateLimiters } from '../src/middleware/rateLimit';
 import { GROQ_MODEL, GROQ_TIMEOUT_MS, GROQ_URL } from '../src/utils/groqClient';
 import { AI_MAX_TASKS, AI_PROMPT_MAX_LENGTH } from '../src/utils/aiTaskParser';
 
@@ -32,6 +33,10 @@ const logged = () =>
   [...errorSpy.mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls].map((c) => c.map(String).join(' ')).join('\n');
 
 beforeEach(() => {
+  // The real router now carries the AI rate limiter (Issue #23); this file sends far more than its
+  // budget from one user/IP, so each test starts with empty counters. Limiting itself is covered in
+  // rateLimitRoutes.test.ts.
+  resetAllRateLimiters();
   process.env.JWT_SECRET = SECRET;
   process.env.GROQ_API_KEY = GROQ_KEY;
   fetchMock.mockReset();

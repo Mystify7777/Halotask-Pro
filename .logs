@@ -4,6 +4,34 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-02",
+      "category": "Backend",
+      "title": "3009: add rate limiting for authentication and sensitive endpoints (Issue #23)",
+      "description": "Added a small fixed-window, process-local rate limiter (middleware/rateLimit.ts; every number in config/rateLimits.ts; no new dependency, no shared store). Topology: one long-lived Node process per deployment (Render primary, Railway backup, Vercel client; no cluster/pm2/replica config), so process-local state is sufficient but not globally authoritative and resets on restart; a shared store is the documented follow-up if the API is ever scaled out. Protected: POST /api/auth/login (IP 30/15min, account+IP 5/15min and hashed-account 30/60min, both refunded on success), register (IP 10/60min), forgot-password (IP 5/15min, address 3/60min), reset-password (IP 10/15min, address 5/15min refunded on success), /api/ai/parse-tasks (user 20/10min, IP 60/10min, after requireAuth) and /api/push/relay (user 60/5min, after requireAuth). Task CRUD, tree, history and push subscribe/unsubscribe are deliberately not limited. A request is refused if any rule is exhausted; checks run before anything is consumed, attempts are counted up front so parallel requests cannot slip under the limit, and memory is bounded without ever evicting a live bucket: expired buckets are reclaimed, and when a rule's store (20,000 keys) is full of live buckets a request with a NEW key gets the normal 429 (Retry-After = earliest expiry) while existing keys keep being enforced (a flood of unique keys is a denial of service against new keys for at most one window, never a way to reset someone's active limit). E-mail keys are salted HMACs of the normalised address, IPv6 is bucketed by /64 via Node's net parsers (invalid addresses share one 'unknown' bucket). Client IP: app.set('trust proxy', TRUST_PROXY_HOPS) with default 0 (forwarded headers ignored); N hops trusts only the N nearest proxies so prepended X-Forwarded-For entries are never believed; malformed values fail startup; production warns when 0; Local development 0, Render 1, Railway unverified (no value claimed). Previously trust proxy was unset, so behind a platform proxy the old forgot-password limiter keyed everyone to the proxy's address. 429 contract: { message: 'Too many requests. Please try again later.' } plus Retry-After (whole seconds); no rule, key or count is exposed. Forgot-password keeps its neutral 200 for known and unknown addresses and its address bucket counts the submitted address regardless of existence, so the 429 point and body are identical (tested end to end). The old in-controller forgotAttempts Map was removed and superseded. Tests: 118 new server tests (77 limiter unit tests with an injected clock, including capacity and IPv6 normalisation, 41 against the real app with mocked models, fake timers and per-test TRUST_PROXY_HOPS); tests/aiRoutes.test.ts and tests/api.routes.test.ts now reset limiter counters in beforeEach (limiting is covered separately). Mutation checks on the boundary, refund, trust-proxy, route wiring and bucket keys were caught; one mutant (dropping the redundant expiry guard in the check phase) is behaviourally equivalent. Known limits: counters are per process and reset on restart; fixed windows allow up to 2x across a boundary; the account-wide login cap can deny an owner for up to an hour during a distributed attack; tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox, so its limiter-reset edit is unverified here. Noticed, out of scope: push subscribe accepts any endpoint URL that relay then POSTs to, and a user's subscription list is unbounded.",
+      "files": [
+        "halotasks-server/src/middleware/rateLimit.ts",
+        "halotasks-server/src/middleware/rateLimiters.ts",
+        "halotasks-server/src/config/rateLimits.ts",
+        "halotasks-server/src/config/env.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/src/server.ts",
+        "halotasks-server/src/routes/auth.routes.ts",
+        "halotasks-server/src/routes/ai.routes.ts",
+        "halotasks-server/src/routes/push.routes.ts",
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/.env.example",
+        "halotasks-server/.env.production",
+        "halotasks-server/tests/rateLimit.test.ts",
+        "halotasks-server/tests/rateLimitRoutes.test.ts",
+        "halotasks-server/tests/aiRoutes.test.ts",
+        "halotasks-server/tests/api.routes.test.ts",
+        "README.md",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-01",
       "category": "Bugfix",
       "title": "3009: move AI task creation behind the authenticated backend (Issue #22)",
