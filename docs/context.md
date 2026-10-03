@@ -439,9 +439,115 @@ several instances each would allow its own full budget. Fixed windows allow up t
 window boundary. The account-wide login cap can be used to deny a specific owner for up to an hour. A shared
 store is the follow-up if the topology changes (the existing MongoDB could back a TTL-indexed counter
 collection; not built because it adds a database write to every login attempt and cannot be tested here
-without MongoMemoryServer). Outside this issue's scope, noticed during inspection: `POST /api/push/subscribe`
-accepts any endpoint URL and `relay` later makes the server POST to it (SSRF-shaped), and a user's
-subscription list is unbounded.
+without MongoMemoryServer). The push endpoint-URL and unbounded-subscription concerns noticed during this work were addressed
+in Issue #26 (see *Push Subscription and Relay Boundaries*).
+
+## Push Subscription and Relay Boundaries (Issue #26)
+
+All three push routes sit behind `requireAuth`; `relay` additionally keeps the Issue #23 per-user limiter
+(unchanged, not duplicated). Input rules live in `utils/pushValidators.ts`; the endpoint is treated as
+untrusted because the **server** later POSTs to it. Every failure is `400 { message }` and the message never
+echoes a submitted value (endpoints are capability URLs).
+
+**Subscribe** (`POST /api/push/subscribe`, body = `PushSubscription.toJSON()`):
+
+| Field | Rule | Why |
+|---|---|---|
+| `endpoint` | string, ≤ 2048 chars, no whitespace/control chars, valid URL, **https**, no credentials, default port, host is a DNS name (no IP literal in any spelling — the URL parser normalises decimal/hex/octal IPv4 first — no `localhost`, no single-label or `.local/.internal/.localhost/...` names) | RFC 8030 requires https push services; real endpoints are 100–300 chars; blocks the obvious SSRF targets (loopback, private ranges, cloud metadata IP) |
+| `keys.p256dh` | unpadded base64url, canonical, decodes to exactly **65** bytes | RFC 8291 uncompressed P-256 point; `web-push` enforces 65 too |
+| `keys.auth` | unpadded base64url, canonical, decodes to exactly **16** bytes | RFC 8291 auth secret (`web-push` accepts ≥ 16; browsers send 16) |
+| `expirationTime` | omitted / `null`, or an integer in `(now, 8.64e15]` ms | epoch-ms like a JS Date; an already-expired subscription is useless |
+
+Only `endpoint`, `expirationTime` and `keys.{p256dh,auth}` are stored; anything else in the body is dropped.
+
+**Dedup and the bound are atomic.** The controller never reads then writes, and never does a `$pull` followed
+by a `$push` (the old code, which could leave duplicates under concurrent requests). It issues single-document
+conditional updates, each atomic in MongoDB: (1) endpoint already stored → `$set` its element in place
+(`pushSubscriptions.$`; position kept); (2) endpoint absent (`$ne` guard) → `$push` with `$each` + `$slice: -10`;
+(3) step 2 matched nothing because a concurrent request stored the same endpoint first → refresh it.
+Duplicates are therefore impossible, and `$slice` makes the array **never exceed 10** per user
+(`PUSH_SUBSCRIPTIONS_MAX_PER_USER`): ten is generous for a personal task app and each entry costs one outbound
+request per relay. At the limit the **oldest is dropped, the newest wins** (rather than rejecting), so a user
+whose old endpoints went stale (reinstalled browser, cleared site data) can always register their current
+device; an account already over the limit from before is trimmed to the newest 10 on its next new subscription.
+A valid token for a deleted account gets 401 and nothing is stored.
+
+**Unsubscribe** (`POST /api/push/unsubscribe`, `{ endpoint }`): the endpoint must be a non-empty string ≤ 2048
+chars. URL shape is deliberately *not* required so a legacy entry can still be removed. Objects such as
+`{ "$ne": "x" }` are rejected with 400 — previously they reached the `$pull` query and could delete every
+subscription of the caller. Unknown endpoints remain a successful no-op (`200 { ok: true }`).
+
+**Relay** (`POST /api/push/relay`, `{ title, body, tag? }`, validated before anything else):
+
+| Field | Rule | Why |
+|---|---|---|
+| `title` | non-empty string, ≤ 100 | client titles are four fixed phrases (≤ 40) |
+| `body` | non-empty string, ≤ 500 | a short template around a task title; task titles are capped at 200 (≤ ~270) |
+| `tag` | optional (default `halotask-push`), string 1–200, no control chars | `halotask-<type>-<taskId>-<due date>` is ~100 |
+| serialised payload | ≤ 3993 UTF-8 bytes | RFC 8291 plaintext limit; character limits alone don't guarantee it (multi-byte text, JSON escaping) |
+
+Delivery: each subscription is attempted independently with `TTL: 3600` and a new **10 s per-delivery timeout**
+so one slow or hostile endpoint cannot hold the request open. Response `200 { sent, failed, pruned }`
+(`failed` is new and additive): `sent` = accepted by the push service; `pruned` = reported gone (**404/410**) and
+removed in one `$pull`; `failed` = any other failure (429, 5xx, 401/403, 413, network error, unusable stored
+keys) — those subscriptions are **kept** because they may recover. One failing endpoint never stops the rest,
+and a failure while pruning is logged generically and reported as `pruned: 0` (the stale entries are retried on
+the next relay) instead of turning a completed relay into a 500. Unchanged: `{ sent: 0 }` for no
+subscriptions, `{ sent: 0, reason: 'vapid_not_configured' }` for a *valid* request when VAPID is unset (a
+malformed request is now 400 in that case too).
+
+**Logging.** Subscribe/unsubscribe log nothing. A failed delivery logs only the push service **host** and an
+HTTP status (`[Push] Delivery failed (host fcm.googleapis.com, status 500)`); endpoints, p256dh/auth, payload
+text and upstream error messages (which can echo them) are never logged.
+
+**SSRF boundary: where DNS names are checked (`utils/pushNetworkGuard.ts`).** Shape checks cannot see where a
+DNS name points, so an attacker-owned name (or a rebinding one) resolving to `127.0.0.1`, `10.x`, or
+`169.254.169.254` would otherwise get the server to POST inward. Delivery therefore passes `web-push` an
+`https.Agent` whose `lookup` resolves the name and **refuses the connection if any returned address is not
+public** (loopback, RFC1918, CGNAT, link-local/metadata, unspecified, multicast, reserved/documentation,
+ULA/link-local/multicast IPv6, NAT64/6to4, and IPv4-mapped IPv6 of any of those). The address validated is the address the socket
+connects to (no second resolution), which is what defeats DNS rebinding; TLS still verifies the certificate
+against the original hostname, and `web-push` does not follow redirects. A mixed answer (public + private)
+fails as a whole. The guard failure is an ordinary delivery failure: counted in `failed`, subscription kept,
+log line is host-only.
+- *What bounds time (precisely).* `web-push`'s `timeout: 10_000` is an **idle socket timeout**, not a total
+  deadline. Node starts it when the socket object is created, which is *before* the DNS lookup finishes, so a
+  delivery whose DNS never completes is still settled by it (`Socket timeout`; tested with the real `web-push`
+  and a resolver that never settles). Two limits remain: it resets on any socket activity, so a slow-drip
+  response can exceed 10 s in total; and it only abandons the request: `dns.lookup()`/getaddrinfo cannot be
+  cancelled and would keep a libuv threadpool thread (shared with fs/crypto/bcrypt) busy. The guard therefore
+  does not use `dns.lookup`: its default resolver is c-ares (`dns.Resolver`) with a per-attempt timeout
+  (2 s x 2 tries) and a hard 5 s deadline after which `cancel()` aborts every outstanding query, so a stalled
+  name leaves nothing running (tested against a silent UDP DNS server: it settles at the deadline and sends no
+  further queries afterwards). A and AAAA are resolved once, in parallel, and only those validated addresses
+  are handed to the socket. Trade-off: c-ares ignores `/etc/hosts` and nsswitch, so names that exist only
+  there do not resolve; public push services are unaffected.
+- *Why not an allowlist:* the hosts HaloTask meets are whatever the browser's `pushManager.subscribe` returns
+  (the client sends no endpoint of its own): `fcm.googleapis.com` (Chrome/Edge/Brave/Opera),
+  `updates.push.services.mozilla.com` (Firefox), `web.push.apple.com` (Safari), `*.notify.windows.com` (WNS).
+  `web-push` itself only special-cases `fcm.googleapis.com`/`android.googleapis.com` and documents no host set.
+  An exact list would break browsers/regions not on it (e.g. numbered WNS hosts, new providers), and a suffix
+  list would be exactly the broad invented allowlist we avoid. The connect-time check needs no list and covers
+  every provider.
+- *What stays at subscribe time:* only shape checks (https, no credentials, default port, no IP literal in any
+  spelling, no localhost/internal-style names). IP literals bypass DNS so they must stay rejected there; the agent
+  guards names. The two layers are tested separately (`tests/pushNetworkGuard.test.ts`, `tests/pushRoutes.test.ts`).
+- Not supported: `web-push`'s `proxy` option (it replaces the agent) and an `HTTPS_PROXY` in the delivery path;
+  neither is used. Adding one would require re-establishing this guard at the proxy.
+
+**Known limitations / follow-ups.**
+- An attacker-controlled public hostname is still accepted at subscribe time and the relay will POST (a fixed,
+  encrypted payload, blind) to whatever *public* server it names; only inward (private/internal) targets are
+  blocked. Limiting delivery to known push services would need the allowlist this design deliberately avoids.
+- Stored subscriptions are not re-shape-validated at relay time (the connect-time guard does apply to them); legacy entries over the new bound stay until the
+  next new subscription trims them.
+- Dedup is by exact endpoint string (hostname case variants of one endpoint are separate entries, bounded by
+  the cap of 10).
+- `subscribe`/`unsubscribe` have no rate limiter (Issue #23 left them out); they are now bounded by
+  validation and the per-user cap.
+- The concurrency and bound behaviour is tested against an in-memory model that emulates only the exact
+  operations used and forces interleaving; MongoDB's own operator semantics (`$` positional update, `$ne` on
+  an array path, `$push` + `$slice`) are not exercised until the Mongo-backed suite can run.
 
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
@@ -520,6 +626,14 @@ Important practical constraints:
 
 Successful validation has included:
 - `npm run build` in `halotasks-client`
+
+`npm run verify` (repo root, `package.json`) runs `halotasks-client`'s `verify` (`test` then `build`) and then
+`halotasks-server`'s `verify` (`test`, `typecheck`, `typecheck:tests`, `build`), stopping at the first failing
+step with a non-zero exit. Each package owns its own `verify`; nothing about the underlying scripts changed
+(`halotasks-server`'s `typecheck` is new: `tsc -p tsconfig.json --noEmit`). The server `test` script is still
+plain `vitest run`, so it includes `tests/api.routes.test.ts`, which needs `mongodb-memory-server` to download a
+MongoDB binary; in environments where that download is blocked (e.g. the sandbox used for development) `verify`
+correctly fails at that suite. Nothing was excluded or skipped to hide it.
 
 ## Current Implementation Notes
 

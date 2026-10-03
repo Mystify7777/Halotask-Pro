@@ -1,0 +1,8 @@
+{
+  "name": "halotask-pro",
+  "private": true,
+  "description": "Repo-level orchestration only. The app lives in halotasks-client/ and halotasks-server/, each with its own package.json and dependencies.",
+  "scripts": {
+    "verify": "npm run verify --prefix halotasks-client && npm run verify --prefix halotasks-server"
+  }
+}
