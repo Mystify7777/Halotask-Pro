@@ -8,6 +8,7 @@ import treeRoutes from './routes/tree.routes';
 import historyRoutes from './routes/history.routes';
 import { resolveOrigin } from './config/cors';
 import { getTrustProxyHops } from './config/env';
+import { securityHeaders } from './middleware/securityHeaders';
 import { isMalformedJsonBodyError, isPayloadTooLargeError } from './utils/httpErrors';
 
 const app = express();
@@ -16,6 +17,13 @@ const app = express();
 // front of this process. Explicit and conservative: 0 hops (forwarded headers ignored) unless
 // TRUST_PROXY_HOPS says otherwise. See docs/context.md "Rate Limiting".
 app.set('trust proxy', getTrustProxyHops());
+
+// Don't advertise the framework (X-Powered-By: Express).
+app.disable('x-powered-by');
+
+// Security headers go FIRST, before cors(): cors() answers preflights itself without calling next(), so
+// anything mounted after it would miss those responses. See docs/context.md "API Security Headers".
+app.use(securityHeaders());
 
 app.use(cors({ origin: resolveOrigin(), credentials: true }));
 

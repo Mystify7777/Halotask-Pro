@@ -656,6 +656,52 @@ legacy purge). The history, AI, push and rate-limit route
 suites mint legacy-shape tokens (no `tv`) and stub the version lookup at 0, which doubles as coverage that
 legacy tokens keep working.
 
+## API Security Headers (Issue #28)
+
+The API sends a small, deliberate set of browser-hardening headers from `src/middleware/securityHeaders.ts`
+(no Helmet, no new dependency; a generic Helmet config would have had most of its defaults switched off anyway).
+Express/API only: the client is served by Vercel, and its security headers (`vercel.json`, a client CSP) are a
+**separate concern** and a separate future issue.
+
+| Header | Value | Sent |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | always |
+| `Referrer-Policy` | `no-referrer` | always |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` | always |
+| `X-Frame-Options` | `DENY` | always |
+| `Strict-Transport-Security` | `max-age=15552000` | only when `NODE_ENV === 'production'` |
+
+`app.disable('x-powered-by')` removes `X-Powered-By: Express`.
+
+**Order matters.** `app.use(securityHeaders())` is the first middleware, before `cors()`. `cors()` answers a
+preflight itself and never calls `next()`, so headers mounted after it would be missing from the preflight 204.
+Placed first, every response carries them: normal, preflight, 401/400/404/413/429 and the 500 from the error handler.
+The middleware touches no other header and never ends the request, so CORS, ETag/304 and bodies are unchanged.
+
+**Why the choices.**
+- *CSP is intentionally minimal and inert.* The API returns JSON, an empty 204 and one tiny `text/html` string
+  (`GET /`). It renders and loads nothing, and CSP does not apply to `fetch` responses, so the policy only restricts
+  that one HTML response ("nothing may load or embed this"). A script/style policy would protect nothing here: the
+  pages that run script are served by the client's host, which this header cannot reach.
+- *`X-Frame-Options` is a compatibility fallback* for browsers that ignore `frame-ancestors`.
+- *HSTS is production-only* (local development is plain HTTP). It is not gated on `req.secure`, because TLS is
+  terminated upstream (Render/Railway) and `req.secure` depends on `TRUST_PROXY_HOPS`, so it cannot be trusted to
+  say "this is HTTPS". It is emitted unconditionally in production.
+- *`includeSubDomains` and `preload` are omitted on purpose:* the API lives on a shared platform domain, where they
+  are meaningless or risky, and both are hard to undo. 180 days is the chosen lifetime.
+- *`Cache-Control` is not part of this issue.* It would change caching behaviour rather than harden headers; the
+  existing ETag/304 behaviour is preserved (and tested).
+- *Not added:* COOP/COEP/CORP, `X-XSS-Protection`, `Permissions-Policy`, `X-DNS-Prefetch-Control`,
+  `X-Download-Options`, `Origin-Agent-Cluster` (irrelevant to a JSON API, deprecated, or a risk to legitimate
+  cross-origin use that CORS already governs).
+- CORS is unchanged, including the fail-closed production fallback and `credentials: true`.
+
+**Tests.** `tests/securityHeaders.test.ts` covers exact values, nothing extra, and HSTS by `NODE_ENV`.
+`tests/securityHeadersRoutes.test.ts` imports the real `src/app.ts` (only models and web-push mocked) and asserts the
+headers on GET /, 404, the CORS preflight (the regression guard for the placement), 401, malformed-JSON 400,
+413, 429 (with `Retry-After`), 500 and an authenticated 200, under production, development and unset `NODE_ENV`.
+After a deploy, confirm with `curl -sI https://<api-host>/` (HSTS present, no `X-Powered-By`).
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is

@@ -4,6 +4,23 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-04",
+      "category": "Backend",
+      "title": "add production HTTP security headers to the API (Issue #28)",
+      "description": "Added a deliberate, minimal HTTP security-header baseline to the Express API; no new dependency and no Helmet. New middleware/securityHeaders.ts sets, on every response: X-Content-Type-Options: nosniff; Referrer-Policy: no-referrer; Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; X-Frame-Options: DENY; and, only when NODE_ENV === 'production', Strict-Transport-Security: max-age=15552000 (no includeSubDomains, no preload, not gated on req.secure). app.ts also calls app.disable('x-powered-by'). The middleware is mounted FIRST, before cors(), because cors() answers preflights itself without calling next(); mounted after it, the preflight 204 would carry no security headers. CSP is intentionally inert: the API returns JSON, an empty 204 and one tiny text/html string (GET /), so it only restricts that one HTML response; it is not a script/style policy, which would protect nothing here (the pages that run script are served by the client's host). X-Frame-Options is kept only as a compatibility fallback for browsers that ignore frame-ancestors. HSTS is production-only because local development is plain HTTP, and it omits includeSubDomains/preload because the API lives on a shared platform domain and both are hard to undo. Cache-Control is deliberately NOT added: it is a behaviour change, not hardening, and ETag/304 revalidation is preserved. Frontend/Vercel security headers (vercel.json, client CSP) are a separate concern and untouched. CORS (including the fail-closed production fallback and credentials: true), rate limiting and Retry-After, the 1mb body limit, error statuses/bodies, GET / and auth are unchanged. Tests: tests/securityHeaders.test.ts (11, exact values, HSTS by NODE_ENV, nothing extra) and tests/securityHeadersRoutes.test.ts (29, the real app.ts with only models/web-push mocked: GET /, 404, CORS preflight, 401, 400, 413, 429 with Retry-After, 500 and an authenticated 200 under production, development and unset NODE_ENV; CORS headers preserved; fail-closed CORS still carries the headers; ETag/304 kept with no Cache-Control). Mutation checks: 18 mutants (moving the middleware after cors fails exactly the 3 preflight tests; unmounting, no x-powered-by disable, dropping or changing each header, loosening the CSP, HSTS always/never/req.secure-gated/with includeSubDomains/with preload/other max-age, adding Cache-Control) were all caught. Results: server 779 passed + 31 skipped, typecheck, typecheck:tests and build clean. Known limits: tests/api.routes.test.ts still needs MongoMemoryServer (download blocked in the sandbox) and was not run; the repo has no formatter/linter configured, so there was no formatting step; headers were verified against the app in-process, not on a live Render deployment, so confirm HSTS and the absence of X-Powered-By with curl -I after deploy. Noticed, out of scope: Access-Control-Allow-Credentials is sent although auth is Bearer-only.",
+      "files": [
+        "halotasks-server/src/middleware/securityHeaders.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/tests/securityHeaders.test.ts",
+        "halotasks-server/tests/securityHeadersRoutes.test.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-03",
       "category": "Backend",
       "title": "revoke sessions issued before a password reset (Issue #27)",
@@ -781,5 +798,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-03T15:00:00Z"
+  "lastUpdated": "2026-10-04T17:00:00Z"
 }
