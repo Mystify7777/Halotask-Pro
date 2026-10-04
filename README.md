@@ -208,6 +208,8 @@ PORT=5000
 # Database
 MONGO_URI=mongodb+srv://user:password@cluster.mongodb.net/halotasks
 MONGO_DNS_SERVERS=8.8.8.8,1.1.1.1
+# Optional: server-selection timeout per attempt in ms (1000-120000, default 15000)
+# MONGO_SERVER_SELECTION_TIMEOUT_MS=15000
 
 # Auth
 JWT_SECRET=<generate-with-openssl-rand-base64-32>

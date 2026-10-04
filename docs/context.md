@@ -702,13 +702,64 @@ headers on GET /, 404, the CORS preflight (the regression guard for the placemen
 413, 429 (with `Retry-After`), 500 and an authenticated 200, under production, development and unset `NODE_ENV`.
 After a deploy, confirm with `curl -sI https://<api-host>/` (HSTS present, no `X-Powered-By`).
 
+## MongoDB Connection and the DNS Fallback (Issue #20)
+
+**Flow.** `server.ts` checks `JWT_SECRET`/`MONGO_URI` are present, validates every MongoDB setting with
+`getMongoConfig()` (`config/env.ts`), registers the crash handlers, then awaits `connectDB()`
+(`config/db.ts`) **before** `app.listen`. A failed connection exits non-zero via `exitWithFatalError`; there is
+no retry loop (the platform restarts the process), and Mongoose buffering/reconnect settings are the defaults.
+
+**Settings** (all validated before any DNS or network work; error messages never contain `MONGO_URI` or its credentials; the timeout and DNS-server errors do quote the offending value, which is a number or an IP-shaped string):
+
+| Variable | Meaning |
+|---|---|
+| `MONGO_URI` | required; must start with `mongodb://` or `mongodb+srv://` |
+| `MONGO_SERVER_SELECTION_TIMEOUT_MS` | optional; whole ms, 1000–120000, default **15000** (was the driver's implicit 30000 per attempt) |
+| `MONGO_DNS_SERVERS` | optional; comma-separated literal IPs (`ip`, `ipv4:port`, `[ipv6]:port`) for the SRV fallback; unset, empty or whitespace-only → `8.8.8.8,1.1.1.1`; a separator with no entries (`,` or ` , `) is the explicit way to disable the fallback |
+
+**Why the DNS fallback exists — do not remove it as "cleanup".** On some hosts the platform resolver refuses SRV
+queries (`querySrv ECONNREFUSED`), so a `mongodb+srv://` Atlas URI cannot be resolved and the app cannot start,
+although the same URI works through a public resolver. On exactly that error (SRV URI, `code ECONNREFUSED`,
+`syscall querySrv`) `connectDB` retries **once** with the fallback resolvers. Other errors (ENOTFOUND, ETIMEOUT,
+server selection, auth, direct URIs) are rethrown unchanged.
+
+**`dns.setServers()` is process-wide.** It changes the resolver for every `dns.resolve*` caller in the Node
+process, not for one connection. The code therefore fences it in:
+- applied only for the single fallback attempt, with the original servers captured immediately before and restored
+  in `finally` whether the attempt succeeds, fails or throws; a failed restore is logged as CRITICAL and never
+  replaces the real error;
+- never overlapped: concurrent `connectDB()` calls share one in-flight attempt. (Before, a second overlapping call
+  would have captured the *fallback* servers as "the originals" and could have left them installed permanently.)
+  An attempt that settles clears the slot, so a later call retries normally; an already-connected call is a no-op;
+- confined to startup: `connectDB()` is awaited before `app.listen`, so no request handler runs during the window
+  (at most one server-selection timeout). Keep it that way; do not call it from a request path.
+Established connections use `getaddrinfo` (`dns.lookup`), which `setServers()` does not affect. Known limit: the
+driver re-resolves SRV records only for sharded topologies (every 60 s); after the override is restored such a
+re-resolution would use the platform resolver again. A private `dns.Resolver` (no global mutation) would remove the
+process-wide side effect entirely but means resolving SRV/TXT ourselves and building the direct URI — a larger change,
+deliberately not done here.
+
+**Also in this change.** Success is confirmed from `mongoose.connection.readyState === 1` (a probe showed two
+overlapping `mongoose.connect()` calls where one settled and logged "connected" at `readyState` 0). Logging names only
+the path (SRV / direct / SRV via fallback DNS), the timeout and an error's name/code — never the URI, host, user or
+password. The final fatal log (`exitWithFatalError`) still prints the driver error object as before; in the cases
+probed it contains the SRV hostname but no credentials.
+
+**Tests (no Atlas, DNS or network).** `tests/mongoConfig.test.ts` (validation) and `tests/mongoConnection.test.ts`
+(`connectDB` with injected `connect`/`getDnsServers`/`setDnsServers`/logger: normal path and timeout option,
+validation-before-network, fallback selection, DNS install/restore ordering on success, failure, a throwing install
+and a throwing restore, 6 failing startups in a row, concurrent callers, the readyState check, secret-free logs, and
+one test against the real `node:dns` state). Not covered because it needs real infrastructure: an actual Atlas
+connection, a real refused-SRV resolver, and `server.ts` itself (it runs on import); `tests/api.routes.test.ts`
+still needs MongoMemoryServer's binary.
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is
 deliberately explicit rather than left to Express/Node defaults:
 
-- `src/server.ts` validates required env vars (`JWT_SECRET`, `MONGO_URI`)
-  and `RESET_TOKEN_TTL_MINUTES` before starting, and exits non-zero via
+- `src/server.ts` validates required env vars (`JWT_SECRET`, `MONGO_URI`),
+  the MongoDB settings (see "MongoDB Connection and the DNS Fallback") and `RESET_TOKEN_TTL_MINUTES` before starting, and exits non-zero via
   `exitWithFatalError()` (in `src/utils/processLifecycle.ts`) on failure —
   including when `connectDB()` itself fails, via an explicit
   `startServer().catch(...)` rather than relying on the generic

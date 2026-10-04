@@ -1,3 +1,5 @@
+import { isIP, isIPv4, isIPv6 } from 'node:net';
+
 const DEFAULT_RESET_TOKEN_TTL_MINUTES = 20;
 
 /**
@@ -71,4 +73,106 @@ export function getTrustProxyHops(env: NodeJS.ProcessEnv = process.env): number 
   }
 
   return parsed;
+}
+
+// ── MongoDB connection settings (Issue #20) ─────────────────────────────────────────────────────
+
+export const DEFAULT_MONGO_DNS_FALLBACK_SERVERS: readonly string[] = ['8.8.8.8', '1.1.1.1'];
+export const DEFAULT_MONGO_SERVER_SELECTION_TIMEOUT_MS = 15_000;
+const MIN_SERVER_SELECTION_TIMEOUT_MS = 1_000;
+const MAX_SERVER_SELECTION_TIMEOUT_MS = 120_000;
+
+export type MongoConfig = {
+  /** The connection string. Never log or interpolate this into an error: it carries credentials. */
+  uri: string;
+  /** true for `mongodb+srv://` (the only form the DNS fallback applies to). */
+  srv: boolean;
+  serverSelectionTimeoutMS: number;
+  /** Resolvers used by the one-shot SRV fallback. Empty = fallback disabled. */
+  dnsFallbackServers: string[];
+};
+
+const isPort = (text: string | undefined): boolean =>
+  text === undefined || (/^\d{1,5}$/.test(text) && Number(text) >= 1 && Number(text) <= 65535);
+
+/** What dns.setServers() accepts, restricted to literal IPs: `ip`, `ipv4:port`, `[ipv6]:port`. */
+function isValidDnsServer(entry: string): boolean {
+  if (isIP(entry)) return true;
+
+  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(entry);
+  if (bracketed) return isIPv6(bracketed[1]) && isPort(bracketed[2]);
+
+  const colon = entry.indexOf(':');
+  if (colon > 0 && colon === entry.lastIndexOf(':')) {
+    return isIPv4(entry.slice(0, colon)) && isPort(entry.slice(colon + 1));
+  }
+
+  return false;
+}
+
+/**
+ * Parses and validates every MongoDB setting in one place, BEFORE any DNS or network work, so a bad
+ * deploy fails fast with a clear message instead of surfacing later as a driver or resolver error.
+ *
+ *   MONGO_URI                          required; must be a `mongodb://` or `mongodb+srv://` string.
+ *   MONGO_DNS_SERVERS                  optional; comma-separated resolvers for the SRV fallback.
+ *                                      Unset, empty or whitespace-only → 8.8.8.8,1.1.1.1. A value with a
+ *                                      separator but no entries (e.g. "," or " , ")
+ *                                      disables the fallback. Entries must be literal IPs (`ip`,
+ *                                      `ipv4:port`, `[ipv6]:port`) — anything else would make
+ *                                      dns.setServers() throw in the middle of the fallback.
+ *   MONGO_SERVER_SELECTION_TIMEOUT_MS  optional; whole milliseconds, 1000–120000, default 15000.
+ *
+ * Error messages never contain MONGO_URI or its credentials. (The timeout and DNS-server errors do quote
+ * the offending value — a number or an IP-shaped string, never a secret.)
+ */
+export function getMongoConfig(env: NodeJS.ProcessEnv = process.env): MongoConfig {
+  const uri = env.MONGO_URI;
+
+  if (!uri || uri.trim() === '') {
+    throw new Error('MONGO_URI is not configured');
+  }
+
+  const srv = uri.startsWith('mongodb+srv://');
+  if (!srv && !uri.startsWith('mongodb://')) {
+    throw new Error('MONGO_URI must start with "mongodb://" or "mongodb+srv://"');
+  }
+
+  const rawTimeout = env.MONGO_SERVER_SELECTION_TIMEOUT_MS;
+  let serverSelectionTimeoutMS = DEFAULT_MONGO_SERVER_SELECTION_TIMEOUT_MS;
+
+  if (rawTimeout !== undefined && rawTimeout.trim() !== '') {
+    const parsed = Number(rawTimeout);
+    if (
+      !Number.isInteger(parsed) ||
+      parsed < MIN_SERVER_SELECTION_TIMEOUT_MS ||
+      parsed > MAX_SERVER_SELECTION_TIMEOUT_MS
+    ) {
+      throw new Error(
+        `MONGO_SERVER_SELECTION_TIMEOUT_MS must be a whole number of milliseconds between ` +
+          `${MIN_SERVER_SELECTION_TIMEOUT_MS} and ${MAX_SERVER_SELECTION_TIMEOUT_MS} (got "${rawTimeout}")`,
+      );
+    }
+    serverSelectionTimeoutMS = parsed;
+  }
+
+  // Unset, empty and whitespace-only all mean "not configured" → defaults. Only a value that actually
+  // contains a separator but no entries (",", " , ") is the explicit way to disable the fallback.
+  const rawServers = env.MONGO_DNS_SERVERS;
+  const dnsFallbackServers = rawServers !== undefined && rawServers.trim() !== ''
+    ? rawServers
+        .split(',')
+        .map((server) => server.trim())
+        .filter((server) => server.length > 0)
+    : [...DEFAULT_MONGO_DNS_FALLBACK_SERVERS];
+
+  for (const server of dnsFallbackServers) {
+    if (!isValidDnsServer(server)) {
+      throw new Error(
+        `MONGO_DNS_SERVERS must be a comma-separated list of IP addresses (optionally with a port) (got "${server}")`,
+      );
+    }
+  }
+
+  return { uri, srv, serverSelectionTimeoutMS, dnsFallbackServers };
 }

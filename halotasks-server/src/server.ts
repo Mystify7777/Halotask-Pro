@@ -2,7 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
-import { getGroqApiKey, getResetTokenTtlMinutes, getTrustProxyHops } from './config/env';
+import { getGroqApiKey, getMongoConfig, getResetTokenTtlMinutes, getTrustProxyHops } from './config/env';
 import { createGracefulShutdown, exitWithFatalError } from './utils/processLifecycle';
 
 // ── Startup validation ─────────────────────────────────────────────────────
@@ -20,6 +20,14 @@ try {
   getResetTokenTtlMinutes();
 } catch (error) {
   exitWithFatalError('Invalid RESET_TOKEN_TTL_MINUTES configuration', error);
+}
+
+// A malformed MONGO_URI scheme, MONGO_DNS_SERVERS or MONGO_SERVER_SELECTION_TIMEOUT_MS is rejected here, before
+// any DNS or network work (the message never contains MONGO_URI or its credentials).
+try {
+  getMongoConfig();
+} catch (error) {
+  exitWithFatalError('Invalid MongoDB configuration', error);
 }
 
 // AI task creation is optional: without GROQ_API_KEY the endpoint answers 503 and the rest of the app
