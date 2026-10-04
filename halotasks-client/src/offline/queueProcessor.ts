@@ -1,3 +1,4 @@
+import { captureSession, isSameSession, isSessionChangedError } from '../services/api';
 import { taskService } from '../services/taskService';
 import { TaskCreatePayload, Task } from '../types/task';
 import { getSyncQueue, setSyncQueue, SyncQueueRecord } from './syncQueue';
@@ -19,11 +20,7 @@ export type ProcessSyncQueueResult = {
   remaining: number;
 };
 
-/**
- * Returns true for HTTP status codes that are permanent client errors.
- * Retrying these entries will not succeed, so they should be discarded.
- */
-function isPermanentError(error: unknown): boolean {
+function httpStatusOf(error: unknown): number | null {
   const status =
     typeof error === 'object' &&
     error !== null &&
@@ -33,7 +30,27 @@ function isPermanentError(error: unknown): boolean {
       ? (error as { response: { status?: number } }).response?.status
       : null;
 
-  if (status === null || status === undefined) {
+  return typeof status === 'number' ? status : null;
+}
+
+/**
+ * 401 means the session is not accepted right now (expired, or revoked by a password reset) — a
+ * statement about the CREDENTIAL, not about the queued action. The action is fine and will succeed
+ * after the user signs in again, so it must be kept, not discarded.
+ */
+function isAuthError(error: unknown): boolean {
+  return httpStatusOf(error) === 401;
+}
+
+/**
+ * Returns true for HTTP status codes that are permanent client errors.
+ * Retrying these entries will not succeed, so they should be discarded.
+ * (401 is deliberately not one of them — see isAuthError.)
+ */
+function isPermanentError(error: unknown): boolean {
+  const status = httpStatusOf(error);
+
+  if (status === null || status === 401) {
     return false;
   }
 
@@ -45,7 +62,24 @@ export const processSyncQueue = async ({
   onTaskUpdated,
   onTaskDeleted,
 }: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
-  const queue = await getSyncQueue();
+  // A queue may only be worked by its owner, with the owner's credential. Bind BOTH now — the account
+  // and the token it is signed in with — and use them for everything below:
+  //  - every read/write of the queue names the owner: after a 401 the response interceptor signs the user
+  //    out, so by the time we write back "the current account" is nobody (or, after a quick re-login,
+  //    somebody else);
+  //  - every request carries the bound session. Checking "is the owner still signed in?" before calling
+  //    the service is not enough, because the service builds the request later and used to read whichever
+  //    token was current THEN. The API client now verifies the bound session and applies the bound token
+  //    in one synchronous step, or refuses to send (SessionChangedError).
+  const session = captureSession();
+
+  if (!session) {
+    return { processed: 0, failed: 0, remaining: 0 };
+  }
+
+  const ownerId = session.userId;
+  const stillSignedIn = () => isSameSession(captureSession(), session);
+  const queue = await getSyncQueue(ownerId);
 
   if (queue.length === 0) {
     return {
@@ -59,16 +93,25 @@ export const processSyncQueue = async ({
   const remainingQueue: SyncQueueRecord[] = [];
   let processed = 0;
 
-  for (const entry of queue) {
+  for (const [index, entry] of queue.entries()) {
+    // Early exit only (saves building a request that would be refused). The API client's check at send
+    // time is the real guard; this one cannot be, because the account can still change after it.
+    if (!stillSignedIn()) {
+      remainingQueue.push(...queue.slice(index));
+      break;
+    }
+
     try {
       if (entry.type === 'create') {
         const localTaskId = entry.taskId;
         const payload = (entry.payload ?? {}) as TaskCreatePayload;
-        const response = await taskService.createTask(payload);
+        const response = await taskService.createTask(payload, { session });
 
         if (localTaskId) {
           idMap.set(localTaskId, response.task._id);
-          onTaskCreated(localTaskId, response.task);
+          // The request went out as the owner and is done. But if another account is on screen now, do
+          // not feed the owner's result into that account's UI state and task cache.
+          if (stillSignedIn()) onTaskCreated(localTaskId, response.task);
         }
 
         processed += 1;
@@ -90,8 +133,8 @@ export const processSyncQueue = async ({
         }
 
         const payload = (entry.payload ?? {}) as TaskUpdatePayload;
-        const response = await taskService.updateTask(resolvedTaskId, payload);
-        onTaskUpdated(resolvedTaskId, response.task);
+        const response = await taskService.updateTask(resolvedTaskId, payload, { session });
+        if (stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
 
         processed += 1;
         continue;
@@ -111,12 +154,29 @@ export const processSyncQueue = async ({
           continue;
         }
 
-        await taskService.deleteTask(resolvedTaskId);
-        onTaskDeleted(resolvedTaskId);
+        await taskService.deleteTask(resolvedTaskId, { session });
+        if (stillSignedIn()) onTaskDeleted(resolvedTaskId);
 
         processed += 1;
       }
     } catch (error) {
+      if (isSessionChangedError(error)) {
+        // The account or token changed between building this request and sending it, and the API client
+        // refused to send it. Nothing was sent. Keep this entry and everything not yet attempted for the
+        // owner; do not retry under whoever is signed in now.
+        remainingQueue.push(...queue.slice(index));
+        break;
+      }
+
+      if (isAuthError(error)) {
+        // Stop here. The response interceptor has already signed the user out, so every further
+        // request would go out without credentials, fail the same way, and (before this) be thrown
+        // away one by one. Keep this entry and everything not yet attempted, in order, for the next
+        // run after the user signs in again.
+        remainingQueue.push(...queue.slice(index));
+        break;
+      }
+
       if (isPermanentError(error)) {
         console.warn('[syncQueue] Discarding permanently failed entry:', entry.type, entry.taskId, error);
         processed += 1;
@@ -127,7 +187,7 @@ export const processSyncQueue = async ({
     }
   }
 
-  await setSyncQueue(remainingQueue);
+  await setSyncQueue(remainingQueue, ownerId);
 
   return {
     processed,

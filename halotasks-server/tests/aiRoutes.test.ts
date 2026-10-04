@@ -10,6 +10,12 @@ import { AI_MAX_TASKS, AI_PROMPT_MAX_LENGTH } from '../src/utils/aiTaskParser';
 // Mongo-independent: the real router, auth middleware, controller, validators and Groq client run;
 // only the network (global fetch) is replaced, so no test ever contacts the real provider.
 
+// requireAuth checks the token against the account's current session version. These tokens are the
+// legacy shape (no `tv`), so an account at version 0 must keep accepting them.
+vi.mock('../src/models/User.model', () => ({
+  default: { findById: () => ({ select: () => ({ lean: async () => ({ tokenVersion: 0 }) }) }) },
+}));
+
 const SECRET = 'test-jwt-secret-1234567890';
 const GROQ_KEY = 'gsk_test_SUPER_SECRET_provider_key_0123456789';
 const URL_PATH = '/api/ai/parse-tasks';

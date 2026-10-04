@@ -4,6 +4,33 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-03",
+      "category": "Backend",
+      "title": "revoke sessions issued before a password reset (Issue #27)",
+      "description": "Auth is a stateless 7-day JWT whose middleware never read the database, so every token issued before a password reset stayed valid for up to 7 days (including an attacker's). User now has tokenVersion (default 0); JWTs carry it as tv, signed from the same read that authenticated the caller; requireAuth is async and accepts a token only while (tv ?? 0) === (account.tokenVersion ?? 0). Missing user -> 401, malformed tv -> 401 before any read, lookup failure -> 500 (fails closed), CastError -> 401; every rejection is the same 'Invalid or expired token'. reset-password is now ONE atomic conditional updateOne filtered on {email, code hash, expiry > now} that sets the password, clears the code, $inc's tokenVersion and empties pushSubscriptions; matchedCount !== 1 -> 400. The earlier exists() read is only a bcrypt cost guard and decides nothing, which closes the replay race of the old findOne -> bcrypt -> save (two simultaneous requests with one code could both return 200). Tokens with no tv and accounts with no tokenVersion both read as 0, so nothing signs anyone out on deploy and no migration is needed; a login that straddles a reset signs the old version and is born revoked. Logout stays client-side. Client: offline/queueProcessor.ts treated every 4xx except 408/429 as permanent, so a revoked token on reconnect discarded the entire offline queue (the interceptor clears the token on the first 401 and every later entry then went out unauthenticated and was discarded too); a 401 now stops the run and keeps that entry and everything not yet attempted, in order. Keeping the queue made it a cross-account risk, because requests carry whatever token is current and the queue was ONE global IndexedDB key: a preserved queue would have been sent under whichever account signed in next. The queue is now per account (sync_queue:<userId>, same convention as history in Issue #31): enqueueSyncAction binds the owner when the action is made (and rejects with nobody signed in); processSyncQueue binds the session (owner AND token) at the start, uses the owner for every read and write (including the write-back after a 401, when the interceptor has already signed everyone out) and passes { session } with every request. A pre-call ownership check alone was a time-of-check/time-of-use race: the service builds the request later and read whichever token was current then, so an account switch in that gap would have sent A's queued mutation with B's token. The request interceptor in services/api.ts now verifies the store against the bound session and applies the BOUND token in one synchronous step, or rejects with SessionChangedError before anything is sent (the processor then stops and keeps the rest for the owner); requests without a session are unchanged. If the account changes while a request is in flight, that request already left as the owner and its result is not fed into the new account's UI or task cache. The old unowned global key cannot be attributed to anyone, so it is never read or sent and is removed once with a console warning stating how many actions were discarded (pending offline changes made before this deploy are lost, same rule history used). Tests: 20 new server tests (tests/sessionInvalidation.test.ts: real app, in-memory User double with snapshot reads, atomic conditional updateOne and gates for the double-reset and login-straddles-reset interleavings; 9 production mutants checked and all caught) and 15 + 20 + 14 client tests (offline/queueProcessor.credentials.test.ts: the real task service and API client against a recording adapter, asserting the token each queued create/update/delete actually carries and that a switch between the ownership check and the request, or in flight, sends nothing as the wrong account; offline/queueProcessor.test.ts: 401 handling and cross-account isolation on the real per-account storage; offline/syncQueue.test.ts: storage isolation, owner binding, legacy purge). Reverting the session binding fails 7 tests, i.e. the suite reproduces the race; mutants of the queue isolation and credential-binding logic (each guard, each entry type, create/update/delete callbacks) were all caught except ones made behaviourally equivalent by deliberate redundancy; 4 real-MongoDB cases added to api.routes.test.ts; the history, AI, push and rate-limit route suites stub the version lookup at 0 with their existing legacy-shape tokens. Results: server 739 passed + 31 skipped, client 156 passed, server typecheck, test typecheck and build and client build clean. Known limits: tests/api.routes.test.ts needs MongoMemoryServer, whose binary cannot be downloaded in the sandbox, so its 31 tests (27 existing + 4 new) were NOT run here; a request already past requireAuth when the reset commits finishes; one indexed read per authenticated request is added by design; the task cache (offline/cache.ts) is still one global IndexedDB key (unchanged, out of scope); Express is 5.2.1 so the async requireAuth's rejections reach the error handler (verified). Noticed, out of scope: Settings -> Change password sends a signed-in user to /forgot-password, which redirects them to the dashboard; the 401 interceptor also fires on a wrong-password login.",
+      "files": [
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/middleware/auth.middleware.ts",
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/tests/sessionInvalidation.test.ts",
+        "halotasks-server/tests/api.routes.test.ts",
+        "halotasks-server/tests/historyRoutes.test.ts",
+        "halotasks-server/tests/aiRoutes.test.ts",
+        "halotasks-server/tests/pushRoutes.test.ts",
+        "halotasks-server/tests/rateLimitRoutes.test.ts",
+        "halotasks-client/src/offline/syncQueue.ts",
+        "halotasks-client/src/offline/syncQueue.test.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/offline/queueProcessor.test.ts",
+        "docs/context.md",
+        "halotasks-client/src/offline/queueProcessor.credentials.test.ts",
+        "halotasks-client/src/services/api.ts",
+        "halotasks-client/src/services/taskService.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-02",
       "category": "Backend",
       "title": "3009: harden Web Push subscription and relay boundaries (Issue #26)",
@@ -754,5 +781,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-01T01:59:59Z"
+  "lastUpdated": "2026-10-03T15:00:00Z"
 }

@@ -45,14 +45,17 @@ const createSmtpTransporter = () => {
 
 const smtpTransporter = createSmtpTransporter();
 
-const createAuthToken = (userId: string, email: string, name: string) => {
+// `tokenVersion` must come from the SAME document read that authenticated the caller (the password
+// check at login), never from a second read: a reset bumps the version in the same atomic write as
+// the password, so a login that straddles a reset signs the old version and is refused by requireAuth.
+const createAuthToken = (userId: string, email: string, name: string, tokenVersion: number) => {
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!jwtSecret) {
     throw new Error('JWT_SECRET is not configured');
   }
 
-  return jwt.sign({ userId, email, name }, jwtSecret, { expiresIn: '7d' });
+  return jwt.sign({ userId, email, name, tv: tokenVersion }, jwtSecret, { expiresIn: '7d' });
 };
 
 const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string }) => ({
@@ -213,7 +216,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
       passwordHash,
     });
 
-    const token = createAuthToken(user.id, user.email, user.name);
+    const token = createAuthToken(user.id, user.email, user.name, user.tokenVersion ?? 0);
 
     return res.status(201).json({
       token,
@@ -248,7 +251,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    const token = createAuthToken(user.id, user.email, user.name);
+    const token = createAuthToken(user.id, user.email, user.name, user.tokenVersion ?? 0);
 
     return res.json({
       token,
@@ -310,20 +313,37 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     const normalizedEmail = normalizeEmail(email);
     const hashedToken = hashResetCode(token);
 
-    const user = await User.findOne({
+    const matchesLiveCode = () => ({
       email: normalizedEmail,
       resetPasswordTokenHash: hashedToken,
       resetPasswordExpiresAt: { $gt: new Date() },
     });
 
-    if (!user) {
+    // Cost guard only: skip the bcrypt work for a code that is already plainly wrong. This is NOT
+    // the security decision — between here and the write below another request can consume the
+    // code or it can expire, so the conditional update is the sole authority.
+    if (!(await User.exists(matchesLiveCode()))) {
       return res.status(400).json({ message: 'Reset code is invalid or expired' });
     }
 
-    user.passwordHash = await bcrypt.hash(password, 10);
-    user.resetPasswordTokenHash = undefined;
-    user.resetPasswordExpiresAt = undefined;
-    await user.save();
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // One atomic, conditional write. Consuming the code, setting the password and revoking every
+    // session issued before now all succeed or fail together, and exactly one of any number of
+    // concurrent requests carrying the same code can match:
+    //   - tokenVersion +1   -> every JWT issued before this moment is refused by requireAuth
+    //   - pushSubscriptions -> devices registered under the old session state stop receiving
+    //                          reminders; legitimate devices re-register after their next login
+    // The reset itself is unauthenticated and issues no token, so no session needs to survive it.
+    const result = await User.updateOne(matchesLiveCode(), {
+      $set: { passwordHash, pushSubscriptions: [] },
+      $unset: { resetPasswordTokenHash: 1, resetPasswordExpiresAt: 1 },
+      $inc: { tokenVersion: 1 },
+    });
+
+    if (result.matchedCount !== 1) {
+      return res.status(400).json({ message: 'Reset code is invalid or expired' });
+    }
 
     return res.json({ message: 'Password updated. Please log in.' });
   } catch (error) {

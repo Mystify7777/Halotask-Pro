@@ -13,6 +13,12 @@ const model = vi.hoisted(() => ({
 
 vi.mock('../src/models/DayHistory.model', () => ({ default: model }));
 
+// requireAuth checks the token against the account's current session version. These tokens are the
+// legacy shape (no `tv`), so an account at version 0 must keep accepting them.
+vi.mock('../src/models/User.model', () => ({
+  default: { findById: () => ({ select: () => ({ lean: async () => ({ tokenVersion: 0 }) }) }) },
+}));
+
 import historyRoutes from '../src/routes/history.routes';
 
 const SECRET = 'test-jwt-secret-1234567890';

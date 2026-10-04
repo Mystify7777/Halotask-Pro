@@ -44,6 +44,14 @@ const userSchema = new Schema(
       type: String,
       required: true,
     },
+    // Session-generation counter. Every JWT carries the value it was issued under (`tv`) and
+    // requireAuth accepts it only while it still equals this field, so incrementing it revokes every
+    // token issued before. Bumped atomically with the password change on a successful reset.
+    // Absent on accounts that predate it; absent is read as 0, as is a token with no `tv`.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
     resetPasswordTokenHash: {
       type: String,
       required: false,

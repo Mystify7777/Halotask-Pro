@@ -135,12 +135,12 @@ Core offline pieces:
 - `offline/cache.ts` - cached auth/task data helpers
 - `offline/db.ts` - IndexedDB wrapper
 - `offline/network.ts` - network helpers
-- `offline/syncQueue.ts` - queued write actions
+- `offline/syncQueue.ts` - queued write actions, one queue per account (`sync_queue:<userId>`)
 - `offline/queueProcessor.ts` - replay and retry logic
 
 Important offline behavior:
 - Tasks can be cached and replayed later
-- Write actions are queued when offline
+- Write actions are queued when offline, in the signed-in account's own queue; a queue is only ever processed while its owner is the signed-in account
 - The queue is processed when connectivity returns
 - Deletions were hardened so the UI is only mutated after queueing succeeds
 - Permanent queue failures should not be retried forever
@@ -158,6 +158,7 @@ Important auth behaviors:
 - Expired tokens are cleared early
 - API requests use a timeout
 - A global 401 response interceptor redirects to login
+- A 401 is not a reason to discard queued offline work: `offline/queueProcessor.ts` stops at the first 401 and keeps that entry and every entry after it, in the owning account's own queue (see "Session Invalidation"); other permanent 4xx still discard the one entry
 - `ProtectedRoute` is the main guard for authenticated views
 
 Auth store data:
@@ -548,6 +549,112 @@ log line is host-only.
 - The concurrency and bound behaviour is tested against an in-memory model that emulates only the exact
   operations used and forces interleaving; MongoDB's own operator semantics (`$` positional update, `$ne` on
   an array path, `$push` + `$slice`) are not exercised until the Mongo-backed suite can run.
+
+## Session Invalidation After Password Reset (Issue #27)
+
+**Invariant.** After a successful password reset, every JWT issued before it is refused (`401`, the same body
+as any other bad token). Only a token from a login *after* the reset works. No session is exempt: the reset is
+unauthenticated (email + 6-digit code) and issues no token, so there is no session performing the reset to
+preserve. The reset code is single-use even when two requests race with it.
+
+**Model.** Still a stateless 7-day JWT sent as a Bearer header (no cookies, refresh tokens or session
+collection). `User.tokenVersion` (integer, default 0) is the account's session generation; every token carries
+the generation it was issued under as the `tv` claim.
+
+| Moment | What happens |
+|---|---|
+| register / login | Token is signed with `tv = user.tokenVersion ?? 0`, taken from the **same read** that authenticated the caller |
+| every protected request | `requireAuth` verifies the signature, then loads `tokenVersion` (`findById().select().lean()`) and accepts only if `(tv ?? 0) === (account.tokenVersion ?? 0)` |
+| reset | One atomic `updateOne` filtered on `{email, resetPasswordTokenHash, resetPasswordExpiresAt > now}` that sets the new `passwordHash`, clears the code, **`$inc`s `tokenVersion`** and empties `pushSubscriptions`. `matchedCount !== 1` -> `400 Reset code is invalid or expired` |
+| logout | Unchanged: client-side only (`clearAuth()`). There is no server logout; a token stays valid until the version changes or it expires |
+
+**Rules that matter.**
+- *The conditional update is the only authority.* The `exists()` read before it is a cost guard (skip bcrypt
+  for an obviously wrong code) and decides nothing; code expiry, code consumption, the password change and the
+  revocation succeed or fail together. Two simultaneous resets with one code: exactly one `200`, one `400`, one
+  version bump.
+- *Legacy compatibility, no migration.* A token with no `tv` and an account with no `tokenVersion` both read as
+  `0`, so nothing signs anyone out on deploy. A legacy account's first reset takes it from absent to `1`
+  (`$inc` creates the field), which kills its old tokens.
+- *A login that straddles a reset fails closed.* It signs the version it read; if a reset committed in between,
+  that token is already stale and the first request with it is a `401`. No locking around login.
+- *One response for every rejection* (stale version, forged or expired token, malformed `tv`, deleted
+  account): `401 { message: 'Invalid or expired token' }`. A missing header keeps its own `401 Authorization
+  token is required`. A malformed `tv` (not a non-negative integer) is refused before any database read.
+- *Fails closed.* If the lookup fails, the request is refused (`500 Internal server error`), never let
+  through. An id that is not a valid ObjectId (`CastError`) is a bad token (`401`). A token for an account that no
+  longer exists is a `401` (previously it passed).
+- *Push subscriptions are part of the old session state.* A device registered under it would otherwise keep
+  receiving the owner's reminders after the reset. Legitimate devices re-register by themselves: the dashboard
+  calls `subscribePush()` on mount when notification permission is granted.
+
+**Cost.** One indexed `_id` read with a one-field projection per authenticated request (previously none).
+This is inherent to revoking stateless tokens; it is deliberately not cached, because a cache would reopen
+the window the invariant closes.
+
+**Client.** The existing 401 interceptor already clears auth and redirects to `/login`. The extra fix is in
+`offline/queueProcessor.ts`: it used to treat every 4xx except 408/429 as permanent and discard the entry, so a
+revoked token on reconnect wiped the whole offline queue (the interceptor clears the token on the first 401,
+and every later entry then went out unauthenticated and was discarded too). Now a 401 stops the run and keeps
+that entry and everything not yet attempted, in order; the queue syncs after the next login. History sync
+already treated 401 as retryable.
+
+**Keeping a queue means keeping it with its owner.** Requests carry whatever token is current, so a queue that
+survives a forced sign-out must never be sent by the next account to sign in on that browser. The queue is
+therefore stored per account under `sync_queue:<userId>` (the same convention as history, Issue #31): there is
+no way to read or write a queue without naming whose it is, so isolation holds by construction rather than by a
+filter that could be forgotten.
+- `enqueueSyncAction` binds the owner when the action is *made*, not when the write eventually runs; with nobody
+  signed in it rejects instead of queuing an unowned action.
+- `processSyncQueue` binds the **session** — the owner *and* the token they are signed in with — at the start
+  and uses the owner for every read and write, including the final write-back after a 401, when the interceptor
+  has already signed everyone out.
+- *The credential is bound to the request, not just checked beforehand.* A check such as "is the owner still
+  signed in?" before calling the service is a time-of-check/time-of-use race: the service builds the request a
+  moment later and (for ordinary callers) reads whichever token is current *then*, so an account switch landing
+  in that gap would have sent A's queued mutation with B's token. Every queue request therefore carries
+  `{ session }` (`taskService.create/update/deleteTask(…, { session })`), and the request interceptor in
+  `services/api.ts` verifies the store against it and applies **the bound token** in one synchronous step — no
+  `await` sits between "verified" and "header set". If the signed-in account or token is no longer the bound
+  one it rejects with `SessionChangedError` and nothing is sent; the processor stops and keeps that entry and
+  everything not yet attempted for the owner. Requests made without a session behave exactly as before. The
+  per-iteration check in the processor is only an early exit; the interceptor is the guard.
+- If the account changes while a request is in flight, that request has already left as the owner and is done;
+  its result is not fed into the new account's screen or task cache (the `onTask…` callbacks are skipped), and
+  no further entry is sent.
+- Another account signing in processes only its own queue; the first account's entries wait for it.
+- *Legacy:* the old single `sync_queue` key recorded no owner and cannot be attributed (a different account may
+  have signed in since), so it is never read, sent or assigned to anyone. It is removed once, with a console
+  warning that says how many actions were discarded. This is the same rule history used; a pending offline
+  change made before this deploy is lost, which is the price of never guessing an owner.
+
+**Known limits.**
+- A request that already passed `requireAuth` when the reset committed runs to completion (bounded by that one
+  request); the next request is refused.
+- Password reset is the only revocation boundary. Anything that later changes the password (a
+  change-password endpoint) must perform the same atomic `$inc`.
+- The task cache (`offline/cache.ts`, key `tasks`) is still one global IndexedDB key, so until the next
+  account's first fetch replaces it a browser can briefly show the previous account's cached tasks, including
+  tasks created offline. Unchanged and out of scope; the queue no longer shares that problem.
+- `enqueueSyncAction` needs `useAuthStore.user` (not just a token) to know whose queue to use, like history. If
+  the stored user record were corrupt while the token is valid, creating a task offline fails loudly instead of
+  being queued unowned.
+- Express is 5.x (5.2.1), so a rejected promise from the async `requireAuth` is forwarded to the error handler
+  (500) rather than hanging; `requireAuth` also handles its own lookup errors explicitly.
+- Settings -> "Change password" sends a signed-in user to `/forgot-password`, which redirects authenticated
+  users to the dashboard (unchanged, out of scope).
+
+**Tests.** `tests/sessionInvalidation.test.ts` (Mongo-independent, real app, in-memory `User` double with
+snapshot reads, an atomic conditional `updateOne`, and gates for the double-reset and login-straddles-reset
+interleavings); real-MongoDB round trip in `tests/api.routes.test.ts` (needs `mongodb-memory-server`'s
+downloaded binary); client `offline/queueProcessor.test.ts` (401 handling and cross-account isolation
+against the real per-account storage and auth store), `offline/queueProcessor.credentials.test.ts` (the real
+task service and API client against a recording adapter: which token each queued create/update/delete actually
+carries, and that a switch of account or token between the ownership check and the request, or while it is in
+flight, sends nothing as the wrong account) and `offline/syncQueue.test.ts` (storage isolation, owner binding,
+legacy purge). The history, AI, push and rate-limit route
+suites mint legacy-shape tokens (no `tv`) and stub the version lookup at 0, which doubles as coverage that
+legacy tokens keep working.
 
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 

@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient, type BoundSession, type SessionRequestConfig } from './api';
 import { Task, TaskCreatePayload, TaskListResponse, TaskResponse } from '../types/task';
 
 type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
@@ -51,15 +51,21 @@ export const taskService = {
     // describe that: everything on "page 1", nothing more to fetch.
     return { ...last, tasks: allTasks, page: 1, limit: allTasks.length, hasMore: false };
   },
-  createTask: async (payload: TaskCreatePayload) => {
-    const response = await apiClient.post<TaskResponse>('/api/tasks', payload);
+  // `options.session` binds the request to the account + token a caller captured earlier (the offline
+  // queue replays one account's work later): the request is sent with that token, or not sent at all if
+  // the signed-in session is no longer it. Omit it for ordinary "as the current user" requests.
+  createTask: async (payload: TaskCreatePayload, options?: { session?: BoundSession }) => {
+    const config: SessionRequestConfig = { session: options?.session };
+    const response = await apiClient.post<TaskResponse>('/api/tasks', payload, config);
     return response.data;
   },
-  updateTask: async (taskId: string, payload: TaskUpdatePayload) => {
-    const response = await apiClient.put<TaskResponse>(`/api/tasks/${taskId}`, payload);
+  updateTask: async (taskId: string, payload: TaskUpdatePayload, options?: { session?: BoundSession }) => {
+    const config: SessionRequestConfig = { session: options?.session };
+    const response = await apiClient.put<TaskResponse>(`/api/tasks/${taskId}`, payload, config);
     return response.data;
   },
-  deleteTask: async (taskId: string) => {
-    await apiClient.delete(`/api/tasks/${taskId}`);
+  deleteTask: async (taskId: string, options?: { session?: BoundSession }) => {
+    const config: SessionRequestConfig = { session: options?.session };
+    await apiClient.delete(`/api/tasks/${taskId}`, config);
   },
 };

@@ -50,6 +50,17 @@ const makeUser = (email: string, extra: Partial<Doc> = {}): Doc => {
   return doc;
 };
 
+const matchesLiveCode = (q: { email: string; resetPasswordTokenHash?: string }): Doc | null => {
+  const u = users.get(q.email) ?? null;
+  return u &&
+    q.resetPasswordTokenHash !== undefined &&
+    u.resetPasswordTokenHash === q.resetPasswordTokenHash &&
+    u.resetPasswordExpiresAt &&
+    u.resetPasswordExpiresAt > new Date()
+    ? u
+    : null;
+};
+
 const fetchMock = vi.fn();
 
 async function loadApp(env: Record<string, string | undefined> = {}): Promise<Express> {
@@ -68,21 +79,31 @@ async function loadApp(env: Record<string, string | undefined> = {}): Promise<Ex
 
   vi.doMock('../src/models/User.model', () => ({
     default: {
-      findOne: async (q: { email: string; resetPasswordTokenHash?: string }) => {
-        const u = users.get(q.email) ?? null;
-        if (u && q.resetPasswordTokenHash) {
-          return u.resetPasswordTokenHash === q.resetPasswordTokenHash &&
-            u.resetPasswordExpiresAt && u.resetPasswordExpiresAt > new Date()
-            ? u
-            : null;
-        }
-        return u;
+      findOne: async (q: { email: string }) => users.get(q.email) ?? null,
+      // Reset-password: the live-code match the controller uses for both its cost guard (exists) and
+      // its single atomic write (updateOne), applied to the in-memory doc.
+      exists: async (q: { email: string; resetPasswordTokenHash?: string }) => (matchesLiveCode(q) ? { _id: 'x' } : null),
+      updateOne: async (
+        q: { email: string; resetPasswordTokenHash?: string },
+        update: { $set: Partial<Doc>; $unset: Record<string, unknown>; $inc: { tokenVersion: number } },
+      ) => {
+        const u = matchesLiveCode(q);
+        if (!u) return { matchedCount: 0, modifiedCount: 0 };
+        Object.assign(u, update.$set);
+        for (const key of Object.keys(update.$unset)) delete (u as Record<string, unknown>)[key];
+        return { matchedCount: 1, modifiedCount: 1 };
       },
       create: async (d: { email: string; name: string; passwordHash: string }) =>
         makeUser(d.email, { name: d.name, passwordHash: d.passwordHash }),
       findById: (id: string) => ({
-        select: () => ({
-          lean: async () => ({ pushSubscriptions: [...users.values()].find((u) => u.id === id)?.pushSubscriptions ?? [] }),
+        select: (fields: string) => ({
+          // requireAuth's session-version check. This suite is about rate limiting, not accounts, so
+          // any id is an account at version 0 (matching these legacy-shape tokens); account existence
+          // and version mismatches are covered in sessionInvalidation.test.ts.
+          lean: async () =>
+            fields === 'tokenVersion'
+              ? { tokenVersion: 0 }
+              : { pushSubscriptions: [...users.values()].find((u) => u.id === id)?.pushSubscriptions ?? [] },
         }),
       }),
       findByIdAndUpdate: async () => null,

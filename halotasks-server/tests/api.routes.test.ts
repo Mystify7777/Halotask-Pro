@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import request from 'supertest';
@@ -297,6 +298,99 @@ describe('HaloTasks API routes', () => {
       .post('/api/auth/reset-password')
       .send({ email: 'reset@mail.com', token: resetCode, password: 'another-password' });
     expect(reuseResponse.status).toBe(400);
+  });
+
+  describe('session invalidation after a password reset (Issue #27), against a real MongoDB', () => {
+    const RESET_CODE = '246810';
+
+    const seedResetCode = async (email: string) => {
+      await User.updateOne(
+        { email },
+        {
+          resetPasswordTokenHash: crypto.createHash('sha256').update(RESET_CODE).digest('hex'),
+          resetPasswordExpiresAt: new Date(Date.now() + 20 * 60 * 1000),
+        },
+      );
+    };
+
+    const resetWith = (email: string, password: string, code = RESET_CODE) =>
+      request(app).post('/api/auth/reset-password').send({ email, token: code, password });
+
+    const probe = (token: string) => request(app).get('/api/tasks').set('Authorization', `Bearer ${token}`);
+
+    it('revokes every session issued before the reset, clears push subscriptions, and honours a fresh login', async () => {
+      const registered = await registerUser({ name: 'Victim', email: 'victim@mail.com', password: 'old-password' });
+      const oldToken: string = registered.body.token;
+      expect((jwt.decode(oldToken) as { tv?: number }).tv).toBe(0);
+      expect((await probe(oldToken)).status).toBe(200);
+
+      await User.updateOne(
+        { email: 'victim@mail.com' },
+        { $push: { pushSubscriptions: { endpoint: 'https://push.example.com/a', keys: { p256dh: 'p', auth: 'a' } } } },
+      );
+      await seedResetCode('victim@mail.com');
+
+      expect((await resetWith('victim@mail.com', 'new-password')).status).toBe(200);
+
+      const stored = await User.findOne({ email: 'victim@mail.com' });
+      expect(stored?.tokenVersion).toBe(1);
+      expect(stored?.pushSubscriptions).toHaveLength(0);
+      expect(stored?.resetPasswordTokenHash).toBeUndefined();
+
+      const stale = await probe(oldToken);
+      expect(stale.status).toBe(401);
+      expect(stale.body).toEqual({ message: 'Invalid or expired token' });
+
+      const fresh = await loginUser({ email: 'victim@mail.com', password: 'new-password' });
+      expect(fresh.status).toBe(200);
+      expect((jwt.decode(fresh.body.token) as { tv?: number }).tv).toBe(1);
+      expect((await probe(fresh.body.token)).status).toBe(200);
+    });
+
+    it('keeps the reset code single-use, including when two requests race with it', async () => {
+      await registerUser({ name: 'Race', email: 'race@mail.com', password: 'old-password' });
+      await seedResetCode('race@mail.com');
+
+      const [one, two] = await Promise.all([
+        resetWith('race@mail.com', 'password-from-one'),
+        resetWith('race@mail.com', 'password-from-two'),
+      ]);
+
+      expect([one.status, two.status].sort()).toEqual([200, 400]);
+      expect((await User.findOne({ email: 'race@mail.com' }))?.tokenVersion).toBe(1);
+
+      const replay = await resetWith('race@mail.com', 'attacker-password');
+      expect(replay.status).toBe(400);
+      expect((await User.findOne({ email: 'race@mail.com' }))?.tokenVersion).toBe(1);
+    });
+
+    it('treats an account that predates tokenVersion as version 0, and revokes its old tokens on reset', async () => {
+      const registered = await registerUser({ name: 'Legacy', email: 'legacy@mail.com', password: 'old-password' });
+      await User.updateOne({ email: 'legacy@mail.com' }, { $unset: { tokenVersion: 1 } });
+      const user = await User.findOne({ email: 'legacy@mail.com' });
+      const legacyToken = jwt.sign(
+        { userId: user!.id, email: user!.email, name: user!.name },
+        TEST_JWT_SECRET,
+      );
+
+      expect((await probe(legacyToken)).status).toBe(200);
+      expect((await probe(registered.body.token)).status).toBe(200);
+
+      await seedResetCode('legacy@mail.com');
+      expect((await resetWith('legacy@mail.com', 'new-password')).status).toBe(200);
+
+      expect((await probe(legacyToken)).status).toBe(401);
+      expect((await probe(registered.body.token)).status).toBe(401);
+    });
+
+    it('rejects a token for an account that no longer exists', async () => {
+      const registered = await registerUser({ name: 'Gone', email: 'gone@mail.com', password: 'old-password' });
+      expect((await probe(registered.body.token)).status).toBe(200);
+
+      await User.deleteOne({ email: 'gone@mail.com' });
+
+      expect((await probe(registered.body.token)).status).toBe(401);
+    });
   });
 
   it('returns the same neutral message for forgot-password whether or not the account exists', async () => {

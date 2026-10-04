@@ -29,6 +29,7 @@ type UserRow = { _id: string; pushSubscriptions: Sub[] };
 
 const users = new Map<string, UserRow>();
 const modelCalls = { updateOne: 0, pull: 0, findById: 0 };
+const authLookups = { count: 0 };
 const failPull = { on: false };
 
 // Concurrency gate: the first `size` updateOne calls all wait here until every one of them has arrived,
@@ -117,9 +118,17 @@ function installModels() {
         return row;
       },
       findById: (id: string) => ({
-        select: () => ({
+        select: (fields: string) => ({
           lean: async () => {
             await Promise.resolve();
+            // requireAuth's session-version check (projection 'tokenVersion'). These tokens are the
+            // legacy shape (no `tv`), so an account at version 0 must keep accepting them. Counted
+            // apart from `modelCalls` so the "nothing was looked up" assertions keep their meaning:
+            // they are about the push controller's own reads.
+            if (fields === 'tokenVersion') {
+              authLookups.count += 1;
+              return { tokenVersion: 0 };
+            }
             modelCalls.findById += 1;
             const row = users.get(id);
             return row ? { pushSubscriptions: clone(row.pushSubscriptions) } : null;
@@ -203,6 +212,7 @@ beforeEach(() => {
   delivery.clear();
   sendCalls.length = 0;
   modelCalls.updateOne = modelCalls.pull = modelCalls.findById = 0;
+  authLookups.count = 0;
   failPull.on = false;
   gate.size = 0;
   gate.arrived = 0;
