@@ -10,8 +10,8 @@ import { resetAllRateLimiters } from '../src/middleware/rateLimit';
 import '../src/middleware/rateLimiters';
 import Task from '../src/models/Task.model';
 import User from '../src/models/User.model';
+import { TEST_JWT_SECRET } from './testConfig';
 
-const TEST_JWT_SECRET = 'test-jwt-secret-1234567890';
 const TEST_CLIENT_ORIGIN = 'http://localhost:5173';
 
 let mongoServer: MongoMemoryServer;

@@ -12,6 +12,7 @@ import {
   PUSH_TAG_MAX_LENGTH,
   PUSH_TITLE_MAX_LENGTH,
 } from '../src/utils/pushValidators';
+import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
 // Mongo-independent: the real push router, auth middleware, rate limiter, controller and validators run
 // against an in-memory User model and a fake web-push. The model emulates ONLY the operations the
@@ -20,7 +21,6 @@ import {
 // pull-then-push, or to an operator-injectable query, fails here instead of being silently accepted.
 // What it cannot prove is MongoDB's own operator semantics; that needs the Mongo-backed suite.
 
-const SECRET = 'test-jwt-secret-1234567890';
 const MAX = PUSH_SUBSCRIPTIONS_MAX_PER_USER;
 const NOW = new Date('2026-10-02T10:00:00Z');
 

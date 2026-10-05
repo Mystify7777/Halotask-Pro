@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import type { Express } from 'express';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
 // Issue #27 — what happens to existing sessions when a password is reset.
 //
@@ -15,7 +16,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 // The same round trip against a real MongoDB lives in api.routes.test.ts, which needs a downloaded
 // mongod binary and so cannot run in every environment.
 
-const SECRET = 'test-jwt-secret-1234567890';
 const OLD_PASSWORD = 'old-password-123';
 const NEW_PASSWORD = 'new-password-456';
 const CODE = '654321';

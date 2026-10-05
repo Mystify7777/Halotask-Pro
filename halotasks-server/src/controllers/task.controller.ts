@@ -1,6 +1,8 @@
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Response } from 'express';
 import mongoose from 'mongoose';
 import Task from '../models/Task.model';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
+import { BODY_MUST_BE_OBJECT, isPlainObject } from '../utils/requestBody';
 import { parsePagination } from '../utils/pagination';
 import {
   DESCRIPTION_MAX_LENGTH,
@@ -142,7 +144,7 @@ const parseTaskBody = (
   return { ok: true, value: result };
 };
 
-export const getTasks = async (req: Request, res: Response, next: NextFunction) => {
+export const getTasks = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const pagination = parsePagination(req.query as Record<string, unknown>);
     if (!pagination.ok) {
@@ -150,7 +152,7 @@ export const getTasks = async (req: Request, res: Response, next: NextFunction) 
     }
     const { page, limit, skip } = pagination.value;
 
-    const filter = { userId: req.user?.id };
+    const filter = { userId: req.user.id };
 
     const [tasks, total] = await Promise.all([
       Task.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -171,9 +173,13 @@ export const getTasks = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-export const createTask = async (req: Request, res: Response, next: NextFunction) => {
+export const createTask = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const parsed = parseTaskBody(req.body as Record<string, unknown>, { requireTitle: true });
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({ message: BODY_MUST_BE_OBJECT });
+    }
+
+    const parsed = parseTaskBody(req.body, { requireTitle: true });
 
     if (!parsed.ok) {
       return res.status(400).json({ message: parsed.message });
@@ -181,7 +187,7 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
     const payload = parsed.value;
 
     const task = await Task.create({
-      userId: req.user?.id,
+      userId: req.user.id,
       title: payload.title,
       description: payload.description ?? '',
       completed: payload.completed ?? false,
@@ -200,20 +206,24 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-export const updateTask = async (req: Request, res: Response, next: NextFunction) => {
+export const updateTask = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid task id' });
     }
 
-    const parsed = parseTaskBody(req.body as Record<string, unknown>, { requireTitle: false });
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({ message: BODY_MUST_BE_OBJECT });
+    }
+
+    const parsed = parseTaskBody(req.body, { requireTitle: false });
 
     if (!parsed.ok) {
       return res.status(400).json({ message: parsed.message });
     }
     const payload = parsed.value;
 
-    const currentTask = await Task.findOne({ _id: req.params.id, userId: req.user?.id });
+    const currentTask = await Task.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!currentTask) {
       return res.status(404).json({ message: 'Task not found' });
@@ -237,7 +247,7 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
     };
 
     const task = await Task.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user?.id },
+      { _id: req.params.id, userId: req.user.id },
       update,
       { returnDocument: 'after', runValidators: true },
     );
@@ -249,13 +259,13 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-export const deleteTask = async (req: Request, res: Response, next: NextFunction) => {
+export const deleteTask = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid task id' });
     }
 
-    const task = await Task.findOneAndDelete({ _id: req.params.id, userId: req.user?.id });
+    const task = await Task.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
 
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });

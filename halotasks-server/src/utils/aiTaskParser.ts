@@ -7,6 +7,7 @@ import {
   isValidPriority,
   type TaskPriority,
 } from './taskValidators';
+import { BODY_MUST_BE_OBJECT, isPlainObject } from './requestBody';
 
 // ── AI task parsing: request validation, prompt, and model-output sanitising ──
 //
@@ -44,11 +45,11 @@ export type AiTaskDraft = {
 export type AiPromptResult = { ok: true; prompt: string } | { ok: false; message: string };
 
 export function parseAiPromptBody(body: unknown): AiPromptResult {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { ok: false, message: 'Request body must be a JSON object.' };
+  if (!isPlainObject(body)) {
+    return { ok: false, message: BODY_MUST_BE_OBJECT };
   }
 
-  const { prompt } = body as Record<string, unknown>;
+  const { prompt } = body;
   if (typeof prompt !== 'string' || prompt.trim().length === 0) {
     return { ok: false, message: 'prompt is required and must be a non-empty string.' };
   }

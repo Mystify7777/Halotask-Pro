@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { BODY_MUST_BE_OBJECT, isPlainObject } from './requestBody';
 
 // ── Push API input contract (Issue #26) ─────────────────────────────────────────
 //
@@ -58,9 +59,6 @@ export type ValidRelay = { title: string; body: string; tag: string; payload: st
 
 const fail = (message: string): { ok: false; message: string } => ({ ok: false, message });
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const CONTROL_OR_SPACE = /[\s\u0000-\u001f\u007f]/;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
@@ -116,7 +114,7 @@ function validateEndpoint(value: unknown): ValidationResult<string> {
 }
 
 export function parsePushSubscription(body: unknown, now: number = Date.now()): ValidationResult<ValidSubscription> {
-  if (!isPlainObject(body)) return fail('Request body must be a JSON object.');
+  if (!isPlainObject(body)) return fail(BODY_MUST_BE_OBJECT);
 
   const endpoint = validateEndpoint(body.endpoint);
   if (!endpoint.ok) return endpoint;
@@ -147,7 +145,7 @@ export function parsePushSubscription(body: unknown, now: number = Date.now()): 
 /** Unsubscribe only needs to *identify* a stored endpoint, so it is checked for type and size, not URL shape
  *  (that also lets a legacy, no-longer-valid entry still be removed). Objects such as `{ $ne: 'x' }` are rejected. */
 export function parseUnsubscribe(body: unknown): ValidationResult<{ endpoint: string }> {
-  if (!isPlainObject(body)) return fail('Request body must be a JSON object.');
+  if (!isPlainObject(body)) return fail(BODY_MUST_BE_OBJECT);
   const { endpoint } = body;
   if (typeof endpoint !== 'string' || endpoint.length === 0) {
     return fail('endpoint is required and must be a string.');
@@ -159,7 +157,7 @@ export function parseUnsubscribe(body: unknown): ValidationResult<{ endpoint: st
 }
 
 export function parseRelay(body: unknown): ValidationResult<ValidRelay> {
-  if (!isPlainObject(body)) return fail('Request body must be a JSON object.');
+  if (!isPlainObject(body)) return fail(BODY_MUST_BE_OBJECT);
   const { title, body: text, tag } = body;
 
   if (typeof title !== 'string' || title.trim().length === 0) return fail('title is required and must be a non-empty string.');

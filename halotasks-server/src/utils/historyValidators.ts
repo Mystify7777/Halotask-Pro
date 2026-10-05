@@ -10,6 +10,7 @@ import {
   TITLE_MAX_LENGTH,
   isValidEstimatedMinutes,
 } from './taskValidators';
+import { BODY_MUST_BE_OBJECT, isPlainObject } from './requestBody';
 
 // ── Documented History API contract ─────────────────────────────────────────
 //
@@ -62,9 +63,6 @@ export type HistoryUpsert = {
 
 const fail = (message: string, code?: string): { ok: false; message: string; code?: string } =>
   code ? { ok: false, message, code } : { ok: false, message };
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Query values must be a single string; repeated keys (arrays) and objects are malformed. */
 const singleString = (raw: unknown): string | null => (typeof raw === 'string' ? raw : null);
@@ -148,7 +146,7 @@ export function parseHistoryUpsert(
   const now = options.now ?? new Date();
 
   if (!isPlainObject(body)) {
-    return fail('Request body must be a JSON object.');
+    return fail(BODY_MUST_BE_OBJECT);
   }
 
   // ── declared offset (required: the server has no other way to know the user's day) ──

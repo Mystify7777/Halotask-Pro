@@ -4,6 +4,42 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-05",
+      "category": "Backend",
+      "title": "strengthen backend validation types and API test coverage (Issue #21)",
+      "description": "Replaced hopeful casts at the backend's trust boundaries with runtime checks and added regression coverage. (1) JWT: new utils/authToken.ts parseTokenPayload() checks the verified payload before any claim is used (plain object; non-empty string userId; string email and name; tv absent => 0 or a non-negative integer) and a failure is the same generic 401 as any bad token, before the database read; jwt.verify and jwt.sign now share one JWT_ALGORITHM (HS256) and verify pins algorithms: ['HS256']. (2) middleware/auth.middleware.ts exports AuthenticatedRequest (user: {id,email,name}, non-optional) and authenticated(handler), an adapter that narrows the request with a runtime check and answers 401 'Authorization token is required' without running the handler if req.user is missing or is not a full {id (non-empty string), email, name} (fail closed); every handler of the task, history, push, tree and ai routers is wrapped, the controllers (the AI one too) take AuthenticatedRequest so an unwrapped handler is a compile error, and use req.user.id, and the optional chaining plus three unreachable 'Unauthorized' guards in push.controller are gone. The global req.user stays optional (public routes exist). (3) New utils/requestBody.ts: isPlainObject, BODY_MUST_BE_OBJECT and readRequiredStrings (not a validation framework); the three private isPlainObject copies now import it. Register, login, forgot-password and reset-password, task create/update and tree PATCH now answer 400 for a missing, array, primitive or text body, and the four auth handlers answer 400 '... must be strings' for non-string fields (previously a 500 from .trim()/crypto or an unchecked value). Existing 400 messages are unchanged. Unchanged on purpose: case-sensitive 'Bearer ' scheme, reset-code lifetime/hashing/storage, rate limits, task field validators, pagination, demo-mode reset logging. (4) Tests: tests/testConfig.ts holds the clearly fake TEST-ONLY JWT secret (7 suites now import it instead of private copies) and testConfig.test.ts enforces that src/ never imports or contains it; new Mongo-free suites authToken, requestBody, authBoundary (header matrix, payload matrix with zero lookups, algorithm rejection, every protected route 401, structural guard check, adapter), taskRoutes (malformed/non-hex/missing ids, ownership), bodyBoundaries and authInput (forgot/reset: hash stored not plaintext, expiry, replacement, unknown email, neutral response, round trip, reuse). Mutation checks: the parser, adapter, body helper, controller guards and route wiring were mutated; every non-equivalent mutant was killed (see the PR report).",
+      "files": [
+        "halotasks-server/src/utils/authToken.ts",
+        "halotasks-server/src/utils/requestBody.ts",
+        "halotasks-server/src/middleware/auth.middleware.ts",
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/src/controllers/task.controller.ts",
+        "halotasks-server/src/controllers/tree.controller.ts",
+        "halotasks-server/src/controllers/history.controller.ts",
+        "halotasks-server/src/controllers/push.controller.ts",
+        "halotasks-server/src/routes/task.routes.ts",
+        "halotasks-server/src/routes/history.routes.ts",
+        "halotasks-server/src/routes/push.routes.ts",
+        "halotasks-server/src/routes/tree.routes.ts",
+        "halotasks-server/src/routes/ai.routes.ts",
+        "halotasks-server/src/utils/pushValidators.ts",
+        "halotasks-server/src/utils/historyValidators.ts",
+        "halotasks-server/src/utils/aiTaskParser.ts",
+        "halotasks-server/tests/testConfig.ts",
+        "halotasks-server/tests/testConfig.test.ts",
+        "halotasks-server/tests/authToken.test.ts",
+        "halotasks-server/tests/requestBody.test.ts",
+        "halotasks-server/tests/authBoundary.test.ts",
+        "halotasks-server/tests/taskRoutes.test.ts",
+        "halotasks-server/tests/bodyBoundaries.test.ts",
+        "halotasks-server/tests/authInput.test.ts",
+        "docs/context.md",
+        "docs/logs.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-04",
       "category": "Backend",
       "title": "stabilise MongoDB connection startup and DNS fallback (Issue #20)",
@@ -818,5 +854,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-04T18:00:00Z"
+  "lastUpdated": "2026-10-05T17:00:00Z"
 }

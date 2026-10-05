@@ -2,6 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
 // Mongo-independent route tests: the real router, auth middleware, controller and
 // validators run against a mocked DayHistory model. They prove user scoping,
@@ -21,7 +22,6 @@ vi.mock('../src/models/User.model', () => ({
 
 import historyRoutes from '../src/routes/history.routes';
 
-const SECRET = 'test-jwt-secret-1234567890';
 const USER_A = '665f1c2e9b1e8a0000000001';
 const USER_B = '665f1c2e9b1e8a0000000002';
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.middleware';
+import { authenticated, requireAuth } from '../middleware/auth.middleware';
 import {
   getHistory,
   upsertHistoryForDate,
@@ -8,9 +8,9 @@ import {
 
 const router = Router();
 
-router.get('/', requireAuth, getHistory);
+router.get('/', requireAuth, authenticated(getHistory));
 // '/today' must be registered before '/:date' so it is not captured as a date param.
-router.put('/today', requireAuth, upsertTodayHistory);
-router.put('/:date', requireAuth, upsertHistoryForDate);
+router.put('/today', requireAuth, authenticated(upsertTodayHistory));
+router.put('/:date', requireAuth, authenticated(upsertHistoryForDate));
 
 export default router;

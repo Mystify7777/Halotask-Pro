@@ -1,14 +1,43 @@
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Request, RequestHandler, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.model';
+import { JWT_ALGORITHM, parseTokenPayload } from '../utils/authToken';
 
-type TokenPayload = {
-  userId: string;
-  email: string;
-  name: string;
-  /** Session generation the token was issued under. Absent on tokens that predate it (= 0). */
-  tv?: number;
-};
+export type AuthenticatedUser = { id: string; email: string; name: string };
+
+/**
+ * A request that has been through `requireAuth`: `user` is guaranteed, not optional. Handlers of protected
+ * routes take this type and are registered through `authenticated()`; public routes keep plain `Request`
+ * (the global `req.user` stays optional because they exist).
+ */
+export interface AuthenticatedRequest extends Request {
+  user: AuthenticatedUser;
+}
+
+const hasAuthenticatedUser = (req: Request): req is AuthenticatedRequest =>
+  typeof req.user === 'object' &&
+  req.user !== null &&
+  typeof req.user.id === 'string' &&
+  req.user.id !== '' &&
+  typeof req.user.email === 'string' &&
+  typeof req.user.name === 'string';
+
+/**
+ * Adapts a handler that needs an `AuthenticatedRequest` into an ordinary Express handler. Express's handler
+ * type takes a plain `Request`, so a handler cannot simply declare a narrower `req`; this is the one place
+ * where the narrowing happens, and it is a runtime check, not a cast. If a protected route was ever wired
+ * without `requireAuth`, the request is refused with 401 and the handler never runs (fail closed).
+ */
+export const authenticated =
+  (handler: (req: AuthenticatedRequest, res: Response, next: NextFunction) => unknown): RequestHandler =>
+  async (req, res, next) => {
+    if (!hasAuthenticatedUser(req)) {
+      res.status(401).json({ message: 'Authorization token is required' });
+      return;
+    }
+
+    await handler(req, res, next);
+  };
 
 const invalidToken = (res: Response) => res.status(401).json({ message: 'Invalid or expired token' });
 
@@ -42,24 +71,27 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     return res.status(500).json({ message: 'Internal server error' });
   }
 
-  let payload: TokenPayload;
+  // Pin the algorithm: with a shared secret only HS256 is ever signed, so nothing else is accepted.
+  let decoded: unknown;
 
   try {
-    payload = jwt.verify(token, jwtSecret) as TokenPayload;
+    decoded = jwt.verify(token, jwtSecret, { algorithms: [JWT_ALGORITHM] });
   } catch {
     return invalidToken(res);
   }
 
-  const tokenVersion = payload.tv === undefined ? 0 : payload.tv;
+  // A valid signature says nothing about the payload's shape: check it before using any claim, and before
+  // spending a database read on a token that cannot be ours.
+  const claims = parseTokenPayload(decoded);
 
-  if (typeof payload.userId !== 'string' || !Number.isInteger(tokenVersion) || tokenVersion < 0) {
+  if (!claims) {
     return invalidToken(res);
   }
 
   try {
-    const account = await User.findById(payload.userId).select('tokenVersion').lean();
+    const account = await User.findById(claims.userId).select('tokenVersion').lean();
 
-    if (!account || (account.tokenVersion ?? 0) !== tokenVersion) {
+    if (!account || (account.tokenVersion ?? 0) !== claims.tokenVersion) {
       return invalidToken(res);
     }
   } catch (error) {
@@ -73,9 +105,9 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
   }
 
   req.user = {
-    id: payload.userId,
-    email: payload.email,
-    name: payload.name,
+    id: claims.userId,
+    email: claims.email,
+    name: claims.name,
   };
 
   return next();

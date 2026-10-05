@@ -753,6 +753,47 @@ one test against the real `node:dns` state). Not covered because it needs real i
 connection, a real refused-SRV resolver, and `server.ts` itself (it runs on import); `tests/api.routes.test.ts`
 still needs MongoMemoryServer's binary.
 
+## Request Boundaries and Auth Types (Issue #21)
+
+**Principle.** A TypeScript cast is not a runtime check. Two places used to rely on one: the JWT payload
+(`jwt.verify` result cast to a claims type) and `req.body` (destructured with `as`). Both are now checked at
+runtime, with small functions rather than a validation framework.
+
+**JWT payload** (`utils/authToken.ts`). `parseTokenPayload(decoded)` returns the claims or `null`: the payload
+must be a plain object; `userId` a non-empty string; `email` and `name` strings; `tv` absent (counts as 0) or a
+non-negative integer (`null`, strings, fractions and negatives are rejected). Extra claims are ignored.
+`requireAuth` calls it right after `jwt.verify` and **before** the `tokenVersion` database read; a rejected
+payload gets the same generic `401 Invalid or expired token` as any other bad token. `JWT_ALGORITHM` (`HS256`)
+is used by both `jwt.sign` (auth controller) and `jwt.verify` (`algorithms: [JWT_ALGORITHM]`), so `alg: none` and
+other algorithms are refused. The scheme match stays case-sensitive (`Bearer `); lowercase is a 401.
+
+**`AuthenticatedRequest` and `authenticated()`** (`middleware/auth.middleware.ts`). Protected handlers declare
+`req: AuthenticatedRequest` (`user: { id, email, name }`, non-optional) and are registered as
+`router.get('/', authenticated(handler))`. Express's `RequestHandler` takes a plain `Request`, so the adapter does
+the narrowing with a runtime check; if a protected route is ever wired without `requireAuth` it answers
+`401 Authorization token is required` and the handler does not run. The global `req.user` stays optional because
+public routes exist. The guard checks the whole `AuthenticatedUser` shape (non-empty string `id`, string `email`, string `name`).
+Every protected handler, including the AI one (which does not read `user` yet), takes `AuthenticatedRequest`, so a
+handler left unwrapped is a compile error.
+
+**Request bodies** (`utils/requestBody.ts`). `isPlainObject`, `BODY_MUST_BE_OBJECT` and
+`readRequiredStrings(body, keys, { required, notStrings })`. Express 5 leaves `req.body` undefined with no JSON
+body (a destructuring cast then threw a 500). Register, login, forgot-password, reset-password, task create/update
+and tree PATCH now answer `400 Request body must be a JSON object.` for a missing/array/primitive body, and the
+four auth handlers answer `400 ... must be strings` for non-string fields. Existing "required" messages are
+unchanged. The three validators that carried private `isPlainObject` copies import the shared one. This is the
+whole abstraction: it has seven-plus real call sites, and no schema library was added.
+
+**Test configuration.** `tests/testConfig.ts` exports `TEST_JWT_SECRET`, an unmistakably fake `TEST-ONLY` value
+used by the suites that sign tokens. It is not a template for production: `.env.example` leaves `JWT_SECRET`
+blank, and `tests/testConfig.test.ts` fails if anything under `src/` imports `tests/` or contains the secret.
+
+**Tests.** Mongo-free suites: `authToken`, `requestBody`, `authBoundary`, `taskRoutes`, `bodyBoundaries`,
+`authInput`, `testConfig`. `api.routes.test.ts` still uses `MongoMemoryServer` and needs the binary download.
+
+**Intentionally unchanged.** Reset-code lifetime, hashing and storage; rate limits; task field validators;
+pagination; demo-mode reset-code logging (it is not gated on `NODE_ENV`; noted, out of scope).
+
 ## Server Lifecycle, CORS, and Request Limits (Backend)
 
 The server's startup, shutdown, CORS, and request-body-size behavior is

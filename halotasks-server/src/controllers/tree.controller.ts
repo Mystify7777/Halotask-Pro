@@ -1,12 +1,14 @@
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Response } from 'express';
 import User from '../models/User.model';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
+import { BODY_MUST_BE_OBJECT, isPlainObject } from '../utils/requestBody';
 
 const VALID_HEALTH  = new Set(['healthy', 'wilting', 'dead']);
 const VALID_STAGE   = new Set(['seed', 'sprout', 'young', 'mature', 'lush']);
 
-export const getTree = async (req: Request, res: Response, next: NextFunction) => {
+export const getTree = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const user = await User.findById(req.user?.id).select('treeState');
+    const user = await User.findById(req.user.id).select('treeState');
     if (!user) return res.status(404).json({ message: 'User not found' });
     return res.json({ treeState: user.treeState });
   } catch (error) {
@@ -14,12 +16,15 @@ export const getTree = async (req: Request, res: Response, next: NextFunction) =
   }
 };
 
-export const patchTree = async (req: Request, res: Response, next: NextFunction) => {
+export const patchTree = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const body = req.body as Record<string, unknown>;
+    const body: unknown = req.body;
+    if (!isPlainObject(body)) {
+      return res.status(400).json({ message: BODY_MUST_BE_OBJECT });
+    }
 
     // Fetch current state for the anti-cheat XP check
-    const user = await User.findById(req.user?.id).select('treeState');
+    const user = await User.findById(req.user.id).select('treeState');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     // Anti-cheat: XP is append-only — reject any attempt to decrease it
@@ -63,7 +68,7 @@ export const patchTree = async (req: Request, res: Response, next: NextFunction)
       );
 
     const updated = await User.findByIdAndUpdate(
-      req.user?.id,
+      req.user.id,
       { $set: patch },
       { returnDocument: 'after', select: 'treeState' },
     );

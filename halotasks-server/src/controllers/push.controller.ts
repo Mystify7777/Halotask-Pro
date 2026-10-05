@@ -1,7 +1,8 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import webpush from 'web-push';
 import { createPushAgent } from '../utils/pushNetworkGuard';
 import User from '../models/User.model';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import {
   PUSH_SUBSCRIPTIONS_MAX_PER_USER,
   parsePushSubscription,
@@ -47,13 +48,8 @@ const hostOf = (endpoint: string): string => {
   }
 };
 
-export const subscribe = async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user?.id;
-
-  if (!userId) {
-    res.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
+export const subscribe = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const userId = req.user.id;
 
   const parsed = parsePushSubscription(req.body);
   if (!parsed.ok) {
@@ -93,13 +89,8 @@ export const subscribe = async (req: Request, res: Response): Promise<void> => {
   res.json({ ok: true });
 };
 
-export const unsubscribe = async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user?.id;
-
-  if (!userId) {
-    res.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
+export const unsubscribe = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const userId = req.user.id;
 
   const parsed = parseUnsubscribe(req.body);
   if (!parsed.ok) {
@@ -124,13 +115,8 @@ export const unsubscribe = async (req: Request, res: Response): Promise<void> =>
  * Deliveries are independent: one failing endpoint never prevents the others, and a failure to prune
  * never turns a completed relay into an error.
  */
-export const relay = async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user?.id;
-
-  if (!userId) {
-    res.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
+export const relay = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const userId = req.user.id;
 
   const parsed = parseRelay(req.body);
   if (!parsed.ok) {

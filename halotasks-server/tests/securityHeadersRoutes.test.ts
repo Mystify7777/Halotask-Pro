@@ -3,12 +3,12 @@ import type { Express } from 'express';
 import jwt from 'jsonwebtoken';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RATE_LIMITS } from '../src/config/rateLimits';
+import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
 // The REAL src/app.ts — real middleware order, CORS, body limit, routers, limiters and error handler —
 // with only the database models and web-push replaced. This is what proves the headers reach every kind
 // of response and that the placement before cors() is what makes preflights carry them.
 
-const SECRET = 'test-jwt-secret-1234567890';
 const ORIGIN = 'https://halotask-pro.vercel.app';
 
 const BASELINE = {

@@ -6,6 +6,8 @@ import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
 import User from '../models/User.model';
 import { getResetTokenTtlMinutes } from '../config/env';
+import { JWT_ALGORITHM } from '../utils/authToken';
+import { readRequiredStrings } from '../utils/requestBody';
 import {
   PASSWORD_MIN_LENGTH,
   isValidEmail,
@@ -55,7 +57,7 @@ const createAuthToken = (userId: string, email: string, name: string, tokenVersi
     throw new Error('JWT_SECRET is not configured');
   }
 
-  return jwt.sign({ userId, email, name, tv: tokenVersion }, jwtSecret, { expiresIn: '7d' });
+  return jwt.sign({ userId, email, name, tv: tokenVersion }, jwtSecret, { expiresIn: '7d', algorithm: JWT_ALGORITHM });
 };
 
 const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string }) => ({
@@ -176,15 +178,16 @@ const sendResetPasswordEmail = async (toEmail: string, resetCode: string, ttlMin
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, email, password } = req.body as {
-      name?: string;
-      email?: string;
-      password?: string;
-    };
+    const fields = readRequiredStrings(req.body, ['name', 'email', 'password'], {
+      required: 'name, email, and password are required',
+      notStrings: 'name, email, and password must be strings',
+    });
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'name, email, and password are required' });
+    if (!fields.ok) {
+      return res.status(400).json({ message: fields.message });
     }
+
+    const { name, email, password } = fields.value;
 
     const normalizedName = normalizeName(name);
     const normalizedEmail = normalizeEmail(email);
@@ -229,14 +232,16 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
 export const loginUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body as {
-      email?: string;
-      password?: string;
-    };
+    const fields = readRequiredStrings(req.body, ['email', 'password'], {
+      required: 'email and password are required',
+      notStrings: 'email and password must be strings',
+    });
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'email and password are required' });
+    if (!fields.ok) {
+      return res.status(400).json({ message: fields.message });
     }
+
+    const { email, password } = fields.value;
 
     const normalizedEmail = normalizeEmail(email);
     const user = await User.findOne({ email: normalizedEmail });
@@ -264,11 +269,16 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
 export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email } = req.body as { email?: string };
+    const fields = readRequiredStrings(req.body, ['email'], {
+      required: 'email is required',
+      notStrings: 'email must be a string',
+    });
 
-    if (!email) {
-      return res.status(400).json({ message: 'email is required' });
+    if (!fields.ok) {
+      return res.status(400).json({ message: fields.message });
     }
+
+    const { email } = fields.value;
 
     const normalizedEmail = normalizeEmail(email);
     const user = await User.findOne({ email: normalizedEmail });
@@ -294,15 +304,16 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
 export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, token, password } = req.body as {
-      email?: string;
-      token?: string;
-      password?: string;
-    };
+    const fields = readRequiredStrings(req.body, ['email', 'token', 'password'], {
+      required: 'email, token, and password are required',
+      notStrings: 'email, token, and password must be strings',
+    });
 
-    if (!email || !token || !password) {
-      return res.status(400).json({ message: 'email, token, and password are required' });
+    if (!fields.ok) {
+      return res.status(400).json({ message: fields.message });
     }
+
+    const { email, token, password } = fields.value;
 
     if (!isValidPassword(password)) {
       return res

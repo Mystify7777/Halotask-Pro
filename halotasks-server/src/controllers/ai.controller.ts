@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { getGroqApiKey } from '../config/env';
 import { AiProviderError, requestGroqCompletion } from '../utils/groqClient';
 import { buildTaskParsingPrompt, parseAiPromptBody, parseModelOutput } from '../utils/aiTaskParser';
@@ -14,7 +15,7 @@ import { buildTaskParsingPrompt, parseAiPromptBody, parseModelOutput } from '../
  * Rate limiting: no reusable limiter exists yet — broader limiting is Issue #23. Until then the
  * endpoint is bounded by authentication, the prompt length cap, max_tokens and a request timeout.
  */
-export const parseTasks = async (req: Request, res: Response): Promise<void> => {
+export const parseTasks = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const parsed = parseAiPromptBody(req.body);
   if (!parsed.ok) {
     res.status(400).json({ message: parsed.message });

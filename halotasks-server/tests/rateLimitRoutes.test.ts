@@ -4,12 +4,12 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RATE_LIMITS, RATE_LIMITED_MESSAGE } from '../src/config/rateLimits';
+import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
 // Real src/app.ts (real routers, auth middleware, controllers, limiters, trust-proxy wiring) with only
 // the database models, web-push and the AI provider's fetch replaced. The app is re-imported per test
 // (vi.resetModules) so each test starts with fresh limiter state and its own TRUST_PROXY_HOPS.
 
-const SECRET = 'test-jwt-secret-1234567890';
 const GROQ_KEY = 'gsk_test_ratelimit_key_0123456789';
 const PASSWORD = 'correct-horse';
 let PASSWORD_HASH = '';

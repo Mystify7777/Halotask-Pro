@@ -1,5 +1,6 @@
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Response } from 'express';
 import DayHistory from '../models/DayHistory.model';
+import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import {
   buildDateWindow,
   parseHistoryQuery,
@@ -18,9 +19,9 @@ import {
 // (oldest → newest) ending at `endDate` (the client's local today).
 // Days with no stored snapshot come back as zeros with `updatedAt: null`, so a
 // client can tell "no record" from "a record that is genuinely zero".
-export const getHistory = async (req: Request, res: Response, next: NextFunction) => {
+export const getHistory = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     const parsed = parseHistoryQuery(req.query as Record<string, unknown>);
     if (!parsed.ok) {
@@ -54,13 +55,13 @@ export const getHistory = async (req: Request, res: Response, next: NextFunction
 };
 
 const upsertHistory = async (
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction,
   mode: 'today' | 'backfill',
 ) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     const parsed = parseHistoryUpsert(req.body, {
       mode,
@@ -90,12 +91,12 @@ const upsertHistory = async (
 // `date` must be today's date at `utcOffsetMinutes`; past/future dates are rejected.
 // The client always sends a snapshot it has already merged with the server's (by task id),
 // so a replace here does not drop another device's tasks.
-export const upsertTodayHistory = (req: Request, res: Response, next: NextFunction) =>
+export const upsertTodayHistory = (req: AuthenticatedRequest, res: Response, next: NextFunction) =>
   upsertHistory(req, res, next, 'today');
 
 // -- PUT /api/history/:date --
 // Bounded backfill, used by the client to deliver a snapshot after its own day has ended
 // (e.g. work recorded offline before midnight, synced the next day). Same body and
 // validation as /today; the date must be within the last 7 days and not in the future.
-export const upsertHistoryForDate = (req: Request, res: Response, next: NextFunction) =>
+export const upsertHistoryForDate = (req: AuthenticatedRequest, res: Response, next: NextFunction) =>
   upsertHistory(req, res, next, 'backfill');
