@@ -2,8 +2,14 @@
 // here — nothing about the provider is ever taken from a request.
 
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-export const GROQ_MODEL = 'llama-3.3-70b-versatile';
+export const GROQ_MODEL = 'openai/gpt-oss-120b';
 export const GROQ_TIMEOUT_MS = 20_000;
+/**
+ * Application-level output budget, sized for the 20-task parser cap. Groq's docs do not spell out
+ * how reasoning tokens count against it, so confirm with live requests that it is sufficient with
+ * reasoning enabled (Issue #32 release check).
+ */
+export const GROQ_MAX_COMPLETION_TOKENS = 2048;
 
 export type AiProviderErrorKind = 'rate_limited' | 'unavailable' | 'timeout' | 'bad_response';
 
@@ -37,7 +43,12 @@ export async function requestGroqCompletion(
         model: GROQ_MODEL,
         messages: [{ role: 'user', content }],
         temperature: 0.2,
-        max_tokens: 1024,
+        max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+        // gpt-oss reasons by default (medium). Task extraction is simple, so keep reasoning short,
+        // and do not ask for reasoning text: only message.content is ever read. reasoning_format is
+        // deliberately absent (unsupported on gpt-oss and mutually exclusive with include_reasoning).
+        reasoning_effort: 'low',
+        include_reasoning: false,
       }),
       signal: controller.signal,
     });

@@ -35,7 +35,7 @@ export const RATE_LIMITS = {
   resetAccount: { windowMs: 15 * MINUTE, max: 5 },
 
   // AI parsing spends a paid provider quota. Per user is the real limit; per IP stops one machine
-  // rotating through accounts. Prompt length, max_tokens and the timeout (Issue #22) still apply.
+  // rotating through accounts. Prompt length, max_completion_tokens and the timeout (Issue #22) still apply.
   aiUser: { windowMs: 10 * MINUTE, max: 20 },
   aiIp: { windowMs: 10 * MINUTE, max: 60 },
 

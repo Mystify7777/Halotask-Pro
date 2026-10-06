@@ -4,7 +4,7 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import aiRoutes from '../src/routes/ai.routes';
 import { resetAllRateLimiters } from '../src/middleware/rateLimit';
-import { GROQ_MODEL, GROQ_TIMEOUT_MS, GROQ_URL } from '../src/utils/groqClient';
+import { GROQ_TIMEOUT_MS, GROQ_URL } from '../src/utils/groqClient';
 import { AI_MAX_TASKS, AI_PROMPT_MAX_LENGTH } from '../src/utils/aiTaskParser';
 import { TEST_JWT_SECRET as SECRET } from './testConfig';
 
@@ -110,8 +110,8 @@ describe('valid request', () => {
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBe(`Bearer ${GROQ_KEY}`);
     const sent = JSON.parse(init.body);
-    expect(sent.model).toBe(GROQ_MODEL);
-    expect(sent.max_tokens).toBe(1024);
+    expect(sent.model).toBe('openai/gpt-oss-120b');
+    expect(sent.max_completion_tokens).toBe(2048);
     expect(sent.messages[0].content).toContain('Book dentist next Tuesday, high priority');
     expect(sent.messages[0].content).not.toContain('  Book dentist'); // trimmed
   });
@@ -134,17 +134,79 @@ describe('valid request', () => {
       apiKey: 'client-supplied-key',
       temperature: 2,
       max_tokens: 999999,
+      max_completion_tokens: 999999,
+      reasoning_effort: 'high',
+      include_reasoning: true,
+      reasoning_format: 'raw',
+      response_format: { type: 'json_object' },
+      stream: true,
+      tools: [{ type: 'function' }],
     });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(GROQ_URL);
     expect(init.headers.Authorization).toBe(`Bearer ${GROQ_KEY}`);
     const sent = JSON.parse(init.body);
-    expect(sent.model).toBe(GROQ_MODEL);
+    expect(sent.model).toBe('openai/gpt-oss-120b');
     expect(sent.temperature).toBe(0.2);
-    expect(sent.max_tokens).toBe(1024);
+    expect(sent.max_completion_tokens).toBe(2048);
+    expect(sent.reasoning_effort).toBe('low');
+    expect(sent.include_reasoning).toBe(false);
+    expect(sent).not.toHaveProperty('max_tokens');
+    expect(sent).not.toHaveProperty('reasoning_format');
+    expect(sent).not.toHaveProperty('response_format');
+    expect(sent).not.toHaveProperty('stream');
+    expect(sent).not.toHaveProperty('tools');
     expect(init.body).not.toContain('evil');
     expect(init.body).not.toContain('client-supplied-key');
+  });
+
+  it('sends exactly the GPT-OSS 120B request contract', async () => {
+    fetchMock.mockResolvedValueOnce(completion('[]'));
+    await authed().send({ prompt: 'buy milk' });
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(Object.keys(sent).sort()).toEqual(
+      ['include_reasoning', 'max_completion_tokens', 'messages', 'model', 'reasoning_effort', 'temperature'].sort(),
+    );
+    expect(sent).toEqual({
+      model: 'openai/gpt-oss-120b',
+      messages: [{ role: 'user', content: expect.stringContaining('buy milk') }],
+      temperature: 0.2,
+      max_completion_tokens: 2048,
+      reasoning_effort: 'low',
+      include_reasoning: false,
+    });
+  });
+
+  it('still hands output to the parser when the provider includes a reasoning field', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                reasoning: 'The user wants milk; I will emit a task for it.',
+                content: '[{"title":"Buy milk","priority":"low","tags":["home"],"description":""}]',
+              },
+            },
+          ],
+          usage: { completion_tokens_details: { reasoning_tokens: 42 } },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await authed().send({ prompt: 'buy milk' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      tasks: [{ title: 'Buy milk', priority: 'low', tags: ['home'], description: '' }],
+    });
+    // The reasoning text is never forwarded to the client.
+    expect(JSON.stringify(res.body) + JSON.stringify(res.headers)).not.toContain('I will emit a task');
   });
 
   it('escapes quotes in the prompt exactly as the browser version did', async () => {
@@ -212,6 +274,36 @@ describe('provider failures become safe API errors', () => {
     ['200 without choices', () => fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 })), 502],
     ['model text that is not JSON', () => fetchMock.mockResolvedValueOnce(completion('Sure! Here are your tasks')), 502],
     ['model JSON that is not an array', () => fetchMock.mockResolvedValueOnce(completion('{"title":"x"}')), 502],
+    ['empty content (e.g. output budget spent on reasoning)', () => fetchMock.mockResolvedValueOnce(completion('')), 502],
+    [
+      'truncated JSON (finish_reason length)',
+      () =>
+        fetchMock.mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              choices: [
+                { finish_reason: 'length', message: { content: '[{"title":"Buy secret milk","priority":"hi' } },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      502,
+    ],
+    [
+      'null content with only a reasoning field',
+      () =>
+        fetchMock.mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              choices: [{ finish_reason: 'length', message: { content: null, reasoning: 'buy secret milk thoughts' } }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      502,
+    ],
+    ['upstream 400 (parameter rejected)', () => fetchMock.mockResolvedValueOnce(new Response(upstreamBody, { status: 400 })), 502],
   ];
 
   it.each(cases)('%s → safe error', async (_name, arrange, expectedStatus) => {
@@ -227,6 +319,8 @@ describe('provider failures become safe API errors', () => {
     expect(wire).not.toContain('Invalid API Key');
     expect(wire).not.toContain('secret milk');
     expect(wire).not.toContain('groq.com');
+    expect(wire).not.toContain('thoughts');
+    expect(wire).not.toContain('"title":"Buy');
   });
 
   it('times out a hung provider with 504 and aborts the request', async () => {
@@ -256,6 +350,15 @@ describe('provider failures become safe API errors', () => {
     await authed().send({ prompt: 'buy secret milk' });
     fetchMock.mockResolvedValueOnce(completion('[{"title":"generated secret title"}]'));
     await authed().send({ prompt: 'buy secret milk' });
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: 'length', message: { content: '', reasoning: 'secret reasoning about buy secret milk' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    await authed().send({ prompt: 'buy secret milk' });
 
     const output = logged();
     expect(output).toContain('[AI]'); // failures ARE logged, just safely
@@ -263,6 +366,7 @@ describe('provider failures become safe API errors', () => {
     expect(output).not.toContain('gsk_');
     expect(output).not.toContain('secret milk');
     expect(output).not.toContain('generated secret');
+    expect(output).not.toContain('secret reasoning');
     expect(output).not.toContain('Invalid API Key');
   });
 });

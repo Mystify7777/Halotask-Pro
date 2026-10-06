@@ -13,7 +13,7 @@ import { buildTaskParsingPrompt, parseAiPromptBody, parseModelOutput } from '../
  * (only a failure category and HTTP status are logged).
  *
  * Rate limiting: no reusable limiter exists yet — broader limiting is Issue #23. Until then the
- * endpoint is bounded by authentication, the prompt length cap, max_tokens and a request timeout.
+ * endpoint is bounded by authentication, the prompt length cap, max_completion_tokens and a request timeout.
  */
 export const parseTasks = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const parsed = parseAiPromptBody(req.body);

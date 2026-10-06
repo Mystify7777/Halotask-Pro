@@ -310,8 +310,18 @@ backend owns the Groq key.
   behind the existing `requireAuth` middleware — no second auth mechanism.
 - **Request:** `{ prompt: string }`, non-empty after trimming, at most 2000 characters
   (`AI_PROMPT_MAX_LENGTH`, mirrored by the textarea's `maxLength`). Other fields are ignored; the provider,
-  model, endpoint, temperature and `max_tokens` are server constants (`utils/groqClient.ts`) and cannot be
-  chosen by a caller. Validation runs **before** the provider is contacted.
+  model, endpoint, temperature, `max_completion_tokens` and the reasoning settings are server constants
+  (`utils/groqClient.ts`) and cannot be chosen by a caller. Validation runs **before** the provider is contacted.
+- **Provider request (Issue #32):** model `openai/gpt-oss-120b` (Groq retired `llama-3.3-70b-versatile`
+  on 2026-08-16). Body: `temperature: 0.2`, `max_completion_tokens: 2048` (the application-level output budget;
+  `max_tokens` is deprecated and no longer sent; Groq's docs do not spell out how reasoning tokens count
+  against it, so live validation should confirm 2048 is sufficient with reasoning enabled), `reasoning_effort: "low"` (the
+  model default is `medium`; extraction is simple and low keeps latency and token use down) and
+  `include_reasoning: false` (only `message.content` is read, so reasoning text is not requested).
+  `reasoning_format` is never sent (unsupported on gpt-oss and mutually exclusive with `include_reasoning`),
+  and there is no `response_format`, `stream` or `tools`: the prompt and the top-level JSON-array contract
+  are unchanged, and `parseModelOutput` still rejects anything that is not an array (truncated or empty
+  output becomes a safe 502).
 - **Response:** `200 { tasks: [{ title, priority, dueDate?, estimatedMinutes?, tags, description }] }`
   (possibly empty). The server parses and sanitises the model output (`utils/aiTaskParser.ts`: at most 20
   tasks, bounded title/description/tags, real `YYYY-MM-DD` dates, valid minutes, priority defaults to
@@ -327,7 +337,7 @@ backend owns the Groq key.
   build needs no provider secret, and `src/test/noClientSecrets.test.ts` fails if a provider reference or
   key variable reappears in client source.
 - **Rate limiting:** no reusable limiter exists in the repo. Per the issue, none was built here; the endpoint
-  is bounded by authentication, the prompt cap, `max_tokens` and the timeout. Per-user/IP limiting is the
+  is bounded by authentication, the prompt cap, `max_completion_tokens` and the timeout. Per-user/IP limiting is the
   dependency on **Issue #23**.
 - Prompt "today" is the server's UTC date (the browser previously used the UTC date too).
 
@@ -389,7 +399,7 @@ through the existing 409), so it is IP-only. Reset-password guesses a 6-digit co
 strict per-account bucket (at most ~10 guesses per code lifetime). Relay fans one call out to every device a
 user registered; the client calls it once per due reminder, so 60 per 5 minutes leaves room for bursts and
 multi-device users, and a refused relay degrades silently (the local notification has already fired).
-The #22 protections (prompt cap, `max_tokens`, 20 s timeout) are unchanged and not duplicated.
+The #22 protections (prompt cap, `max_completion_tokens`, 20 s timeout) are unchanged and not duplicated.
 
 **Not limited, deliberately:** task CRUD, tree, history and push subscribe/unsubscribe (authenticated, cheap,
 bounded by body size and per-route validation). Unauthenticated floods against other routes are out of scope.

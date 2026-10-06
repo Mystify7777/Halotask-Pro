@@ -4,6 +4,22 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-06",
+      "category": "Backend",
+      "title": "migrate AI task parsing from deprecated llama-3.3-70b-versatile to openai/gpt-oss-120b (Issue #32)",
+      "description": "Groq retired llama-3.3-70b-versatile (shutdown 2026-08-16), so the server-side AI task parser now uses openai/gpt-oss-120b. Only the provider request body in utils/groqClient.ts changed: model openai/gpt-oss-120b; max_tokens: 1024 replaced by max_completion_tokens: 2048 (the application-level output budget; max_tokens is deprecated; Groq's docs do not spell out how reasoning tokens count against it, so live validation should confirm 2048 is sufficient with reasoning enabled); reasoning_effort: 'low' (model default is medium; task extraction is simple, so this limits latency and reasoning-token use); include_reasoning: false (only message.content is read). reasoning_format is not sent (unsupported on gpt-oss), and there is no response_format, stream or tools. The prompt, the top-level JSON-array contract, parseModelOutput and the 20-task cap are unchanged, as are the authenticated route, rate limits, server-only GROQ_API_KEY, 20 s timeout, AiProviderError categories and generic error responses. tests/aiRoutes.test.ts now asserts the literal model ID and the exact request body (including absent max_tokens, reasoning_format, response_format, stream and tools), handling of a response that carries a reasoning field, and 502 for empty, truncated or content-less output, plus no leak of reasoning text, prompts or keys. Live validation against Groq was not possible in the development sandbox (no GROQ_API_KEY, api.groq.com blocked), so behaviour against the real model should be checked manually with a real key before release. Historical entries that name the old model are intentionally unchanged.",
+      "files": [
+        "halotasks-server/src/utils/groqClient.ts",
+        "halotasks-server/src/controllers/ai.controller.ts",
+        "halotasks-server/src/config/rateLimits.ts",
+        "halotasks-server/tests/aiRoutes.test.ts",
+        "docs/context.md",
+        "docs/logs.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-05",
       "category": "Backend",
       "title": "strengthen backend validation types and API test coverage (Issue #21)",
@@ -854,5 +870,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-05T17:00:00Z"
+  "lastUpdated": "2026-10-06T08:00:00Z"
 }
