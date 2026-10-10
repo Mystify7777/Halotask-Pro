@@ -73,6 +73,12 @@ const userSchema = new Schema(
       stage:            { type: String,  enum: ['seed', 'sprout', 'young', 'mature', 'lush'], default: 'seed' },
       lastCalculatedAt: { type: String,  default: () => new Date().toISOString() },
       awardedTaskIds:   { type: [String], default: [] },
+      // Recovery marker (Issue #24), server-internal and never returned or client-writable: the UTC days
+      // (YYYY-MM-DD) of awards whose streak/derived write is not persisted yet. Added with $addToSet in the
+      // same atomic update as the XP award, removed ($unset) by the derived write that covers them. Absent
+      // (no default, so no empty array) = nothing pending. One entry per distinct day, so it grows by at
+      // most one per day of consecutive failures and every successful award clears it.
+      pendingDerivedDays: { type: [String], default: undefined },
     },
   },
   {

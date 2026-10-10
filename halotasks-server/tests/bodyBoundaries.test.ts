@@ -104,13 +104,23 @@ describe('PATCH /api/tree', () => {
     expect(res.body).toEqual(BODY_MESSAGE);
   });
 
-  it('still accepts a normal JSON object (an empty one is a valid, no-op patch)', async () => {
+  it('still accepts an empty JSON object (a valid, no-op patch that writes nothing)', async () => {
+    const app = await loadApp();
+
+    const res = await request(app).patch('/api/tree').set(auth).send({});
+
+    expect(res.status).toBe(200);
+    expect(calls.writes).toBe(0);
+  });
+
+  it('rejects reward fields with TREE_FIELD_NOT_WRITABLE (Issue #24) and writes nothing', async () => {
     const app = await loadApp();
 
     const res = await request(app).patch('/api/tree').set(auth).send({ xp: 20, health: 'healthy' });
 
-    expect(res.status).toBe(200);
-    expect(calls.writes).toBe(1);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'TREE_FIELD_NOT_WRITABLE', fields: ['xp', 'health'] });
+    expect(calls.writes).toBe(0);
   });
 });
 

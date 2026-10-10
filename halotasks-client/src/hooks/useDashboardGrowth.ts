@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { awardXpForCompletion } from '../growth/treeLogic';
 import {
+  applyServerGrowth as applyServerGrowthToStorage,
   getTreeState,
   initTreeStorage,
-  setTreeState,
   TreeIdentityError,
 } from '../growth/treeStorage';
-import type { TreeState } from '../growth/treeTypes';
+import type { GrowthResult, TreeState } from '../growth/treeTypes';
 import { useAuthStore } from '../store/authStore';
 
 export function useDashboardGrowth() {
@@ -37,23 +37,31 @@ export function useDashboardGrowth() {
     };
   }, [userId]);
 
-  const processGrowthForCompletion = useCallback((taskId: string) => {
+  // OFFLINE ONLY: show the +10 straight away while the completion waits in the sync queue. This is a
+  // preview held in React state — it is never stored, never sent to the server, and is replaced by the
+  // server's tree as soon as the queued request is processed (applyServerGrowth).
+  const previewGrowthForCompletion = useCallback((taskId: string) => {
     setTreeStateLocal((current) => {
       const baseState = current ?? getTreeState();
-      const { state: nextState } = awardXpForCompletion(baseState, taskId, true);
-      try {
-        setTreeState(nextState); // updates cache + persists storage
-      } catch (err) {
-        // Identity mismatch: do not apply or persist an award computed for another user.
-        console.error('[useDashboardGrowth] Growth award not persisted:', err);
-        return current;
-      }
-      return nextState;
+      return awardXpForCompletion(baseState, taskId, true).state;
     });
+  }, []);
+
+  // The server's answer to a completion (the `growth` block of a task response) becomes the tree.
+  const applyServerGrowth = useCallback((growth: GrowthResult | undefined) => {
+    if (!growth) return;
+    try {
+      const next = applyServerGrowthToStorage(growth);
+      setTreeStateLocal(next);
+    } catch (err) {
+      // Identity mismatch: never show another account's tree.
+      console.warn('[useDashboardGrowth] Server growth not applied:', err);
+    }
   }, []);
 
   return {
     treeState,
-    processGrowthForCompletion,
+    previewGrowthForCompletion,
+    applyServerGrowth,
   };
 }

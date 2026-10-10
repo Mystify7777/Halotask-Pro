@@ -119,7 +119,7 @@ export default function DashboardPage() {
   }, [location.state, location.pathname]);
 
   const { isOnline } = useNetworkStatus();
-  const { treeState, processGrowthForCompletion } = useDashboardGrowth();
+  const { treeState, previewGrowthForCompletion, applyServerGrowth } = useDashboardGrowth();
 
   const orbTreeData = treeState
     ? (() => {
@@ -139,7 +139,8 @@ export default function DashboardPage() {
     setTasks,
     isOnline,
     syncBridgeRef,
-    processGrowthForCompletion,
+    previewGrowthForCompletion,
+    applyServerGrowth,
     setStatusError,
     setStatusInfo,
   });
@@ -184,6 +185,7 @@ export default function DashboardPage() {
     setStatusError,
     setStatusInfo,
     setTasks: tasksHook.setTasks,
+    applyServerGrowth,
   });
 
   syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;

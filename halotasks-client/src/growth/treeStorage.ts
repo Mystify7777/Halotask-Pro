@@ -1,17 +1,18 @@
 /**
- * Growth Tree Storage
+ * Growth Tree Storage (Issue #24: the SERVER is authoritative)
  *
- * Local-first with server sync, strictly scoped to the authenticated user:
- *   - Every local record lives under a per-user IndexedDB key
- *     (`growth_tree:<userId>`) and the in-memory cache remembers its owner.
- *   - On init: fetch from server, merge with THIS user's local state
- *     (higher XP wins), union awardedTaskIds from both sources.
- *   - On save: update local cache + IndexedDB immediately,
- *     push to server as fire-and-forget.
- *
- * Offline usage still works for the current user — their local state is the
- * source of truth during a session, and the server acts as the cross-device
- * persistence layer.
+ *   - XP and the awarded-task ledger are created only by the server, as a side effect of completing a
+ *     task (`growth` in the task response). This module never computes or pushes reward state:
+ *     there is no write to `/api/tree`, and no "higher XP wins" merge.
+ *   - The in-memory cache holds the last SERVER-CONFIRMED tree for the current user. IndexedDB
+ *     (`growth_tree:<userId>`) holds a copy of it purely so an offline start has something to show.
+ *   - On init: fetch the server tree and adopt it as is. Only if the server cannot be reached is the
+ *     local copy used (display fallback, never pushed anywhere).
+ *   - `applyServerGrowth` adopts the tree from a task response. XP never decreases on the server, so a
+ *     response older than what we already hold (bulk requests can finish out of order) is ignored.
+ *   - Offline completions are only an in-memory PREVIEW in React state (useDashboardGrowth); they are
+ *     never stored here. The queued request makes the server award them, and its response replaces the
+ *     preview.
  *
  * Identity contract:
  *   - The user id comes from `useAuthStore.getState().user.id` (issued by the
@@ -24,14 +25,12 @@
  *     in localStorage) has no provable owner. It is never read or migrated;
  *     it is deleted on init.
  *   - `authStore.clearAuth()` intentionally does not touch this module: keys
- *     and cache are owner-scoped, so a later user can never see them, and
- *     wiping on logout/401 would destroy the previous user's unsynced offline
- *     progress.
+ *     and cache are owner-scoped, so a later user can never see them.
  */
 
 import { offlineDb } from '../offline/db';
 import { useAuthStore } from '../store/authStore';
-import { TreeState, TreeStateJSON } from './treeTypes';
+import { GrowthResult, TreeState, TreeStateJSON } from './treeTypes';
 import { createInitialTreeState, updateStreakState } from './treeLogic';
 import { treeService } from '../services/treeService';
 
@@ -85,20 +84,6 @@ const deserialize = (json: TreeStateJSON): TreeState => ({
   awardedTaskIds:   new Set(json.awardedTaskIds),
 });
 
-// ── Merge strategy ─────────────────────────────────────────────────────────
-// "Higher XP wins" — takes the state with more progress, then unions
-// awardedTaskIds from both sources to prevent double-awarding on either device.
-// Both inputs are always the SAME user's state (scoped local + that user's server record).
-
-const mergeStates = (local: TreeState, server: TreeState): TreeState => {
-  const winner = server.xp > local.xp ? server : local;
-  return {
-    ...winner,
-    // Union task IDs so neither device can re-award already-completed tasks
-    awardedTaskIds: new Set([...local.awardedTaskIds, ...server.awardedTaskIds]),
-  };
-};
-
 // ── In-memory cache (owner-scoped) ─────────────────────────────────────────
 
 let cache: { userId: string; state: TreeState } | null = null;
@@ -127,18 +112,15 @@ const purgeLegacyUnscopedState = async (): Promise<void> => {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 /**
- * initTreeStorage — call once per authenticated session (and again if the
- * user changes).
+ * initTreeStorage — call once per authenticated session (and again if the user changes).
  *
  * 1. Delete legacy unscoped data (never migrated — see above).
- * 2. Load this user's local state from IndexedDB.
- * 3. Fetch server state and merge (higher XP wins).
- * 4. If local was ahead, push the merged state back to the server.
- * 5. Run streak recalculation (days may have passed while app was closed).
+ * 2. Fetch the server tree; if it answers, it IS the state (the local copy is not consulted).
+ * 3. Only if the server cannot be reached: fall back to this user's last stored copy (or an empty tree).
+ * 4. Apply the display-only streak check (days may have passed while the app was closed).
  *
- * Throws TreeIdentityError if there is no authenticated user, or if the
- * authenticated user changes while init is in flight (the result is then
- * discarded: nothing is cached, persisted or pushed for the stale user).
+ * Nothing is pushed to the server. Throws TreeIdentityError if there is no authenticated user, or if
+ * the authenticated user changes while init is in flight (the result is then discarded).
  */
 export const initTreeStorage = async (): Promise<TreeState> => {
   const userId = requireUserId();
@@ -152,56 +134,42 @@ export const initTreeStorage = async (): Promise<TreeState> => {
     }
   };
 
-  // ── Step 1: discard legacy unscoped data ────────────────────────────────
   await purgeLegacyUnscopedState();
 
-  // ── Step 2: Load this user's local state ────────────────────────────────
-  let localState: TreeState;
-  try {
-    const stored = await offlineDb.get<TreeStateJSON>(idbKey);
-    localState = stored ? deserialize(stored) : createInitialTreeState();
-  } catch (err) {
-    console.warn('[treeStorage] Could not read local state, starting fresh:', err);
-    localState = createInitialTreeState();
-  }
-  assertSameUser();
-
-  // ── Step 3: Fetch server state and merge ────────────────────────────────
   let serverState: TreeState | null = null;
   try {
     const serverJson = await treeService.getTree();
     if (serverJson) serverState = deserialize(serverJson);
   } catch (err) {
-    // Server unreachable — continue with this user's local state
-    console.warn('[treeStorage] Could not fetch server state, using local only:', err);
+    console.warn('[treeStorage] Could not fetch server state, falling back to the stored copy:', err);
   }
-  // The token may have changed (logout, 401, account switch) while the request
-  // was in flight. Never merge or push across an identity change.
+  // The token may have changed (logout, 401, account switch) while the request was in flight.
   assertSameUser();
 
-  let mergedState = localState;
+  let state: TreeState;
   if (serverState) {
-    mergedState = mergeStates(localState, serverState);
-
-    // ── Step 4: Push merged state back if local was ahead ─────────────────
-    if (localState.xp > serverState.xp) {
-      treeService.patchTree(serialize(mergedState)).catch((err) => {
-        console.warn('[treeStorage] Failed to push local state to server:', err);
-      });
+    state = serverState;
+  } else {
+    try {
+      const stored = await offlineDb.get<TreeStateJSON>(idbKey);
+      state = stored ? deserialize(stored) : createInitialTreeState();
+    } catch (err) {
+      console.warn('[treeStorage] Could not read local state, starting fresh:', err);
+      state = createInitialTreeState();
     }
+    assertSameUser();
   }
 
-  // ── Step 5: Run streak recalculation ────────────────────────────────────
-  mergedState = updateStreakState(mergedState);
+  state = updateStreakState(state);
+  cache = { userId, state };
 
-  cache = { userId, state: mergedState };
+  if (serverState) {
+    offlineDb.set(idbKey, serialize(state)).catch((err) => {
+      console.warn('[treeStorage] Failed to persist server state to IndexedDB:', err);
+    });
+  }
 
-  // Persist merged state to this user's IndexedDB record
-  offlineDb.set(idbKey, serialize(mergedState)).catch((err) => {
-    console.warn('[treeStorage] Failed to persist merged state to IndexedDB:', err);
-  });
-
-  return mergedState;
+  return state;
 };
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -224,33 +192,45 @@ export const getTreeState = (): TreeState => {
 };
 
 /**
- * setTreeState — update cache immediately, persist to IndexedDB and server.
- * Both persistence calls are fire-and-forget so React state updates stay sync.
+ * applyServerGrowth — adopt the tree the server returned with a task completion.
  *
- * Throws TreeIdentityError if there is no authenticated user, or if the cache
- * has not been initialised for the current user (the state in hand could have
- * been derived from another account).
+ * The server's `treeState` is the truth, so it replaces the cached values wholesale (xp, leaves, streak,
+ * health, stage, dates) — nothing is recomputed here. Two safeguards:
+ *   - a response whose xp is LOWER than the cache is stale (XP never decreases server-side): ignored;
+ *   - the ledger kept locally gains the task id when the server holds an award for it.
+ *
+ * Throws TreeIdentityError if the cache is not initialised for the current user, so a response can never
+ * be applied to another account's tree. Returns the resulting cached state.
  */
-export const setTreeState = (newState: TreeState): void => {
+export const applyServerGrowth = (growth: GrowthResult): TreeState => {
   const userId = requireUserId();
   if (!cache || cache.userId !== userId) {
     throw new TreeIdentityError(
-      'Growth Tree is not initialised for the current user; refusing to persist',
+      'Growth Tree is not initialised for the current user; refusing to apply server growth',
     );
   }
 
-  cache = { userId, state: newState };
-  const json = serialize(newState);
+  if (growth.treeState.xp < cache.state.xp) return cache.state;
 
-  // Local persistence
-  offlineDb.set(idbKeyFor(userId), json).catch((err) => {
-    console.warn('[treeStorage] Failed to persist to IndexedDB:', err);
-  });
+  const awardedTaskIds = new Set(cache.state.awardedTaskIds);
+  if (growth.awarded || growth.reason === 'already_awarded') awardedTaskIds.add(growth.taskId);
 
-  // Server persistence — fire-and-forget
-  treeService.patchTree(json).catch((err) => {
-    console.warn('[treeStorage] Failed to push state to server:', err);
+  const next: TreeState = {
+    xp: growth.treeState.xp,
+    leaves: growth.treeState.leaves,
+    streakDays: growth.treeState.streakDays,
+    lastActiveDate: growth.treeState.lastActiveDate,
+    health: growth.treeState.health,
+    stage: growth.treeState.stage,
+    lastCalculatedAt: growth.treeState.lastCalculatedAt,
+    awardedTaskIds,
+  };
+
+  cache = { userId, state: next };
+  offlineDb.set(idbKeyFor(userId), serialize(next)).catch((err) => {
+    console.warn('[treeStorage] Failed to persist server growth to IndexedDB:', err);
   });
+  return next;
 };
 
 /** clearTreeState — wipes the current user's IndexedDB record and cache. */

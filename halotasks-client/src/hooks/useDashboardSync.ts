@@ -5,6 +5,7 @@ import { processSyncQueue } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
 import type { Task } from '../types/task';
+import type { GrowthResult } from '../growth/treeTypes';
 
 export type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline' | 'errors-pending';
 
@@ -21,6 +22,8 @@ type UseDashboardSyncArgs = {
   setStatusError: (message: string | null) => void;
   setStatusInfo: (message: string | null) => void;
   setTasks: (tasks: Task[]) => void;
+  /** Adopt the Growth Tree the server returned for a replayed completion (Issue #24). */
+  applyServerGrowth?: (growth: GrowthResult | undefined) => void;
 };
 
 export function useDashboardSync({
@@ -30,6 +33,7 @@ export function useDashboardSync({
   setStatusError,
   setStatusInfo,
   setTasks,
+  applyServerGrowth,
 }: UseDashboardSyncArgs) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
@@ -71,6 +75,7 @@ export function useDashboardSync({
       onTaskDeleted: (taskId) => {
         persistTasks((current) => current.filter((task) => task._id !== taskId));
       },
+      onGrowth: (growth) => applyServerGrowth?.(growth),
     });
 
     if (result.remaining > 0) {

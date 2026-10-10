@@ -1,6 +1,7 @@
 import { captureSession, isSameSession, isSessionChangedError } from '../services/api';
 import { taskService } from '../services/taskService';
 import { TaskCreatePayload, Task } from '../types/task';
+import type { GrowthResult } from '../growth/treeTypes';
 import { getSyncQueue, setSyncQueue, SyncQueueRecord } from './syncQueue';
 
 type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
@@ -12,6 +13,11 @@ type ProcessSyncQueueParams = {
   onTaskCreated: (localTaskId: string, serverTask: Task) => void;
   onTaskUpdated: (taskId: string, serverTask: Task) => void;
   onTaskDeleted: (taskId: string) => void;
+  /**
+   * The server's Growth Tree answer to a replayed completion (Issue #24). Called only while the owner is
+   * still signed in, like the other callbacks. Optional: callers that do not show the tree can omit it.
+   */
+  onGrowth?: (growth: GrowthResult) => void;
 };
 
 export type ProcessSyncQueueResult = {
@@ -61,6 +67,7 @@ export const processSyncQueue = async ({
   onTaskCreated,
   onTaskUpdated,
   onTaskDeleted,
+  onGrowth,
 }: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
   // A queue may only be worked by its owner, with the owner's credential. Bind BOTH now — the account
   // and the token it is signed in with — and use them for everything below:
@@ -113,6 +120,7 @@ export const processSyncQueue = async ({
           // not feed the owner's result into that account's UI state and task cache.
           if (stillSignedIn()) onTaskCreated(localTaskId, response.task);
         }
+        if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
         processed += 1;
         continue;
@@ -135,6 +143,7 @@ export const processSyncQueue = async ({
         const payload = (entry.payload ?? {}) as TaskUpdatePayload;
         const response = await taskService.updateTask(resolvedTaskId, payload, { session });
         if (stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+        if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
         processed += 1;
         continue;

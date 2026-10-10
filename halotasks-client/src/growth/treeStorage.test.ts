@@ -17,21 +17,20 @@ vi.mock('../offline/db', () => ({
 }));
 
 vi.mock('../services/treeService', () => ({
-  treeService: { getTree: vi.fn(), patchTree: vi.fn() },
+  treeService: { getTree: vi.fn() },
 }));
 
 import { useAuthStore } from '../store/authStore';
 import { treeService } from '../services/treeService';
-import { awardXpForCompletion } from './treeLogic';
 import {
+  applyServerGrowth,
   clearTreeState,
   getTreeState,
   initTreeStorage,
   resetCache,
-  setTreeState,
   TreeIdentityError,
 } from './treeStorage';
-import type { TreeState, TreeStateJSON } from './treeTypes';
+import type { GrowthResult, TreeStateJSON } from './treeTypes';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -53,15 +52,16 @@ const json = (xp: number, awardedTaskIds: string[] = []): TreeStateJSON => ({
   awardedTaskIds,
 });
 
-const state = (xp: number, awardedTaskIds: string[] = []): TreeState => ({
-  ...json(xp),
-  awardedTaskIds: new Set(awardedTaskIds),
-});
+// What the server returns inside a task response after awarding `taskId` (the tree it now holds).
+const growth = (taskId: string, xp: number, awarded = true, reason?: GrowthResult['reason']): GrowthResult => {
+  const { awardedTaskIds: _ledger, ...summary } = json(xp);
+  void _ledger;
+  return { taskId, awarded, xpGained: awarded ? 10 : 0, ...(reason ? { reason } : {}), treeState: summary };
+};
 
 // Fake server: records are keyed by whichever user's token is active when the
 // request is made — mirroring how the real API derives the user from the JWT.
 const serverRecords = new Map<string, TreeStateJSON>();
-const patches: { userId: string | null; body: Partial<TreeStateJSON> }[] = [];
 let serverOffline = false;
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -71,7 +71,6 @@ beforeEach(() => {
   idb.clear();
   localStorage.clear();
   serverRecords.clear();
-  patches.length = 0;
   serverOffline = false;
   resetCache();
   logout();
@@ -82,40 +81,29 @@ beforeEach(() => {
     if (serverOffline || !userId) throw new Error('network');
     return serverRecords.get(userId) ?? json(0);
   });
-
-  vi.mocked(treeService.patchTree).mockReset().mockImplementation(async (body) => {
-    const userId = currentUserId();
-    patches.push({ userId, body });
-    if (!userId) throw new Error('unauthenticated');
-    const existing = serverRecords.get(userId) ?? json(0);
-    if (typeof body.xp === 'number' && body.xp < existing.xp) throw new Error('XP cannot decrease');
-    const next = { ...existing, ...body } as TreeStateJSON;
-    serverRecords.set(userId, next);
-    return next;
-  });
 });
 
 // ── Single-user behaviour is preserved ─────────────────────────────────────
 
 describe('single user', () => {
-  it('starts from the initial state, persists under a user-scoped key, and pushes to the server', async () => {
+  it('adopts the server tree on init and keeps a copy under a user-scoped key', async () => {
     login(USER_A);
-    const initial = await initTreeStorage();
-    expect(initial.xp).toBe(0);
+    serverRecords.set('user-a', json(30, ['t1']));
 
-    setTreeState(state(30, ['t1']));
+    const initial = await initTreeStorage();
     await flush();
 
+    expect(initial.xp).toBe(30);
+    expect([...initial.awardedTaskIds]).toEqual(['t1']);
     expect(getTreeState().xp).toBe(30);
     expect(scopedKeys()).toEqual(['growth_tree:user-a']);
     expect((idb.get('growth_tree:user-a') as TreeStateJSON).xp).toBe(30);
-    expect(serverRecords.get('user-a')?.xp).toBe(30);
   });
 
-  it('keeps working offline for the current user across an app restart', async () => {
+  it('falls back to the stored copy only when the server cannot be reached (display only)', async () => {
     login(USER_A);
+    serverRecords.set('user-a', json(40, ['t1', 't2']));
     await initTreeStorage();
-    setTreeState(state(40, ['t1', 't2']));
     await flush();
 
     serverOffline = true;
@@ -126,32 +114,86 @@ describe('single user', () => {
     expect([...restored.awardedTaskIds].sort()).toEqual(['t1', 't2']);
   });
 
-  it('still merges: higher server XP wins and awardedTaskIds are unioned; local-ahead is pushed', async () => {
+  it('does NOT do a "higher XP wins" merge any more: the server tree replaces a higher local copy', async () => {
     login(USER_A);
-    idb.set('growth_tree:user-a', json(50, ['local']));
+    idb.set('growth_tree:user-a', json(500, ['local-forged']));
     serverRecords.set('user-a', json(20, ['remote']));
 
-    const merged = await initTreeStorage();
+    const state = await initTreeStorage();
     await flush();
 
-    expect(merged.xp).toBe(50);
-    expect([...merged.awardedTaskIds].sort()).toEqual(['local', 'remote']);
-    expect(patches.filter((p) => p.userId === 'user-a')).toHaveLength(1);
+    expect(state.xp).toBe(20);
+    expect([...state.awardedTaskIds]).toEqual(['remote']);
+    expect(state.awardedTaskIds.has('local-forged')).toBe(false);
+    expect((idb.get('growth_tree:user-a') as TreeStateJSON).xp).toBe(20); // the local copy is overwritten by the server's
+  });
+});
 
-    resetCache();
-    serverRecords.set('user-a', json(90, ['remote']));
-    const serverWins = await initTreeStorage();
-    expect(serverWins.xp).toBe(90);
+describe('applyServerGrowth: the server response becomes the tree', () => {
+  it('adopts every server-computed field and records the awarded id', async () => {
+    login(USER_A);
+    serverRecords.set('user-a', json(10, ['t1']));
+    await initTreeStorage();
+
+    const incoming = growth('t2', 20);
+    incoming.treeState = { ...incoming.treeState, streakDays: 3, stage: 'sprout', health: 'healthy', lastActiveDate: '2026-10-06' };
+    const next = applyServerGrowth(incoming);
+    await flush();
+
+    expect(next).toMatchObject({ xp: 20, streakDays: 3, stage: 'sprout', lastActiveDate: '2026-10-06' });
+    expect([...next.awardedTaskIds].sort()).toEqual(['t1', 't2']);
+    expect(getTreeState().xp).toBe(20);
+    expect((idb.get('growth_tree:user-a') as TreeStateJSON).xp).toBe(20);
+  });
+
+  it('applies a refused award too (already_awarded) so the cache converges on the server', async () => {
+    login(USER_A);
+    serverRecords.set('user-a', json(10, []));
+    await initTreeStorage();
+
+    const next = applyServerGrowth(growth('t9', 50, false, 'already_awarded'));
+
+    expect(next.xp).toBe(50);
+    expect(next.awardedTaskIds.has('t9')).toBe(true);
+  });
+
+  it('does not record an id for a refusal that is not an award (ledger_full)', async () => {
+    login(USER_A);
+    serverRecords.set('user-a', json(10, []));
+    await initTreeStorage();
+    const next = applyServerGrowth(growth('t9', 10, false, 'ledger_full'));
+    expect(next.awardedTaskIds.has('t9')).toBe(false);
+  });
+
+  it('ignores a stale response (bulk requests can finish out of order): XP never goes backwards', async () => {
+    login(USER_A);
+    serverRecords.set('user-a', json(10));
+    await initTreeStorage();
+
+    applyServerGrowth(growth('t3', 30));
+    const stale = applyServerGrowth(growth('t2', 20));
+
+    expect(stale.xp).toBe(30);
+    expect(getTreeState().xp).toBe(30);
+  });
+
+  it('never writes to the server: the tree service has no write method', async () => {
+    expect(Object.keys(treeService)).toEqual(['getTree']);
+  });
+
+  it('refuses to apply growth before init for the current user', () => {
+    login(USER_A);
+    expect(() => applyServerGrowth(growth('t1', 10))).toThrow(TreeIdentityError);
   });
 });
 
 // ── Two users, one browser ─────────────────────────────────────────────────
 
 describe('two users sharing the same browser storage', () => {
-  it("does not load user A's local state for user B", async () => {
+  it("does not load user A's stored copy for user B", async () => {
     login(USER_A);
+    serverRecords.set('user-a', json(200, ['a1']));
     await initTreeStorage();
-    setTreeState(state(200, ['a1']));
     await flush();
 
     logout();
@@ -165,53 +207,47 @@ describe('two users sharing the same browser storage', () => {
     expect(getTreeState().xp).toBe(10);
   });
 
-  it("user A's higher local XP never overwrites user B's lower server XP", async () => {
+  it("user A's higher stored XP never shows up for user B", async () => {
     idb.set('growth_tree:user-a', json(500, ['a1']));
     login(USER_B);
     serverRecords.set('user-b', json(10));
 
-    await initTreeStorage();
+    const b = await initTreeStorage();
     await flush();
 
-    expect(serverRecords.get('user-b')?.xp).toBe(10);
-    expect(patches).toEqual([]); // nothing pushed for B: B's local (0) is not ahead of B's server (10)
+    expect(b.xp).toBe(10);
     expect(idb.get('growth_tree:user-a')).toMatchObject({ xp: 500 }); // A's record untouched
   });
 
-  it("user A's awardedTaskIds do not suppress rewards for user B", async () => {
+  it("user A's awarded ids do not leak into user B's tree", async () => {
     login(USER_A);
+    serverRecords.set('user-a', json(0));
     await initTreeStorage();
-    const { state: afterA, event: eventA } = awardXpForCompletion(getTreeState(), 'shared-task', true);
-    expect(eventA?.xpGained).toBe(10);
-    setTreeState(afterA);
+    applyServerGrowth(growth('shared-task', 10));
     await flush();
 
     logout();
     login(USER_B);
     const bState = await initTreeStorage();
-    expect(bState.awardedTaskIds.has('shared-task')).toBe(false);
 
-    const { state: afterB, event: eventB } = awardXpForCompletion(bState, 'shared-task', true);
-    expect(eventB?.xpGained).toBe(10);
-    expect(afterB.awardedTaskIds.has('shared-task')).toBe(true);
-    expect(serverRecords.get('user-b')?.awardedTaskIds ?? []).not.toContain('a1');
+    expect(bState.awardedTaskIds.has('shared-task')).toBe(false);
+    expect(bState.xp).toBe(0);
   });
 
-  it('logout → login A → logout → login B → logout → login A restores each user their own state (offline)', async () => {
-    serverOffline = true;
-
+  it('logout → login A → logout → login B → logout → login A restores each user their own copy (offline)', async () => {
     login(USER_A);
+    serverRecords.set('user-a', json(70, ['a1']));
     await initTreeStorage();
-    setTreeState(state(70, ['a1']));
     await flush();
     logout();
 
     login(USER_B);
-    const b = await initTreeStorage();
-    expect(b.xp).toBe(0);
-    setTreeState(state(20, ['b1']));
+    serverRecords.set('user-b', json(20, ['b1']));
+    await initTreeStorage();
     await flush();
     logout();
+
+    serverOffline = true;
 
     login(USER_A);
     resetCache();
@@ -228,22 +264,20 @@ describe('two users sharing the same browser storage', () => {
     expect(scopedKeys().sort()).toEqual(['growth_tree:user-a', 'growth_tree:user-b']);
   });
 
-  it("never serves user A's cached state to user B, and refuses to persist before B is initialised", async () => {
+  it("never serves user A's cached state to user B, and refuses to apply growth before B is initialised", async () => {
     login(USER_A);
+    serverRecords.set('user-a', json(80, ['a1']));
     await initTreeStorage();
-    setTreeState(state(80, ['a1']));
     await flush();
-    patches.length = 0;
 
     logout();
     login(USER_B); // no initTreeStorage() yet for B
 
     expect(getTreeState().xp).toBe(0);
-    expect(() => setTreeState(state(80, ['a1']))).toThrow(TreeIdentityError);
+    expect(() => applyServerGrowth(growth('a2', 90))).toThrow(TreeIdentityError);
     await flush();
 
     expect(idb.has('growth_tree:user-b')).toBe(false);
-    expect(patches).toEqual([]);
   });
 
   it('discards an in-flight init if the account changes before the server responds', async () => {
@@ -264,7 +298,6 @@ describe('two users sharing the same browser storage', () => {
     await expect(pending).rejects.toBeInstanceOf(TreeIdentityError);
     await flush();
 
-    expect(patches).toEqual([]);
     expect(idb.has('growth_tree:user-b')).toBe(false);
     expect(getTreeState().xp).toBe(0); // stale A result was not cached for B
     expect(idb.get('growth_tree:user-a')).toMatchObject({ xp: 300 });
@@ -288,11 +321,10 @@ describe('two users sharing the same browser storage', () => {
 describe('no authenticated user', () => {
   it('fails explicitly and touches neither local nor server state', async () => {
     await expect(initTreeStorage()).rejects.toBeInstanceOf(TreeIdentityError);
-    expect(() => setTreeState(state(10))).toThrow(TreeIdentityError);
+    expect(() => applyServerGrowth(growth('t', 10))).toThrow(TreeIdentityError);
     await expect(clearTreeState()).rejects.toBeInstanceOf(TreeIdentityError);
 
     expect(treeService.getTree).not.toHaveBeenCalled();
-    expect(treeService.patchTree).not.toHaveBeenCalled();
     expect(idb.size).toBe(0);
   });
 });
@@ -314,7 +346,6 @@ describe('legacy unscoped storage', () => {
     expect(bState.awardedTaskIds.has('legacy-ls-task')).toBe(false);
     expect(idb.has('growth_tree')).toBe(false);
     expect(localStorage.getItem('halotask:growth_tree')).toBeNull();
-    expect(patches).toEqual([]);
     expect(scopedKeys()).toEqual(['growth_tree:user-b']);
   });
 

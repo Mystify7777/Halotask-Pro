@@ -120,12 +120,68 @@ Client Growth Tree persistence (`growth/treeStorage.ts`) is strictly per-user:
 
 - Identity: `useAuthStore.getState().user.id`. It comes from the same login response as the token the API client sends, so the server updates the same user the client keys locally.
 - IndexedDB key: `growth_tree:<userId>` (via `offlineDb`; no new store or DB version).
-- In-memory cache records its owner. `getTreeState()` never returns another user's cache (returns initial state instead); `setTreeState()` throws `TreeIdentityError` unless `initTreeStorage()` has completed for the current user.
-- `initTreeStorage()` throws `TreeIdentityError` when no user is authenticated, and discards its result (no cache write, no IndexedDB write, no server push) if the authenticated user changes while it is awaiting local or server state. Callers must handle the rejection (`useDashboardGrowth` and `InsightsPage` both do: log and show no tree).
-- Merge rules (higher XP wins, union of `awardedTaskIds`) are unchanged and now only ever combine one user's local record with that same user's server record.
-- `clearAuth()` deliberately does not clear Growth Tree state. Owner-scoped keys and cache already prevent cross-user reads, and wiping on logout or 401 would destroy the previous user's unsynced offline progress. Consequence: a user's tree record remains in that browser's IndexedDB until they log in again or `clearTreeState()` is called.
+- In-memory cache records its owner. `getTreeState()` never returns another user's cache (returns initial state instead); `applyServerGrowth()` throws `TreeIdentityError` unless `initTreeStorage()` has completed for the current user.
+- `initTreeStorage()` throws `TreeIdentityError` when no user is authenticated, and discards its result (no cache write, no IndexedDB write) if the authenticated user changes while it is awaiting local or server state. Callers must handle the rejection (`useDashboardGrowth` and `InsightsPage` both do: log and show no tree).
+- Since Issue #24 there is NO merge: the server tree is adopted as is, and the stored copy is only an offline display fallback (see "Growth Tree integrity model" below). The old "higher XP wins" merge and every client push to `/api/tree` were removed.
+- `clearAuth()` deliberately does not clear Growth Tree state. Owner-scoped keys and cache already prevent cross-user reads. Consequence: a user's tree record remains in that browser's IndexedDB until they log in again or `clearTreeState()` is called.
 
-Legacy unscoped data decision: the old global IndexedDB key `growth_tree` and localStorage key `halotask:growth_tree` recorded no owner, so they are never read or migrated to whichever user logs in next. `initTreeStorage()` deletes both. The server copy (whatever was successfully synchronized) is the recovery path for the real owner; progress that was never successfully synchronized under the old code is lost.
+Legacy unscoped data decision: the old global IndexedDB key `growth_tree` and localStorage key `halotask:growth_tree` recorded no owner, so they are never read or migrated to whichever user logs in next. `initTreeStorage()` deletes both. The server tree is the recovery path for the real owner; progress that was never successfully synchronized under the old code is lost.
+
+### Growth Tree integrity model (server-authoritative, Issue #24)
+
+XP and the awarded-task ledger are created **only by the server**. The client cannot write reward state.
+
+| Field | Authority |
+| --- | --- |
+| `xp`, `awardedTaskIds` | Server only. Changed solely by `utils/treeAward.ts` when a task is completed; append-only ledger. |
+| `streakDays`, `lastActiveDate` | Server, at award time, using the existing UTC rule (`utils/treeRules.ts`, copied from the old client logic). |
+| `leaves`, `stage`, `health` | Derived: leaves = floor(xp / 20), stage thresholds 0/20/60/120/250, health from streak + date. Stored values are only a cache; every read recomputes them. |
+| `lastCalculatedAt` | Server-stamped. |
+
+**Award triggers.** `PUT /api/tasks/:id` on an incomplete -> complete transition, and `POST /api/tasks` when the task is created already `completed:true` (an offline create-then-complete arrives this way). Both return an additive `growth` block: `{ taskId, awarded, xpGained, reason?, treeState }` (`treeState` = the tree without the ledger). No other request changes XP. `XP_PER_COMPLETION = 10`; there is deliberately no daily cap, rate limiter or anti-cheat layer.
+
+**Atomic award** (`awardTaskCompletion`). Step 1 is one conditional update on the user document:
+
+```
+filter  { _id, 'treeState.awardedTaskIds': { $ne: taskId },
+          'treeState.awardedTaskIds.19999': { $exists: false },      // ledger not full
+          'treeState.xp': { $gte: 0, $lte: MAX_SAFE_INTEGER - 10 } } // xp is a usable number
+update  { $inc: { 'treeState.xp': 10 },
+          $push: { 'treeState.awardedTaskIds': taskId },
+          $addToSet: { 'treeState.pendingDerivedDays': <award UTC day> } } // recovery marker (below)
+```
+
+A single-document update is atomic, so of any number of concurrent requests for one task exactly one matches; different tasks each `$inc` atomically and none is lost. XP, the ledger entry and the marker change together or not at all. Only simple operators are used (no pipeline), so no MongoDB/Atlas version feature is required. Step 2 writes streak/date/derived values with a compare-and-set pinned to the xp, streakDays and lastActiveDate it observed, and in the same write removes the marker (`$unset`). The marker is deliberately not part of the pin: days are only ever added together with an xp `$inc`, so the pin on xp already fails if a day was added after the read. On a lost race it re-reads and recomputes (up to 5 attempts).
+
+**Recovery marker (`treeState.pendingDerivedDays`).** Server-internal: never returned by any endpoint and not client-writable. It is the SET of UTC days (`YYYY-MM-DD`, one entry per distinct day) of awards whose step 2 has not been persisted. It is NOT a reward model: it carries no XP and is only a "derived state is behind" flag, stored in the same atomic update as the award (`$addToSet`) and removed (`$unset`) by the step-2 write that covers it. It is a set rather than one timestamp so that no day is lost when derived writes fail on several days in a row: reconciliation replays the streak transition for every recorded day, oldest first, and then, for a new award, today. Example: derived writes fail on Monday and Tuesday and succeed on Wednesday: Monday and Tuesday are both replayed, so a streak of 0 becomes 2 (last active Tuesday) on a reconciling retry, or 3 (last active Wednesday) when Wednesday's own award is the one that reconciles; a skipped day still resets the streak to 1. A recorded day older than the stored last-active date is skipped (a later award already covered it). The array has no default (absent = nothing pending), grows by at most one entry per day of consecutive failures, and is cleared by any successful award or reconcile.
+
+**Failure and retry semantics**
+- PUT, award not recorded (step 1 failed): 500, the task is untouched; a retry sees the same transition and awards once.
+- PUT, award recorded but step 2 not persisted (database error or 5 lost compare-and-sets): the call throws `derived_unpersisted` and the request is a 500 with the task untouched. It never reports an unpersisted projection as the tree. XP, ledger and marker are durable. The retry finds the id in the ledger (no second award), sees the marker, finishes step 2 for the recorded award days, completes the task, and answers `growth: { awarded:false, reason:'already_awarded', treeState: <persisted> }`.
+- PUT, award succeeds but the task write fails: 500; the retry completes the task and awards nothing more.
+- POST, award not recorded: the just-created task is deleted again and the request fails (500), so a retry creates and awards once. If that cleanup also fails it is logged and the request still fails; a completed task without an award then remains (accepted, rare, visible in the log).
+- POST, award recorded but step 2 not persisted: the task and its XP are KEPT (deleting the task would orphan the XP and a retry would create a second task and award again). The 201 carries `growth` read back from storage (`awarded:true`, streak not yet advanced; never projected), or no `growth` if even that read fails. The marker is finished by the next award, which applies the marker's day and then today, so no streak day is lost, even when several days in a row are pending.
+- Retries, duplicates, concurrent requests and uncomplete -> re-complete never award twice (the ledger is keyed by task id, not by task state). An already-awarded retry with NO marker writes nothing, so re-completing an old task can never keep a streak alive.
+- A task is looked up with `{_id, userId}` before awarding, so only the caller's own tasks can be awarded. Deleting a task never removes awarded XP.
+
+**Bounds.** The ledger holds at most `AWARDED_TASK_IDS_MAX = 20,000` ids of at most 64 characters each. A full ledger refuses further awards (`reason:'ledger_full'`); it is never truncated. XP is capped at `Number.MAX_SAFE_INTEGER - 10` (`reason:'xp_ceiling'`).
+
+**Legacy data and repairs: what is persisted and what is response-only.** Existing XP is preserved as the baseline and is never clamped against ledger length (XP can legitimately belong to since-deleted tasks). Stored values that are structurally impossible are handled as follows (`normalizeTreeState` is the single definition of "repaired"):
+
+| Where | What happens | Written to the database? |
+| --- | --- | --- |
+| `GET /api/tree`, `PATCH /api/tree` `{}` | Response is normalised: non-finite, negative, non-number xp/streak become 0; fractions floored; unsafe integers capped at `MAX_SAFE_INTEGER`; junk `lastActiveDate` becomes null; leaves/stage/health recomputed; implausible ledger entries left out of the response. | **No.** Reads never write (no race, no write amplification). The recompute is deterministic, so it needs no persistence to stay correct. Stored `leaves`/`stage`/`health` may therefore be stale in the database; nothing reads them. |
+| Award step 1, usable-xp guard fails (xp missing, Infinity, NaN, negative, string) | xp is set to the repaired value, then the award is retried. | **Yes**, as one update pinned to the exact stored xp it saw, so a concurrent change is never overwritten. Valid xp is never reduced. |
+| Award step 2 (and reconcile) | streakDays, lastActiveDate, health, leaves, stage, lastCalculatedAt are written from the normalised state; a fractional xp is floored in the same write; the marker is cleared. | **Yes**, one compare-and-set pinned to xp, streakDays, lastActiveDate and the marker. |
+| Awarded-task ledger | Never rewritten, filtered or truncated in storage: only appended to. Implausible entries stay stored (they only occupy ledger space, which counts toward the 20,000 bound). | **No** (append only). |
+
+So a damaged tree is shown repaired immediately and is repaired in storage the first time its owner earns an award.
+
+**`PATCH /api/tree`** no longer changes anything. A body containing any of `xp, leaves, streakDays, lastActiveDate, health, stage, lastCalculatedAt, awardedTaskIds` is refused with `400 { code: 'TREE_FIELD_NOT_WRITABLE', fields }`; a non-object body keeps its 400; `{}` is a no-op returning the server tree. `GET /api/tree` keeps its response shape and returns the normalised tree.
+
+**Client behaviour.** `initTreeStorage()` adopts the server tree (the stored IndexedDB copy is used only if the server is unreachable, and is never pushed). `applyServerGrowth(growth)` adopts the tree from a task response and ignores a response with lower XP than the cache (bulk requests can finish out of order). Online completions show the server's `growth`; offline completions show a +10 **preview in React state only** (never stored or sent), which the server's answer replaces after the queued request is replayed (`processSyncQueue({ onGrowth })`). Local `local-...` ids are never awarded locally, so they cannot double-count. `treeService` has no write method. `growth/treeLogic.ts` is now display/preview logic; its constants are pinned against the server copy by `growth/treeRules.parity.test.ts`.
+
+**Known limitations.** An offline preview is not persisted: reloading while offline shows the last server-confirmed tree until the queue syncs. `GET /api/tree` still returns the whole ledger (up to roughly 0.5 MB at the cap). Streak/health reset semantics are unchanged and remain Issue #16 (streak is still UTC-based and its reset is still computed on the client for display).
 
 ## Offline Architecture
 

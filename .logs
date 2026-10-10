@@ -4,6 +4,30 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-08",
+      "category": "Backend",
+      "title": "make Growth Tree state server-authoritative (Issue #24)",
+      "description": "XP and the awarded-task ledger are now created only by the server. PUT /api/tasks/:id (incomplete -> complete) and POST /api/tasks (created already completed, the offline create-then-complete path) call utils/treeAward.ts, which awards +10 XP with one atomic conditional MongoDB update on the user document ($ne ledger check + ledger-has-room + xp-range guard, $inc xp and $push taskId together) followed by a compare-and-set write of streak, date and derived fields. Awards are idempotent per task id: retries, duplicates, concurrent requests and uncomplete -> re-complete never award twice, and concurrent completions of different tasks keep all XP. Failure semantics: a failed award fails a PUT before the task is written; a failed task write after an award is retried without a second award; a failed award on POST deletes the just-created task. Ledger capped at 20,000 ids (refused, never truncated). Rules (XP per completion, leaves, stages, existing UTC streak/health) live in utils/treeRules.ts; stored values are normalised on read (legacy XP is never clamped; impossible values such as Infinity are repaired). PATCH /api/tree now rejects every reward field with 400 TREE_FIELD_NOT_WRITABLE. Task responses carry an additive growth block. Client: initTreeStorage adopts the server tree (no higher-XP-wins merge, no pushes), treeService.patchTree and setTreeState removed, applyServerGrowth adopts the server's answer (stale lower-XP responses ignored), offline completions are an in-memory preview replaced by the server's tree after sync (processSyncQueue onGrowth). Tests: server treeRules, treeAward (strict atomic in-memory User double), treeAward.mongoose (exact Mongoose command), treeRoutes (HTTP); client treeStorage, useDashboardGrowth, queueProcessor.growth, rules parity. Streak/health reset semantics are unchanged and remain Issue #16. Recovery: step 1 also records the award's UTC day in a server-internal marker set (treeState.pendingDerivedDays, $addToSet, so every unreconciled day survives across several days of failures) in the same atomic update, and step 2 clears it in its compare-and-set after replaying the streak transition for each recorded day, oldest first. If step 2 cannot be persisted (database error or 5 lost compare-and-sets) the award throws derived_unpersisted instead of returning an unpersisted projection: PUT fails with the task untouched and the retry reconciles the derived fields for every recorded award day without awarding again; POST keeps the task and XP and answers with the persisted tree read back; the next award finishes any leftover marker (recorded days first, then today). An already-awarded retry with no marker writes nothing, so re-completing an old task cannot keep a streak alive. Reads (GET, PATCH {}) repair the response only and never write; storage is repaired by the next award (xp pinned repair, then the derived compare-and-set); the ledger is only ever appended to.",
+      "files": [
+        "halotasks-server/src/utils/treeRules.ts",
+        "halotasks-server/src/utils/treeAward.ts",
+        "halotasks-server/src/controllers/tree.controller.ts",
+        "halotasks-server/src/controllers/task.controller.ts",
+        "halotasks-client/src/growth/treeStorage.ts",
+        "halotasks-client/src/growth/treeTypes.ts",
+        "halotasks-client/src/services/treeService.ts",
+        "halotasks-client/src/hooks/useDashboardGrowth.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-06",
       "category": "Backend",
       "title": "migrate AI task parsing from deprecated llama-3.3-70b-versatile to openai/gpt-oss-120b (Issue #32)",
@@ -853,8 +877,7 @@
       ],
       "priority": "high",
       "status": "completed"
-    }
-    ,
+    },
     {
       "date": "2026-05-21",
       "category": "Feature",
@@ -870,5 +893,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-06T08:00:00Z"
+  "lastUpdated": "2026-10-10T12:00:00Z"
 }

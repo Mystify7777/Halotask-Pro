@@ -35,7 +35,11 @@ async function loadApp(): Promise<Express> {
   };
 
   vi.doMock('../src/models/User.model', () => ({
-    default: { findById: () => ({ select: () => ({ lean: async () => ({ tokenVersion: 0 }) }) }) },
+    default: {
+      findById: () => ({ select: () => ({ lean: async () => ({ tokenVersion: 0 }) }) }),
+      // The Growth Tree award (Issue #24) is exercised in treeRoutes.test.ts; here it just has to succeed.
+      findOneAndUpdate: () => ({ lean: async () => ({ treeState: { xp: 10, streakDays: 1, lastActiveDate: '2026-10-06', awardedTaskIds: ['x'] } }) }),
+    },
   }));
   vi.doMock('../src/models/DayHistory.model', () => ({ default: {} }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined } }));

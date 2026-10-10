@@ -4,6 +4,8 @@ import Task from '../models/Task.model';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { BODY_MUST_BE_OBJECT, isPlainObject } from '../utils/requestBody';
 import { parsePagination } from '../utils/pagination';
+import { TreeAwardError, awardTaskCompletion, readPersistedGrowth } from '../utils/treeAward';
+import type { GrowthResult } from '../utils/treeRules';
 import {
   DESCRIPTION_MAX_LENGTH,
   TAGS_MAX_COUNT,
@@ -199,7 +201,35 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
       completedAt: payload.completed ? new Date() : null,
     });
 
-    return res.status(201).json({ task });
+    // Growth Tree (Issue #24): a task created already completed (an offline create-then-complete is
+    // delivered this way) earns its award once, here. The task id only exists now, so the task is
+    // written first. Two different failures, handled differently:
+    //  - the award was NOT recorded: the new task is removed again and the request fails, so a retry
+    //    creates it afresh and is awarded exactly once, instead of leaving a completed, unrewarded task;
+    //  - the award IS recorded but its streak/derived write is not (derived_unpersisted): the task and
+    //    its XP are kept (deleting the task would orphan the XP, and a retry would create a second task
+    //    and be awarded again). The response carries the tree as persisted, read back, never projected
+    //    (or no growth block if even that read fails); the leftover marker is reconciled by the next
+    //    award, so nothing is lost.
+    let growth: GrowthResult | undefined;
+    if (payload.completed === true) {
+      try {
+        growth = await awardTaskCompletion(req.user.id, String(task._id));
+      } catch (awardError) {
+        if (awardError instanceof TreeAwardError && awardError.kind === 'derived_unpersisted') {
+          growth = await readPersistedGrowth(req.user.id, String(task._id));
+        } else {
+          try {
+            await Task.findOneAndDelete({ _id: task._id, userId: req.user.id });
+          } catch {
+            console.error('[Tree] Award failed and the just-created task could not be removed.');
+          }
+          throw awardError;
+        }
+      }
+    }
+
+    return res.status(201).json({ task, ...(growth ? { growth } : {}) });
   } catch (error) {
     if (respondIfMongooseInputError(error, res)) return;
     return next(error);
@@ -232,6 +262,23 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
     const nextCompleted = payload.completed ?? currentTask.completed;
     const wasCompleted = currentTask.completed;
 
+    // Growth Tree (Issue #24): the incomplete -> complete transition earns the award, BEFORE the task is
+    // written. The award is idempotent by task id, so ordering it first makes every failure retryable:
+    //  - the award fails        -> the request fails and the task is untouched; a retry sees the same
+    //                              transition and awards once;
+    //  - the award is recorded but its streak/derived write is not (derived_unpersisted) -> the request
+    //                              fails and the task is untouched; the retry awards nothing more, finishes
+    //                              the derived write, and completes the task;
+    //  - the task write fails   -> the award is already recorded, the retry awards nothing more, so a
+    //                              task never yields more than one award (it may briefly hold one while
+    //                              incomplete, never a second);
+    //  - a retry / duplicate / uncomplete -> re-complete finds the id in the ledger and awards nothing.
+    // The task is looked up with {_id, userId} above, so only the caller's own task can be awarded.
+    let growth: GrowthResult | undefined;
+    if (nextCompleted && !wasCompleted) {
+      growth = await awardTaskCompletion(req.user.id, String(currentTask._id));
+    }
+
     const update = {
       ...(payload.title !== undefined ? { title: payload.title } : {}),
       ...(payload.description !== undefined ? { description: payload.description } : {}),
@@ -252,7 +299,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
       { returnDocument: 'after', runValidators: true },
     );
 
-    return res.json({ task });
+    return res.json({ task, ...(growth ? { growth } : {}) });
   } catch (error) {
     if (respondIfMongooseInputError(error, res)) return;
     return next(error);

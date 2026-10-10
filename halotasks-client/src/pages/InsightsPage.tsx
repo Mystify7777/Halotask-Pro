@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import InsightModal from '../components/dashboard/InsightModal';
-import { initTreeStorage, TreeIdentityError } from '../growth/treeStorage';
+import { applyServerGrowth, initTreeStorage, TreeIdentityError } from '../growth/treeStorage';
 import { getWeekHistory, type HistoryEntry, type WeekHistory } from '../offline/history';
 import { getCachedTasks } from '../offline/cache';
 import { taskService } from '../services/taskService';
@@ -396,7 +396,15 @@ export default function InsightsPage() {
     setTasks((prev) => prev.map((current) => (current._id === task._id ? updated : current)));
 
     try {
-      await taskService.updateTask(task._id, { completed: updated.completed });
+      const response = await taskService.updateTask(task._id, { completed: updated.completed });
+      if (response.growth) {
+        // The server awarded (or reconciled) this completion: show its tree, not a local guess.
+        try {
+          setTreeState(applyServerGrowth(response.growth));
+        } catch (err) {
+          console.warn('[InsightsPage] Server growth not applied:', err);
+        }
+      }
     } catch {
       setTasks((prev) => prev.map((current) => (current._id === task._id ? task : current)));
     }

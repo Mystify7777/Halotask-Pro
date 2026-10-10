@@ -1,3 +1,5 @@
+import type { GrowthResult } from '../growth/treeTypes';
+
 export type Priority = 'low' | 'medium' | 'high';
 
 export type Task = {
@@ -36,4 +38,6 @@ export type TaskCreatePayload = {
 
 export type TaskResponse = {
   task: Task;
+  /** Present when the server processed a completion for this request (Issue #24). */
+  growth?: GrowthResult;
 };

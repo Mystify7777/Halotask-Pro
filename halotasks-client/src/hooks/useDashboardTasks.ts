@@ -7,6 +7,7 @@ import { useTagSuggestions } from './useTagSuggestions';
 import { enqueueSyncAction } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
 import { Priority, Task, TaskCreatePayload } from '../types/task';
+import type { GrowthResult } from '../growth/treeTypes';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 import { setCachedTasks } from '../offline/cache';
@@ -39,7 +40,10 @@ type UseDashboardTasksArgs = {
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   isOnline: boolean;
   syncBridgeRef: RefObject<SyncBridge>;
-  processGrowthForCompletion: (taskId: string) => void;
+  /** Offline only: show +10 immediately; never persisted (the server awards on sync). */
+  previewGrowthForCompletion: (taskId: string) => void;
+  /** Adopt the tree the server returned with a completion. */
+  applyServerGrowth: (growth: GrowthResult | undefined) => void;
   setStatusError: (message: string | null) => void;
   setStatusInfo: (message: string | null) => void;
 };
@@ -49,7 +53,8 @@ export function useDashboardTasks({
   setTasks,
   isOnline,
   syncBridgeRef,
-  processGrowthForCompletion,
+  previewGrowthForCompletion,
+  applyServerGrowth,
   setStatusError,
   setStatusInfo,
 }: UseDashboardTasksArgs) {
@@ -275,7 +280,7 @@ export function useDashboardTasks({
       await syncBridgeRef.current.refreshPendingQueueCount();
 
       if (nextCompleted && !task.completed) {
-        processGrowthForCompletion(task._id);
+        previewGrowthForCompletion(task._id);
       }
 
       syncBridgeRef.current.setSyncStatus('offline');
@@ -288,11 +293,9 @@ export function useDashboardTasks({
       const response = await taskService.updateTask(task._id, { completed: nextCompleted });
       persistTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
 
-      if (nextCompleted && !task.completed) {
-        processGrowthForCompletion(task._id);
-      }
+      applyServerGrowth(response.growth);
 
-      setStatusInfo(nextCompleted && !task.completed ? 'Task completion updated. +10 XP' : 'Task completion updated.');
+      setStatusInfo(response.growth?.awarded ? 'Task completion updated. +10 XP' : 'Task completion updated.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
       setStatusError(axiosError.response?.data?.message ?? 'Unable to update task');
@@ -459,7 +462,7 @@ export function useDashboardTasks({
       await syncBridgeRef.current.refreshPendingQueueCount();
 
       incompleteIds.forEach((taskId) => {
-        processGrowthForCompletion(taskId);
+        previewGrowthForCompletion(taskId);
       });
 
       clearSelection();
@@ -475,6 +478,7 @@ export function useDashboardTasks({
       );
 
       const updatedTasks: Task[] = [];
+      const growths: GrowthResult[] = [];
       const failedIds: string[] = [];
 
       results.forEach((result, index) => {
@@ -482,6 +486,7 @@ export function useDashboardTasks({
 
         if (result.status === 'fulfilled') {
           updatedTasks.push(result.value.task);
+          if (result.value.growth) growths.push(result.value.growth);
         } else {
           failedIds.push(sourceTask._id);
         }
@@ -491,9 +496,11 @@ export function useDashboardTasks({
         const updatedById = new Map(updatedTasks.map((task) => [task._id, task]));
         persistTasks((current) => current.map((task) => updatedById.get(task._id) ?? task));
 
-        updatedTasks.forEach((task) => {
-          processGrowthForCompletion(task._id);
-        });
+        // Responses can finish in any order; the server's XP only ever grows, so applying them from the
+        // lowest XP up means the newest tree is the one that sticks (and stale ones are ignored anyway).
+        [...growths]
+          .sort((a, b) => a.treeState.xp - b.treeState.xp)
+          .forEach((growth) => applyServerGrowth(growth));
       }
 
       setBulkFailedTaskIds(failedIds);
@@ -505,7 +512,10 @@ export function useDashboardTasks({
       }
 
       if (updatedTasks.length > 0) {
-        setStatusInfo(`Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete. +${updatedTasks.length * 10} XP`);
+        const awardedXp = growths.reduce((sum, growth) => sum + growth.xpGained, 0);
+        setStatusInfo(
+          `Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete.${awardedXp > 0 ? ` +${awardedXp} XP` : ''}`,
+        );
       }
 
       if (failedIds.length > 0) {
@@ -713,6 +723,7 @@ export function useDashboardTasks({
       const response = await taskService.updateTask(taskId, payload);
 
       persistTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
+      applyServerGrowth(response.growth);
       handleCancelEditing();
       setStatusInfo('Task updated successfully.');
     } catch (requestError) {
