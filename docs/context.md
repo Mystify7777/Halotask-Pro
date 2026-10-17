@@ -252,7 +252,7 @@ Important auth behaviors:
 - Tokens are validated on startup
 - Expired tokens are cleared early
 - API requests use a timeout
-- A global 401 response interceptor redirects to login
+- A global 401 response interceptor clears auth and redirects to login, but only when the failed request was issued by the session that is still in place (Issue #34): each request is stamped with the auth store's in-memory `sessionGeneration` (bumped by every login and logout, never persisted) and must also still carry the credential in use, so a late 401 for a previous session, even one that re-logged in with an identical token, is ignored
 - A 401 is not a reason to discard queued offline work: `offline/queueProcessor.ts` stops at the first 401 and keeps that entry and every entry after it, in the owning account's own queue (see "Session Invalidation"); other permanent 4xx still discard the one entry
 - `ProtectedRoute` is the main guard for authenticated views
 

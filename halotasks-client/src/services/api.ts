@@ -22,6 +22,13 @@ export const getApiErrorMessage = (error: unknown, fallback = 'Something went wr
 export type BoundSession = { userId: string; token: string };
 export type SessionRequestConfig = AxiosRequestConfig & { session?: BoundSession };
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** In-memory marker set by the request interceptor: the auth store's sessionGeneration when the request was issued. */
+    sessionGeneration?: number;
+  }
+}
+
 /** The signed-in account and its token right now; null unless both exist. */
 export const captureSession = (): BoundSession | null => {
   const { user, token } = useAuthStore.getState();
@@ -44,6 +51,43 @@ export class SessionChangedError extends Error {
 export const isSessionChangedError = (error: unknown): error is SessionChangedError =>
   error instanceof SessionChangedError;
 
+/** The bearer token an ordinary (unbound) request would be sent with right now, or null when signed out. */
+const credentialInUse = (): string | null => useAuthStore.getState().token ?? localStorage.getItem(TOKEN_KEY);
+
+/** Where a refused session sends the user. A seam so tests can observe it (jsdom cannot navigate). */
+export const authRedirect = {
+  toLogin: (): void => window.location.replace('/login'),
+};
+
+/** The bearer token a request actually carried, read back from the Authorization header it was sent with. */
+const bearerSentWith = (config: { headers?: unknown } | undefined): string | null => {
+  const headers = config?.headers as { get?: (name: string) => unknown; Authorization?: unknown } | undefined;
+  const value = typeof headers?.get === 'function' ? headers.get('Authorization') : headers?.Authorization;
+  return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice('Bearer '.length) : null;
+};
+
+/**
+ * Whether a failed request was issued by the session that is signed in NOW.
+ *
+ * A response can arrive long after the request was sent, across a logout and another login. Two independent
+ * facts must both still hold for the request to count as the current session's:
+ *   1. the session GENERATION stamped on the request when it was issued is still the store's current one. This is
+ *      the session-instance identity: it changes on every login and logout, so it also tells apart a re-login that
+ *      happens to receive the very same token string;
+ *   2. the credential the request was sent with is still the credential in use (the same store-then-storage
+ *      lookup the request interceptor uses: the store token if there is one, otherwise the stored token). With an
+ *      empty store this also catches the stored token being replaced by another tab; with a token in the store
+ *      another tab's change is not seen at all (there is no cross-tab sync).
+ * A request sent while signed out belongs to "signed out": it still counts if nobody has signed in since (the
+ * login form's own 401 keeps its behaviour), and it is stale once someone has. A request with no generation stamp
+ * (not produced by this client's interceptor) is judged on the credential alone.
+ */
+const issuedByActiveSession = (config: { headers?: unknown; sessionGeneration?: number } | undefined): boolean => {
+  const generation = config?.sessionGeneration;
+  if (generation !== undefined && generation !== useAuthStore.getState().sessionGeneration) return false;
+  return bearerSentWith(config) === credentialInUse();
+};
+
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000',
   timeout: 60_000,
@@ -64,25 +108,29 @@ apiClient.interceptors.request.use((config) => {
 
     config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${bound.token}`;
+    config.sessionGeneration = useAuthStore.getState().sessionGeneration;
     return config;
   }
 
-  const token = useAuthStore.getState().token ?? localStorage.getItem(TOKEN_KEY);
+  const token = credentialInUse();
 
   if (token) {
     config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  config.sessionGeneration = useAuthStore.getState().sessionGeneration;
   return config;
 });
 
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // A 401 only ends the session that issued the request. A late 401 for a previous account (logged out,
+    // then another account signed in while the request was in flight) says nothing about the current one.
+    if (error?.response?.status === 401 && issuedByActiveSession(error.config)) {
       useAuthStore.getState().clearAuth();
-      window.location.replace('/login');
+      authRedirect.toLogin();
     }
 
     return Promise.reject(error);

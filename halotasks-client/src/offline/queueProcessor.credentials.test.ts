@@ -1,4 +1,4 @@
-import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import { AxiosError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../store/authStore';
 import { resetSyncQueueState, type SyncQueueRecord } from './syncQueue';
@@ -25,7 +25,7 @@ vi.mock('./db', () => ({
   },
 }));
 
-import { apiClient } from '../services/api';
+import { apiClient, authRedirect } from '../services/api';
 import { taskService } from '../services/taskService';
 import { processSyncQueue } from './queueProcessor';
 
@@ -264,5 +264,58 @@ describe('the account switches while a request is in flight', () => {
     await processSyncQueue(cb);
 
     expect(cb[callback]).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Issue #34: the response to a queued request can arrive after the account changed. The 401 of A's request
+// must neither sign B out nor cost A the entry (a 401 is about the credential, not the queued action).
+describe('a queued request refused with 401 after the account switched', () => {
+  const refuseWith401 = (): void => {
+    apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+      const header = config.headers.get('Authorization');
+      sent.push({
+        method: String(config.method).toUpperCase(),
+        url: String(config.url),
+        authorization: typeof header === 'string' ? header : null,
+      });
+      inFlight.hook?.();
+      const response = { data: {}, status: 401, statusText: 'Unauthorized', headers: {}, config } as AxiosResponse;
+      throw new AxiosError('HTTP 401', 'ERR_BAD_REQUEST', config, undefined, response);
+    };
+  };
+
+  it('A’s 401 arrives after B signed in: B stays signed in, A’s entry is kept, B’s queue is untouched', async () => {
+    const toLogin = vi.spyOn(authRedirect, 'toLogin').mockImplementation(() => {});
+    seed(USER_A.id, [update('a1', 'srv-a1'), update('a2', 'srv-a2')]);
+    seed(USER_B.id, [update('b1', 'srv-b1')]);
+    signIn(USER_A);
+    inFlight.hook = () => {
+      inFlight.hook = null;
+      signIn(USER_B); // the account changes while A's request is in flight
+    };
+    refuseWith401();
+
+    const result = await processSyncQueue(callbacks());
+
+    expect(sent).toEqual([{ method: 'PUT', url: '/api/tasks/srv-a1', authorization: `Bearer ${TOKEN_A}` }]);
+    expect(useAuthStore.getState().token).toBe(TOKEN_B);
+    expect(useAuthStore.getState().user).toEqual(USER_B);
+    expect(toLogin).not.toHaveBeenCalled();
+    expect(result.processed).toBe(0);
+    expect(idsOf(USER_A.id)).toEqual(['a1', 'a2']); // nothing discarded, nothing run as B
+    expect(idsOf(USER_B.id)).toEqual(['b1']);
+  });
+
+  it('control: the same 401 with no switch signs A out and keeps A’s entries for the next login', async () => {
+    const toLogin = vi.spyOn(authRedirect, 'toLogin').mockImplementation(() => {});
+    seed(USER_A.id, [update('a1', 'srv-a1'), update('a2', 'srv-a2')]);
+    signIn(USER_A);
+    refuseWith401();
+
+    await processSyncQueue(callbacks());
+
+    expect(toLogin).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(idsOf(USER_A.id)).toEqual(['a1', 'a2']);
   });
 });
