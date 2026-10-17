@@ -30,6 +30,21 @@
       "status": "completed"
     },
     {
+      "date": "2026-10-17",
+      "category": "Docs",
+      "title": "remove the public demo credential from the README (Issue #33)",
+      "description": "The README no longer publishes a reusable demo email/password pair. Visitors now register their own account (open registration, no email verification, so no SMTP dependency); every account starts empty and is confined to its own data. The server has no seed, demo or admin mechanism, so no code or data changed. New docs/DEMO_ACCESS.md explains the visitor path, how a maintainer can hand out a guided demo account out of band without committing credentials, and how to rotate or revoke one (delete the account, or replace passwordHash and bump tokenVersion). Tests: tests/noPublishedCredentials.test.ts fails if any Markdown file or the changelog contains a credential written as a label plus a value (the detector is itself tested, including against the previous README); api.routes.test.ts gains an 'isolation between accounts' suite run against a real MongoDB (tasks, history, Growth Tree, push subscriptions, deleted-account tokens). Operational note: the previously published login remains in git history and was not rotated by this change. The owner confirmed it was a disposable, normal user account meant for guest logins, so leaving it exposed is an accepted decision; whether it still works was not verified.",
+      "files": [
+        "README.md",
+        "docs/DEMO_ACCESS.md",
+        "docs/HaloTaskPro-Documentation-Index.md",
+        "halotasks-server/tests/noPublishedCredentials.test.ts",
+        "halotasks-server/tests/api.routes.test.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-11",
       "category": "Backend",
       "title": "define Growth Tree reset and recovery rules (Issue #16)",

@@ -19,6 +19,7 @@ This index replaces the scattered root, ops, product, and helper docs that were 
 
 ### Deployment
 - `DEPLOYMENT.md` - production rollout steps, environment setup, and release checklist items.
+- `DEMO_ACCESS.md` - how visitors explore the live app without a shared login, and how a demo account is maintained and rotated.
 
 ## Operational Notes
 
