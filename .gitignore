@@ -2,8 +2,8 @@ node_modules/
 dist/
 build/
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 coverage/
 .DS_Store
 assistance/
