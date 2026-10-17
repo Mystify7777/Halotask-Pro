@@ -1,9 +1,6 @@
 # 🌟 HaloTaskPro
 
->⚠️⚠️ Due to some conflict between smtp and resend, the password reset flow and forget password isn't working for now as it requires an otp. I am trying to look for a workaround that doesn't requires me investing, I am broke..
-
-
-> **Try it:** open the [live app](https://halotask-pro.vercel.app) and create your own free account (Register: any name, an email address and a password; no email verification). Every account is private and starts empty. There is no shared demo login. See [docs/DEMO_ACCESS.md](docs/DEMO_ACCESS.md).
+> **Try it:** open the [live app](https://halotask-pro.vercel.app) and create your own free account (Register: any name, an email address and a password; no email verification). Every account is private and starts empty.
 
 HaloTaskPro is a modern productivity application built for people who want more than a checklist.
 
