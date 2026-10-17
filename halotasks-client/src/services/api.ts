@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
+import { resolveApiBaseUrl } from '../config/apiBaseUrl';
 import { useAuthStore } from '../store/authStore';
 import { TOKEN_KEY } from '../store/authStore';
 
@@ -89,7 +90,12 @@ const issuedByActiveSession = (config: { headers?: unknown; sessionGeneration?: 
 };
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000',
+  // Vite inlines this value at build time, so the primary guard lives in vite.config.ts; resolving it here too
+  // means a production bundle can never fall back to localhost even if that guard were bypassed.
+  baseURL: resolveApiBaseUrl({
+    value: import.meta.env.VITE_API_BASE_URL,
+    isProduction: import.meta.env.PROD,
+  }),
   timeout: 60_000,
   headers: {
     'Content-Type': 'application/json',

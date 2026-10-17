@@ -174,6 +174,8 @@ npm run dev
 
 Frontend runs on `http://localhost:5173`, backend on `http://localhost:5000`.
 
+If `VITE_API_BASE_URL` is unset, `npm run dev` falls back to `http://localhost:5000`. That fallback is for development only; see [Production Build](#production-build).
+
 ---
 
 ### Production Build
@@ -183,10 +185,17 @@ Frontend runs on `http://localhost:5173`, backend on `http://localhost:5000`.
 cd halotasks-server && npm run build
 # Output: dist/ (compiled JavaScript)
 
-# Frontend
+# Frontend (VITE_API_BASE_URL is required, see below)
 cd halotasks-client && npm run build
 # Output: dist/ (optimized static files)
 ```
+
+**The frontend build requires `VITE_API_BASE_URL`.** Vite inlines it into the bundle at build time, so a build with the variable missing or invalid fails with an explicit error instead of silently shipping a client that calls `http://localhost:5000`. It must be the public origin of the API: an absolute `http://` or `https://` URL with no path, query string, fragment or credentials (for example `https://your-api.onrender.com`).
+
+- **Vercel:** set it under Project Settings > Environment Variables (Production scope, plus Preview if previews should use an API) *before* the build. It is read at build time, so changing it needs a redeploy.
+- **Local production build:** keep it in `halotasks-client/.env` (copy `.env.example`) or export it in the shell, e.g. `VITE_API_BASE_URL=http://localhost:5000 npm run build`. This also applies to `npm run verify`.
+- **CI:** `.github/workflows/ci.yml` sets a non-secret placeholder origin for the verify step only so the build can run. Nothing built there is deployed.
+- It is a public value, not a secret: never put credentials or tokens in a `VITE_*` variable. The backend's `CLIENT_ORIGIN` must also allow the deployed frontend origin (CORS).
 
 See [**docs/DEPLOYMENT.md**](docs/DEPLOYMENT.md) for full production deployment, CORS setup, and email configuration.
 
@@ -237,6 +246,8 @@ TRUST_PROXY_HOPS=0
 ### Frontend (.env)
 
 ```env
+# Public API origin (http:// or https://, origin only). Optional in development (defaults to
+# http://localhost:5000); REQUIRED for production builds, which fail without it.
 VITE_API_BASE_URL=http://localhost:5000
 ```
 

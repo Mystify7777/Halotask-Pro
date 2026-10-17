@@ -18,6 +18,25 @@
   "entries": [
     {
       "date": "2026-10-17",
+      "category": "Config",
+      "title": "fail fast when the production API base URL is missing or invalid (Issue #36)",
+      "description": "The client used import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000', and Vite inlines that value at build time, so a production build without the variable succeeded and shipped a bundle that called localhost. Validation now lives in one pure helper (src/config/apiBaseUrl.ts: resolveApiBaseUrl, ApiBaseUrlError). Missing or blank means the localhost default in development and an error in production; a set value must be an absolute http:// or https:// origin (no path, query, fragment or credentials) in every mode, and is normalised to its origin. Errors never echo the rejected value. Two callers: a Vite plugin in vite.config.ts checks the env Vite resolved during vite build (the primary guard, so a bad configuration fails the build), and services/api.ts resolves the same value at module load as a backstop. CI sets a non-secret placeholder VITE_API_BASE_URL on the verify step because the production build now requires it; the README and .env.example document the setting and that on Vercel it must be set before the build. Tests: pure helper table tests, apiClient baseURL wiring, and the real vite.config.ts build guard via resolveConfig.",
+      "files": [
+        "halotasks-client/src/config/apiBaseUrl.ts",
+        "halotasks-client/src/config/apiBaseUrl.test.ts",
+        "halotasks-client/src/config/buildGuard.test.ts",
+        "halotasks-client/src/services/api.ts",
+        "halotasks-client/src/services/api.baseUrl.test.ts",
+        "halotasks-client/vite.config.ts",
+        "halotasks-client/.env.example",
+        ".github/workflows/ci.yml",
+        "README.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-10-17",
       "category": "Bugfix",
       "title": "make the global 401 handler session-aware (Issue #34)",
       "description": "The Axios response interceptor used to clear auth and redirect to /login on ANY 401, so a delayed 401 for account A (logged out, then B signed in while the request was in flight) signed B out. Each request is now stamped by the request interceptor with the auth store's in-memory sessionGeneration (0 at startup, +1 on every setAuth and clearAuth, never persisted and not a credential); on a 401 the request counts as the current session's only if its generation is still current AND the bearer token it was sent with (read back from its Authorization header) is still the credential in use, so a re-login with an identical token string is a different session, and, while this tab's store is empty, the stored token being replaced by another tab is caught too. A request sent while signed out still counts as current while nobody has signed in, so the login form's own 401 behaves as before. The redirect moved behind an exported authRedirect.toLogin seam so tests can observe it. The store/storage invariant is documented in authStore (within a tab the token and storage change together, only in setAuth/clearAuth/hydration; a non-null store token always wins over storage, and there is no cross-tab synchronization, so a tab that holds a token does not notice another tab's sign-in or sign-out). Offline queue ownership is unchanged (bound sessions are still verified before send); a queued request refused with 401 after an account switch keeps its entry and leaves the new session alone. Tests: services/api.session401.test.ts (35: current-session 401, stale 401, concurrent requests, rapid switching, identical-token re-login, store/storage fallback states, hydration, normal responses) and two queue tests in offline/queueProcessor.credentials.test.ts, all deterministic via held adapter promises. A second genuine 401 of the same session no longer signs out twice.",
@@ -975,5 +994,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-17T10:26:26.748Z"
+  "lastUpdated": "2026-10-17T17:31:11.000Z"
 }

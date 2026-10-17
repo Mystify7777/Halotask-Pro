@@ -50,5 +50,9 @@ jobs:
       - name: Install server dependencies
         run: npm ci --prefix halotasks-server
 
+      # The client production build requires VITE_API_BASE_URL and fails without it (Issue #36). This is a public,
+      # non-secret placeholder that only lets the build run here; nothing built in CI is deployed.
       - name: Verify (client tests + build, server tests + typechecks + build)
+        env:
+          VITE_API_BASE_URL: https://api.ci-build.invalid
         run: npm run verify
