@@ -1,0 +1,54 @@
+name: CI
+
+# One job that runs the repository's own verification contract (`npm run verify` at the root), so CI and local
+# verification cannot drift apart:
+#   client: npm run verify -> vitest run, then tsc -b && vite build (this is the client TypeScript check + production build)
+#   server: npm run verify -> vitest run (all tests, including api.routes and treeAward.realmongo against a real
+#           mongod), tsc --noEmit, tsc -p tsconfig.test.json --noEmit, tsc build
+# Change what CI checks by changing the `verify` scripts, not by adding commands here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            halotasks-client/package-lock.json
+            halotasks-server/package-lock.json
+
+      # The server tests start a real MongoDB through mongodb-memory-server (default: the current supported
+      # release, downloaded once and cached). They are NOT skipped when it is unavailable: a failed download or
+      # start fails the job.
+      - name: Cache MongoDB binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('halotasks-server/package-lock.json') }}
+
+      - name: Install client dependencies
+        run: npm ci --prefix halotasks-client
+
+      - name: Install server dependencies
+        run: npm ci --prefix halotasks-server
+
+      - name: Verify (client tests + build, server tests + typechecks + build)
+        run: npm run verify
