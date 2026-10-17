@@ -408,6 +408,111 @@ describe('HaloTasks API routes', () => {
     expect(knownResponse.body.message).toBe(unknownResponse.body.message);
   });
 
+  // Issue #33: there is no shared demo login any more; a visitor registers an ordinary account. That is only safe if an
+  // account is strictly confined to its own data, so this checks it end to end, against a real MongoDB, for every
+  // per-user resource. (No role or "demo" tier exists on the server, so there is no privileged path to test.)
+  describe('isolation between accounts (Issue #33), against a real MongoDB', () => {
+    const today = () => new Date().toISOString().slice(0, 10);
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const pushSub = (endpoint: string) => ({
+      endpoint,
+      expirationTime: null,
+      keys: {
+        p256dh: Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)]).toString('base64url'),
+        auth: crypto.randomBytes(16).toString('base64url'),
+      },
+    });
+
+    const twoAccounts = async () => {
+      const a = (await registerUser({ name: 'Owner', email: 'owner@mail.com', password: 'owner-pass-1' })).body as AuthResult;
+      const b = (await registerUser({ name: 'Visitor', email: 'visitor@mail.com', password: 'visitor-pass-1' })).body as AuthResult;
+      return { a, b };
+    };
+
+    it('a fresh visitor account starts empty and sees none of another account\'s tasks, history or Growth Tree', async () => {
+      const { a, b } = await twoAccounts();
+      const created = await createTaskForUser(a.token, { title: 'Owner private task', priority: 'high' });
+      const taskId = created.body.task._id as string;
+      expect((await request(app).put(`/api/tasks/${taskId}`).set(auth(a.token)).send({ completed: true })).status).toBe(200);
+      const day = today();
+      const put = await request(app)
+        .put('/api/history/today')
+        .set(auth(a.token))
+        .send({
+          date: day,
+          utcOffsetMinutes: 0,
+          completedCount: 1,
+          workDoneMinutes: 30,
+          completedTasks: [{ taskId, title: 'Owner private task', estimatedMinutes: 30 }],
+        });
+      expect(put.status).toBe(200);
+      // Sanity: the owner really has data to leak.
+      expect((await request(app).get('/api/tree').set(auth(a.token))).body.treeState.xp).toBeGreaterThan(0);
+
+      const tasks = await request(app).get('/api/tasks').set(auth(b.token));
+      expect(tasks.status).toBe(200);
+      expect(tasks.body.tasks).toEqual([]);
+      expect(JSON.stringify(tasks.body)).not.toContain('Owner private task');
+
+      const history = await request(app).get(`/api/history?days=1&endDate=${day}&utcOffsetMinutes=0`).set(auth(b.token));
+      expect(history.status).toBe(200);
+      expect(history.body.history).toEqual([
+        { date: day, completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null },
+      ]);
+
+      const tree = await request(app).get('/api/tree').set(auth(b.token));
+      expect(tree.status).toBe(200);
+      expect(tree.body.treeState.xp).toBe(0);
+      expect(tree.body.treeState.streakDays).toBe(0);
+    });
+
+    it('a visitor cannot change or complete another account\'s task, nor award Growth Tree XP through it', async () => {
+      const { a, b } = await twoAccounts();
+      const taskId = (await createTaskForUser(a.token, { title: 'Owner task', priority: 'low' })).body.task._id as string;
+
+      const update = await request(app).put(`/api/tasks/${taskId}`).set(auth(b.token)).send({ completed: true, title: 'hijacked' });
+      expect(update.status).toBe(404);
+      expect((await request(app).delete(`/api/tasks/${taskId}`).set(auth(b.token))).status).toBe(404);
+
+      const ownerTasks = await Task.find({ userId: a.user.id }).lean();
+      expect(ownerTasks).toHaveLength(1);
+      expect(ownerTasks[0].title).toBe('Owner task');
+      expect(ownerTasks[0].completed).toBe(false);
+      expect(((await User.findById(a.user.id).lean())?.treeState?.xp ?? 0)).toBe(0);
+      expect(((await User.findById(b.user.id).lean())?.treeState?.xp ?? 0)).toBe(0);
+      expect(((await User.findById(b.user.id).lean())?.treeState?.awardedTaskIds ?? [])).toEqual([]);
+    });
+
+    it('a visitor cannot forge Growth Tree progress, for themselves or anyone else', async () => {
+      const { a, b } = await twoAccounts();
+      const forged = await request(app).patch('/api/tree').set(auth(b.token)).send({ xp: 99999, userId: a.user.id });
+      expect(forged.status).toBe(400);
+      expect(((await User.findById(a.user.id).lean())?.treeState?.xp ?? 0)).toBe(0);
+      expect(((await User.findById(b.user.id).lean())?.treeState?.xp ?? 0)).toBe(0);
+    });
+
+    it('push subscriptions are per account: a visitor cannot remove or overwrite another account\'s', async () => {
+      const { a, b } = await twoAccounts();
+      const endpoint = 'https://push.example.com/send/owner-device';
+      expect((await request(app).post('/api/push/subscribe').set(auth(a.token)).send(pushSub(endpoint))).status).toBeLessThan(300);
+      const before = (await User.findById(a.user.id).lean())?.pushSubscriptions ?? [];
+      expect(before).toHaveLength(1);
+
+      await request(app).post('/api/push/unsubscribe').set(auth(b.token)).send({ endpoint });
+      const after = (await User.findById(a.user.id).lean())?.pushSubscriptions ?? [];
+      expect(after.map((s) => s.endpoint)).toEqual([endpoint]);
+      expect(((await User.findById(b.user.id).lean())?.pushSubscriptions ?? [])).toEqual([]);
+    });
+
+    it('every per-user route refuses a request with no token or a token for a deleted account', async () => {
+      const { a } = await twoAccounts();
+      const routes = ['/api/tasks', '/api/history?days=1', '/api/tree'];
+      for (const route of routes) expect((await request(app).get(route)).status).toBe(401);
+      await User.deleteOne({ _id: a.user.id });
+      for (const route of routes) expect((await request(app).get(route).set(auth(a.token))).status).toBe(401);
+    });
+  });
+
   describe('task API validation and query boundaries', () => {
     it('returns a 400 (not a 500) for a malformed task id on update and delete', async () => {
       const user = (await registerUser({ name: 'Boundary User', email: 'boundary@mail.com', password: '123456' }))
