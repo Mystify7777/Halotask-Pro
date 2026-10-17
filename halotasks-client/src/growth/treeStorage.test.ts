@@ -165,6 +165,15 @@ describe('applyServerGrowth: the server response becomes the tree', () => {
     expect(next.awardedTaskIds.has('t9')).toBe(false);
   });
 
+  it('does not record an id for a refusal that is not an award (history_full: the server would not take a new day)', async () => {
+    login(USER_A);
+    serverRecords.set('user-a', json(10, []));
+    await initTreeStorage();
+    const next = applyServerGrowth(growth('t9', 10, false, 'history_full'));
+    expect(next.awardedTaskIds.has('t9')).toBe(false);
+    expect(next.xp).toBe(10);
+  });
+
   it('ignores a stale response (bulk requests can finish out of order): XP never goes backwards', async () => {
     login(USER_A);
     serverRecords.set('user-a', json(10));
@@ -358,5 +367,19 @@ describe('legacy unscoped storage', () => {
 
     expect(aState.xp).toBe(0);
     expect(idb.has('growth_tree')).toBe(false);
+  });
+});
+
+describe('Issue #16: the loaded tree is shown as of today, without touching progress', () => {
+  it('a server tree whose last completion is days old loads with streak 0 and dead health, xp/stage/ledger intact', async () => {
+    login(USER_A);
+    vi.mocked(treeService.getTree).mockResolvedValueOnce({
+      ...json(130, ['a']), streakDays: 9, lastActiveDate: '2000-01-01', health: 'healthy', stage: 'mature',
+    });
+
+    const state = await initTreeStorage();
+
+    expect(state).toMatchObject({ xp: 130, leaves: 6, stage: 'mature', streakDays: 0, health: 'dead', lastActiveDate: '2000-01-01' });
+    expect([...state.awardedTaskIds]).toEqual(['a']);
   });
 });

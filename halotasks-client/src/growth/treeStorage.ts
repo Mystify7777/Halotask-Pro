@@ -31,7 +31,7 @@
 import { offlineDb } from '../offline/db';
 import { useAuthStore } from '../store/authStore';
 import { GrowthResult, TreeState, TreeStateJSON } from './treeTypes';
-import { createInitialTreeState, updateStreakState } from './treeLogic';
+import { applyEffectiveStatus, createInitialTreeState } from './treeLogic';
 import { treeService } from '../services/treeService';
 
 const IDB_KEY_PREFIX  = 'growth_tree:';
@@ -117,7 +117,7 @@ const purgeLegacyUnscopedState = async (): Promise<void> => {
  * 1. Delete legacy unscoped data (never migrated — see above).
  * 2. Fetch the server tree; if it answers, it IS the state (the local copy is not consulted).
  * 3. Only if the server cannot be reached: fall back to this user's last stored copy (or an empty tree).
- * 4. Apply the display-only streak check (days may have passed while the app was closed).
+ * 4. Show the state as of today (applyEffectiveStatus: streak and health only; days may have passed while the app was closed). xp, stage and the ledger are never touched.
  *
  * Nothing is pushed to the server. Throws TreeIdentityError if there is no authenticated user, or if
  * the authenticated user changes while init is in flight (the result is then discarded).
@@ -160,7 +160,7 @@ export const initTreeStorage = async (): Promise<TreeState> => {
     assertSameUser();
   }
 
-  state = updateStreakState(state);
+  state = applyEffectiveStatus(state);
   cache = { userId, state };
 
   if (serverState) {

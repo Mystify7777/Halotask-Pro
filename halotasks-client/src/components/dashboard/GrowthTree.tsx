@@ -1,4 +1,4 @@
-import { getStageEmoji, getStageDescription, getStageProgressForXp, getTodayDate, daysBetween } from '../../growth/treeLogic';
+import { getStageEmoji, getStageDescription, getStageProgressForXp, deriveTreeStatus, getStreakHint, TREE_STATUS_COPY } from '../../growth/treeLogic';
 import type { TreeState, TreeHealth } from '../../growth/treeTypes';
 import styles from './GrowthTree.module.css';
 
@@ -12,25 +12,6 @@ const HEALTH_COLOR: Record<TreeHealth, string> = {
   dead: '#ef4444',
 };
 
-const HEALTH_LABEL: Record<TreeHealth, string> = {
-  healthy: 'Healthy',
-  wilting: 'Wilting',
-  dead: 'Needs Care',
-};
-
-function getFooterMessage(state: TreeState): string {
-  // Brand-new user: no tasks ever done
-  if (state.xp === 0 && state.streakDays === 0) {
-    return 'Complete your first task to plant a seed.';
-  }
-  // Has XP but streak is currently 0 — streak broke
-  if (state.streakDays === 0 && state.xp > 0) {
-    return 'Your streak broke, but your progress remains. Complete a task to restart.';
-  }
-  // Active streak
-  return 'Keep completing tasks to grow your tree and build a streak.';
-}
-
 /**
  * GrowthTree Widget
  *
@@ -39,8 +20,10 @@ function getFooterMessage(state: TreeState): string {
  * done any tasks yet, rather than the misleading "Needs Care" label.
  */
 export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
-  const daysSinceActive = daysBetween(state.lastActiveDate, getTodayDate());
-  const streakStatus = daysSinceActive === 0 ? 'Active Today' : `${daysSinceActive}d since last`;
+  // Labels only: the server decides the status (GET /api/tree); this derives the same one from the cached state.
+  const info = deriveTreeStatus(state.streakDays, state.lastActiveDate, state.xp);
+  const copy = TREE_STATUS_COPY[info.status];
+  const streakStatus = getStreakHint(info);
 
   const stageProgress = getStageProgressForXp(state.xp);
   const progressLabel = stageProgress.nextStage
@@ -51,9 +34,8 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
     ? `${stageProgress.xpToNextStage} XP to ${getStageDescription(stageProgress.nextStage)}`
     : 'Maximum Growth Reached';
 
-  // A brand-new user (xp=0, streak=0) hasn't neglected anything —
-  // don't show the tree as "dead/Needs Care", show it as unstarted.
-  const isUnstarted = state.xp === 0 && state.streakDays === 0;
+  // A brand-new user hasn't neglected anything: don't show the tree as "Needs Care", show it as unstarted.
+  const isUnstarted = info.status === 'unstarted';
 
   return (
     <div className={styles.container}>
@@ -76,19 +58,19 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
             <span className={styles.healthLabel}>Health</span>
             <div
               className={styles.healthDot}
-              style={{ backgroundColor: HEALTH_COLOR[state.health] }}
-              title={HEALTH_LABEL[state.health]}
+              style={{ backgroundColor: HEALTH_COLOR[info.health] }}
+              title={copy.healthLabel}
               aria-hidden="true"
             />
-            <span className={styles.healthText}>{HEALTH_LABEL[state.health]}</span>
+            <span className={styles.healthText}>{copy.healthLabel}</span>
           </div>
         )}
 
         {/* Streak Counter */}
         <div className={styles.statRow}>
           <span className={styles.statLabel}>Streak</span>
-          <span className={styles.statValue}>{state.streakDays} days</span>
-          {!isUnstarted && (
+          <span className={styles.statValue}>{info.effectiveStreakDays} days</span>
+          {streakStatus && (
             <span className={styles.statHint}>{streakStatus}</span>
           )}
         </div>
@@ -119,7 +101,7 @@ export const GrowthTree: React.FC<GrowthTreeProps> = ({ state }) => {
 
       {/* Footer Message */}
       <div className={styles.footer}>
-        <p className={styles.message}>{getFooterMessage(state)}</p>
+        <p className={styles.message}>{copy.message}</p>
       </div>
     </div>
   );

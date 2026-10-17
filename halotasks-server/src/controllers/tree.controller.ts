@@ -2,12 +2,12 @@ import { NextFunction, Response } from 'express';
 import User from '../models/User.model';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { BODY_MUST_BE_OBJECT, isPlainObject } from '../utils/requestBody';
-import { TREE_REWARD_FIELDS, normalizeTreeState } from '../utils/treeRules';
+import { TREE_REWARD_FIELDS, presentTreeState } from '../utils/treeRules';
 
 // ── Growth Tree endpoints (Issue #24: the server is authoritative) ──────────────
 //
 // GET   /api/tree  — the user's tree. Stored values are NORMALISED on the way out (treeRules): leaves,
-//                    stage and health are always derived, impossible numbers are repaired IN THE RESPONSE ONLY (a read
+//                    stage and health are always derived, and the streak and health are the EFFECTIVE ones for today's UTC day (Issue #16: idle days reset the streak and wilt the tree; XP, leaves and stage never drop), impossible numbers are repaired IN THE RESPONSE ONLY (a read
 //                    never writes; storage is repaired by the next award, see utils/treeAward.ts), and the
 //                    response shape is the one clients have always received.
 // PATCH /api/tree  — no longer a way to change reward state. XP and the awarded-task ledger only change
@@ -20,7 +20,7 @@ export const TREE_FIELD_NOT_WRITABLE = 'TREE_FIELD_NOT_WRITABLE';
 
 const readTree = async (userId: string) => {
   const user = await User.findById(userId).select('treeState').lean();
-  return user ? normalizeTreeState((user as { treeState?: unknown }).treeState, new Date()) : null;
+  return user ? presentTreeState((user as { treeState?: unknown }).treeState, new Date()) : null;
 };
 
 export const getTree = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {

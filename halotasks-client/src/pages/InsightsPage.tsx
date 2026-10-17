@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import InsightModal from '../components/dashboard/InsightModal';
+import { deriveTreeStatus } from '../growth/treeLogic';
 import { applyServerGrowth, initTreeStorage, TreeIdentityError } from '../growth/treeStorage';
 import { getWeekHistory, type HistoryEntry, type WeekHistory } from '../offline/history';
 import { getCachedTasks } from '../offline/cache';
@@ -64,7 +65,7 @@ function StatCard({
 function WeeklySummary({ history, treeState }: { history: WeekHistory; treeState: TreeState | null }) {
   const weekTotal = history.reduce((sum, entry) => sum + entry.completedCount, 0);
   const weekMins = history.reduce((sum, entry) => sum + entry.workDoneMinutes, 0);
-  const streak = treeState?.streakDays ?? 0;
+  const streak = treeState ? deriveTreeStatus(treeState.streakDays, treeState.lastActiveDate, treeState.xp).effectiveStreakDays : 0;
 
   const bestEntry = history.reduce<HistoryEntry | null>((best, entry) => {
     if (!best || entry.completedCount > best.completedCount) {

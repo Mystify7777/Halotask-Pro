@@ -73,11 +73,15 @@ const userSchema = new Schema(
       stage:            { type: String,  enum: ['seed', 'sprout', 'young', 'mature', 'lush'], default: 'seed' },
       lastCalculatedAt: { type: String,  default: () => new Date().toISOString() },
       awardedTaskIds:   { type: [String], default: [] },
-      // Recovery marker (Issue #24), server-internal and never returned or client-writable: the UTC days
-      // (YYYY-MM-DD) of awards whose streak/derived write is not persisted yet. Added with $addToSet in the
-      // same atomic update as the XP award, removed ($unset) by the derived write that covers them. Absent
-      // (no default, so no empty array) = nothing pending. One entry per distinct day, so it grows by at
-      // most one per day of consecutive failures and every successful award clears it.
+      // Retained award-day history (Issue #16 AC8), server-internal and never returned or client-writable: the
+      // UTC days (YYYY-MM-DD) on which a completion was awarded, one entry per day. It is the CANONICAL source of
+      // the streak and last-active date; streakDays/lastActiveDate above are a materialised copy that may be
+      // validated and repaired from it. Added with $addToSet in the SAME atomic update as the XP and the ledger
+      // entry; capped at ACTIVE_DAYS_MAX and never truncated (a day that would not fit is refused). No default on
+      // purpose: an absent field means "legacy tree, history not adopted yet" and the award adopts it first.
+      activeDays: { type: [String], default: undefined },
+      // Legacy recovery marker (Issue #24), no longer written. A tree that still carries one folds its days into
+      // `activeDays` when it adopts the history, and the marker is removed in the same write.
       pendingDerivedDays: { type: [String], default: undefined },
     },
   },

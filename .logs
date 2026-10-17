@@ -4,6 +4,33 @@
   "categories": ["Frontend", "Backend", "Docs", "Config", "CI/CD", "Ops", "Planning", "Refactor", "Bugfix", "Feature", "Performance", "Accessibility"],
   "entries": [
     {
+      "date": "2026-10-11",
+      "category": "Backend",
+      "title": "define Growth Tree reset and recovery rules (Issue #16)",
+      "description": "define Growth Tree reset and recovery rules (Issue #16): one authoritative server rules module (utils/treeRules.ts: deriveTreeStatus, replayAwardDays, presentTreeState) with exclusive statuses on the UTC calendar day. After one missed day (gap 2) the effective streak is 0 and the tree is wilting; after two or more (gap >= 3) it is 0 and dead; a completion yesterday is at_risk (streak kept, healthy); one completion restores healthy immediately, the streak restarting at 1 unless it was done yesterday. XP, leaves and stage never decrease. GET /api/tree, PATCH {} and award/growth responses now return the effective streakDays and health plus additive status and daysSinceActive; reads never write (the stored copy changes only on the next award or retry; a read folds the retained award-day history in memory), and issue #24's atomic award and ledger are unchanged (the inline replay loop moved into replayAwardDays; the pendingDerivedDays recovery marker is replaced by the retained history, see AC8). AC8 (recalculation gives the same result from the same completion history) is met by retained-history reconstruction: treeState.activeDays (UTC award days, one per day) is the canonical source of the streak and last-active date; the stored streakDays/lastActiveDate/health are a materialised copy that may be validated and repaired from it. The day is recorded with $addToSet in the SAME atomic update as the XP and the ledger entry; replayAwardDays over the history is the one recalculation (same days, same result, whatever the order, repetition, retry or concurrency); reads stay write-free; XP and task-award de-duplication keep their separate authority. The history is capped at 20,000 days and never truncated: a new day that would not fit is refused (reason history_full), like a full ledger. A legacy tree adopts its history in one pinned write (the days implied by its stored streak plus any day left in the old marker, which is removed); activity before the first recorded day is not reconstructible, and that is documented, not claimed. Client: non-authoritative copy (deriveTreeStatus, nextStreak, applyEffectiveStatus) replaces updateStreakState and fixes the devices-disagree bug (server returned the stored streak at 3+ idle days while the client reset it); GrowthTree and Insights show per-status copy that never implies XP or stage is lost. UTC-day limitation documented (IST example). Tests: server treeRules, treeAward and treeRoutes (thresholds, UTC midnight boundary, recovery, replay equivalence, read-only, XP/stage invariants); client parity (byte-identical STATUS_CASES), GrowthTree, treeStorage. Review follow-up: the effective state is folded from the retained history in memory (reads still never write), so the award fallback response and GET show a recorded-but-unreconciled completion as a restored tree (regression tests force the derived write to fail on POST and PUT, then check the fallback and a later GET, and that storage is untouched). Clock skew: a recorded award for today is no longer skipped when the stored last-active date is in the future (nextStreak moves that date back to the award day; the read shows the same), with a test for a future stored date plus a recorded award for today. A zero-streak legacy record that is 2 or 3+ days old now follows the wilting/dead thresholds; unrecorded applies only when gap <= 1 (docs, code and both parity tables aligned, stale zero-streak rows added). Tests added for the history: atomic recording, one entry per day, adoption of legacy streaks and markers (including concurrent first awards and a future date), the cap (refuse a new day, accept a held day, last slot), repair of a stale or wrong copy from the history, and property tests (the fold equals day-by-day nextStreak; random mixes of days, failed derived writes, retries and concurrency leave storage equal to the fold of the recorded days). Review round 4: legacy adoption is bounded (the whole set is validated before the write; if it cannot fit, history_full and the legacy record is untouched; nothing is clamped); stored history is validated strictly (non-array, over the cap, invalid dates, duplicates give conflict with nothing rewritten, via a pre-flight read); migration edge cases (zero streak, missing/invalid last-active date, a date two or more days ahead) infer no days and fabricate no streak, a date one day ahead counts as today; the randomized test now derives its expectations from the actual atomic award log with deterministic injected failures; tests/treeAward.realmongo.test.ts runs concurrent adoption, malformed history and cap behavior against a real mongod; .github/workflows/server-tests.yml runs the full server suite (including api.routes) and the client suite.",
+      "files": [
+        "halotasks-server/src/utils/treeRules.ts",
+        "halotasks-server/src/utils/treeAward.ts",
+        "halotasks-server/src/controllers/tree.controller.ts",
+        "halotasks-client/src/growth/treeLogic.ts",
+        "halotasks-client/src/growth/treeStorage.ts",
+        "halotasks-client/src/growth/treeTypes.ts",
+        "halotasks-client/src/components/dashboard/GrowthTree.tsx",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "docs/context.md",
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/tests/helpers/treeDoubles.ts",
+        "halotasks-server/tests/treeAward.test.ts",
+        "halotasks-server/tests/treeAward.mongoose.test.ts",
+        "halotasks-server/tests/treeRules.test.ts",
+        "halotasks-server/tests/treeRoutes.test.ts",
+        "halotasks-server/tests/treeAward.realmongo.test.ts",
+        ".github/workflows/server-tests.yml"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-08",
       "category": "Backend",
       "title": "make Growth Tree state server-authoritative (Issue #24)",

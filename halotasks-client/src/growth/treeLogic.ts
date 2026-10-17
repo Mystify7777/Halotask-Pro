@@ -5,7 +5,7 @@
  * No side effects, fully testable.
  */
 
-import { TreeState, TreeHealth, TreeStage, GrowthEventPayload } from './treeTypes';
+import { TreeState, TreeHealth, TreeStage, TreeStatus, GrowthEventPayload } from './treeTypes';
 
 const XP_PER_COMPLETION = 10;
 const XP_PER_LEAF = 20;
@@ -121,75 +121,103 @@ export const getLeavesForXp = (xp: number): number => {
 };
 
 /**
- * Calculate health based on streak
+ * Reset / health / recovery rules (Issue #16) — a NON-AUTHORITATIVE copy of
+ * halotasks-server/src/utils/treeRules.ts `deriveTreeStatus`, used only to label the cached state and to
+ * preview an offline completion. halotasks-client/src/growth/treeRules.parity.test.ts holds the same case
+ * table as the server's test, so the two cannot drift silently. Conditions are exclusive, in this order:
+ *   unstarted  no date, xp 0                      streak 0   dead
+ *   unrecorded no date but xp > 0                  streak 0   dead
+ *   dead       2+ missed days  (gap >= 3)          streak 0   dead
+ *   wilting    1 missed day    (gap === 2)         streak 0   wilting
+ *   unrecorded gap <= 1 but a stored streak of 0   streak 0   dead   (legacy)
+ *   at_risk    last completion yesterday (gap 1)   stored     healthy
+ *   active     completed today (gap <= 0)          stored     healthy
+ * XP, leaves and stage are never part of this. The day is the UTC calendar day.
  */
-export const getHealthForStreak = (streakDays: number, lastActiveDate: string | null): TreeHealth => {
-  const today = getTodayDate();
-  const daysSinceActive = daysBetween(lastActiveDate, today);
+export type TreeStatusInfo = {
+  status: TreeStatus;
+  effectiveStreakDays: number;
+  health: TreeHealth;
+  daysSinceActive: number | null;
+};
 
-  // If no activity recorded, tree is dead
-  if (streakDays === 0) {
-    return 'dead';
+export const deriveTreeStatus = (
+  streakDays: number,
+  lastActiveDate: string | null,
+  xp: number,
+  today: string = getTodayDate(),
+): TreeStatusInfo => {
+  if (!lastActiveDate) {
+    return { status: xp === 0 ? 'unstarted' : 'unrecorded', effectiveStreakDays: 0, health: 'dead', daysSinceActive: null };
   }
+  const gap = Math.max(0, daysBetween(lastActiveDate, today));
+  if (gap >= 3) return { status: 'dead', effectiveStreakDays: 0, health: 'dead', daysSinceActive: gap };
+  if (gap === 2) return { status: 'wilting', effectiveStreakDays: 0, health: 'wilting', daysSinceActive: gap };
+  if (streakDays === 0) return { status: 'unrecorded', effectiveStreakDays: 0, health: 'dead', daysSinceActive: gap };
+  return { status: gap === 1 ? 'at_risk' : 'active', effectiveStreakDays: streakDays, health: 'healthy', daysSinceActive: gap };
+};
 
-  // If completed task today or yesterday, healthy
-  if (daysSinceActive === 0 || daysSinceActive === 1) {
-    return 'healthy';
+/** Health alone; the same rule as deriveTreeStatus. */
+export const getHealthForStreak = (
+  streakDays: number,
+  lastActiveDate: string | null,
+  today: string = getTodayDate(),
+): TreeHealth => deriveTreeStatus(streakDays, lastActiveDate, 1, today).health;
+
+/** The streak transition of an award on `today` (same rule as the server's nextStreak). */
+export const nextStreak = (
+  streakDays: number,
+  lastActiveDate: string | null,
+  today: string,
+): { streakDays: number; lastActiveDate: string } => {
+  if (lastActiveDate === today) return { streakDays, lastActiveDate: today };
+  let next = streakDays;
+  if (lastActiveDate) {
+    const gap = daysBetween(lastActiveDate, today);
+    if (gap === 1) next = streakDays + 1;
+    else if (gap > 1) next = 1;
+  } else {
+    next = 1;
   }
-
-  // If missed 1 day (2 days since last activity), wilting
-  if (daysSinceActive === 2) {
-    return 'wilting';
-  }
-
-  // If missed 3+ days, dead
-  return 'dead';
+  return { streakDays: next, lastActiveDate: today };
 };
 
 /**
- * Process streak logic on each load
- * 
- * Called when app initializes to check if streak continues or resets
+ * Show the cached state as of today: effective streak and health only. xp, leaves, stage and the ledger are
+ * returned untouched, and nothing is written anywhere. Idempotent, so applying it to a state the server has
+ * already presented changes nothing.
  */
-export const updateStreakState = (state: TreeState): TreeState => {
-  const today = getTodayDate();
-  const daysSinceActive = daysBetween(state.lastActiveDate, today);
+export const applyEffectiveStatus = (state: TreeState, today: string = getTodayDate()): TreeState => {
+  const info = deriveTreeStatus(state.streakDays, state.lastActiveDate, state.xp, today);
+  if (info.effectiveStreakDays === state.streakDays && info.health === state.health) return state;
+  return { ...state, streakDays: info.effectiveStreakDays, health: info.health, lastCalculatedAt: new Date().toISOString() };
+};
 
-  // If no last activity, streak stays at 0
-  if (!state.lastActiveDate) {
-    return {
-      ...state,
-      streakDays: 0,
-      health: 'dead',
-      lastCalculatedAt: new Date().toISOString(),
-    };
-  }
+/**
+ * Display copy for each status. Never says or implies that XP, leaves or stage were lost.
+ */
+export const TREE_STATUS_COPY: Record<TreeStatus, { healthLabel: string; message: string }> = {
+  unstarted: { healthLabel: '—', message: 'Complete your first task to plant a seed.' },
+  active: { healthLabel: 'Healthy', message: 'You grew your tree today. Come back tomorrow to keep the streak going.' },
+  at_risk: { healthLabel: 'Healthy', message: 'Complete a task today to keep your streak going.' },
+  wilting: {
+    healthLabel: 'Wilting',
+    message: 'You missed a day, so the streak reset and the tree is wilting. Your XP and stage are safe. Complete a task to restore it.',
+  },
+  dead: {
+    healthLabel: 'Needs Care',
+    message: 'It has been a few days, so the streak reset. Your XP, leaves and stage are safe. Complete a task to bring your tree back.',
+  },
+  unrecorded: { healthLabel: 'Needs Care', message: 'Complete a task to start a new streak. Your XP and stage are safe.' },
+};
 
-  // If completed task today, streak continues
-  if (daysSinceActive === 0) {
-    return state;
-  }
-
-  // If missed exactly 1 day (2 days since last), streak resets but health wilts
-  if (daysSinceActive === 2) {
-    return {
-      ...state,
-      health: 'wilting',
-      lastCalculatedAt: new Date().toISOString(),
-    };
-  }
-
-  // If missed 2+ days (3+ days since last), streak resets to 0
-  if (daysSinceActive >= 3) {
-    return {
-      ...state,
-      streakDays: 0,
-      health: 'dead',
-      lastCalculatedAt: new Date().toISOString(),
-    };
-  }
-
-  return state;
+/** Hint under the streak counter. */
+export const getStreakHint = (info: TreeStatusInfo): string | null => {
+  if (info.status === 'unstarted') return null;
+  if (info.daysSinceActive === null) return null;
+  if (info.daysSinceActive === 0) return 'Active Today';
+  if (info.daysSinceActive === 1) return 'Last active yesterday';
+  return `${info.daysSinceActive}d since last`;
 };
 
 /**
@@ -222,31 +250,11 @@ export const awardXpForCompletion = (
   const newLeaves = getLeavesForXp(newXp);
   const newStage = getStageForXp(newXp);
 
-  // Update streak if completing on new day
+  // Streak: the shared rule (continues after a completion yesterday, otherwise restarts at 1).
   const today = getTodayDate();
-  let newStreakDays = state.streakDays;
-  let newLastActiveDate = state.lastActiveDate;
+  const { streakDays: newStreakDays, lastActiveDate: newLastActiveDate } = nextStreak(state.streakDays, state.lastActiveDate, today);
 
-  if (state.lastActiveDate !== today) {
-    // User completing first task of the day
-    if (state.lastActiveDate) {
-      // Check if they missed days
-      const daysSinceActive = daysBetween(state.lastActiveDate, today);
-      if (daysSinceActive === 1) {
-        // Completed yesterday, streak continues
-        newStreakDays = state.streakDays + 1;
-      } else if (daysSinceActive > 1) {
-        // Missed days, streak resets
-        newStreakDays = 1;
-      }
-    } else {
-      // First ever completion
-      newStreakDays = 1;
-    }
-    newLastActiveDate = today;
-  }
-
-  const newHealth = getHealthForStreak(newStreakDays, newLastActiveDate);
+  const newHealth = getHealthForStreak(newStreakDays, newLastActiveDate, today);
   const healthChanged = state.health !== newHealth;
 
   const newAwardedIds = new Set(state.awardedTaskIds);

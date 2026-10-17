@@ -24,7 +24,7 @@ const withoutTimestamps = (update: Record<string, unknown> | undefined) => {
 };
 
 const stored = (over: Record<string, unknown> = {}) => ({
-  treeState: { xp: 100, streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['older'], ...over },
+  treeState: { xp: 100, streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['older'], activeDays: ['2026-10-03', '2026-10-04', '2026-10-05'], ...over },
 });
 
 beforeEach(() => {
@@ -43,7 +43,7 @@ beforeEach(() => {
   collection.findOneAndUpdate = async (filter: Record<string, unknown>, update: Record<string, unknown>, options: Record<string, unknown>) => {
     sent.push({ method: 'findOneAndUpdate', filter, update, options });
     findOneAndUpdateCalls += 1;
-    const doc = findOneAndUpdateCalls === 1 ? stored({ xp: 110, awardedTaskIds: ['older', TASK_ID], pendingDerivedDays: ['2026-10-06'] }) : stored({ xp: 110, streakDays: 4, lastActiveDate: '2026-10-06', awardedTaskIds: ['older', TASK_ID] });
+    const doc = findOneAndUpdateCalls === 1 ? stored({ xp: 110, awardedTaskIds: ['older', TASK_ID], activeDays: ['2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06'] }) : stored({ xp: 110, streakDays: 4, lastActiveDate: '2026-10-06', awardedTaskIds: ['older', TASK_ID], activeDays: ['2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06'] });
     // The driver returns the document directly (includeResultMetadata false), or a ModifyResult — answer both ways.
     return options?.includeResultMetadata === true ? { value: doc, ok: 1 } : doc;
   };
@@ -54,32 +54,42 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('the command Mongoose sends for an award', () => {
-  it('step 1 is ONE conditional update: not-yet-awarded + ledger-has-room + usable-xp filter; $inc, $push and the recovery marker together', async () => {
+  it('step 1 is ONE conditional update: not-yet-awarded + ledger-has-room + usable-xp + history-has-room filter; $inc, $push and the award day together', async () => {
     const result = await awardTaskCompletion(USER_ID, TASK_ID, new Date('2026-10-06T10:00:00.000Z'));
     expect(result.awarded).toBe(true);
 
-    const award = sent[0];
+    // The award is the first findOneAndUpdate. (Before it, one lean pre-flight read validates the stored history.)
+    const award = sent.filter((c) => c.method === 'findOneAndUpdate')[0];
     expect(award.method).toBe('findOneAndUpdate');
+
+    const preflight = sent[0];
+    expect(preflight.method).toBe('findOne');
+    expect(String(preflight.filter._id)).toBe(USER_ID);
+    // (the recording helper stores a findOne's options in its second slot, `update`)
+    expect(preflight.update).toEqual({ projection: { 'treeState.activeDays': 1 } }); // the history only, never the whole tree
 
     // Filter: every guard survived casting, including the array-index path.
     expect(String(award.filter._id)).toBe(USER_ID);
     expect(award.filter['treeState.awardedTaskIds']).toEqual({ $ne: TASK_ID });
     expect(award.filter['treeState.awardedTaskIds.19999']).toEqual({ $exists: false });
     expect(award.filter['treeState.xp']).toEqual({ $gte: 0, $lte: Number.MAX_SAFE_INTEGER - 10 });
+    // The retained history must exist as an array, and have room for today unless today is already in it.
+    expect(award.filter['treeState.activeDays']).toEqual({ $type: 'array' });
+    expect(award.filter.$or).toEqual([{ 'treeState.activeDays': '2026-10-06' }, { 'treeState.activeDays.19999': { $exists: false } }]);
 
-    // Update: XP, ledger and the recovery marker change in the SAME operation; nothing else rides along.
+    // Update: XP, ledger and the award day change in the SAME operation; nothing else rides along.
     expect(withoutTimestamps(award.update)).toEqual({
       $inc: { 'treeState.xp': 10 },
       $push: { 'treeState.awardedTaskIds': TASK_ID },
-      $addToSet: { 'treeState.pendingDerivedDays': '2026-10-06' },
+      $addToSet: { 'treeState.activeDays': '2026-10-06' },
     });
     expect(award.options).toMatchObject({ returnDocument: 'after' });
   });
 
-  it('step 2 is a compare-and-set pinned to xp, streakDays, lastActiveDate and the marker; it writes server-computed values and clears the marker', async () => {
+  it('step 2 is a compare-and-set pinned to xp, streakDays and lastActiveDate; it writes the values folded from the retained history', async () => {
     await awardTaskCompletion(USER_ID, TASK_ID, new Date('2026-10-06T10:00:00.000Z'));
 
-    const derived = sent[1];
+    const derived = sent.filter((c) => c.method === 'findOneAndUpdate')[1];
     expect(derived.method).toBe('findOneAndUpdate');
     expect(derived.filter).toMatchObject({
       'treeState.xp': 110,
@@ -95,7 +105,6 @@ describe('the command Mongoose sends for an award', () => {
         'treeState.stage': 'young',
         'treeState.lastCalculatedAt': '2026-10-06T10:00:00.000Z',
       },
-      $unset: { 'treeState.pendingDerivedDays': '' },
     });
   });
 
@@ -109,6 +118,7 @@ describe('the command Mongoose sends for an award', () => {
       'treeState.stage',
       'treeState.lastCalculatedAt',
       'treeState.awardedTaskIds',
+      'treeState.activeDays',
       'treeState.pendingDerivedDays',
     ]) {
       expect(User.schema.path(path), path).toBeDefined();
@@ -135,5 +145,37 @@ describe('repairing a forged Infinity xp (the old PATCH allowed `1e999`)', () =>
     expect(withoutTimestamps(repair?.update)).toEqual({ $set: { 'treeState.xp': 0 } });
     expect(result.awarded).toBe(true);
     expect(result.treeState.xp).toBe(10);
+  });
+});
+
+describe('adopting the retained history (a legacy tree has no activeDays)', () => {
+  it('is ONE pinned write that sets the implied days and removes the old marker; the award follows', async () => {
+    const collection = User.collection as unknown as Record<string, unknown>;
+    let call = 0;
+    collection.findOneAndUpdate = async (filter: Record<string, unknown>, update: Record<string, unknown>, options: Record<string, unknown>) => {
+      sent.push({ method: 'findOneAndUpdate', filter, update, options });
+      call += 1;
+      if (call === 1) return null; // no activeDays array yet: the award filter matches nothing
+      if (call === 2) return stored({ xp: 110, awardedTaskIds: ['older', TASK_ID], activeDays: ['2026-10-04', '2026-10-05', '2026-10-06'] });
+      return stored({ xp: 110, streakDays: 3, lastActiveDate: '2026-10-06', awardedTaskIds: ['older', TASK_ID], activeDays: ['2026-10-04', '2026-10-05', '2026-10-06'] });
+    };
+    // A legacy document: a streak of 2 ending 2026-10-05, a marker day, and no activeDays at all.
+    collection.findOne = async () => ({ treeState: { xp: 100, streakDays: 2, lastActiveDate: '2026-10-05', awardedTaskIds: ['older'], pendingDerivedDays: ['2026-10-05'] } });
+
+    const result = await awardTaskCompletion(USER_ID, TASK_ID, new Date('2026-10-06T10:00:00.000Z'));
+
+    const adoption = sent.find((c) => c.method === 'updateOne');
+    expect(adoption?.filter).toMatchObject({
+      'treeState.activeDays': null,
+      'treeState.xp': 100,
+      'treeState.streakDays': 2,
+      'treeState.lastActiveDate': '2026-10-05',
+    });
+    expect(withoutTimestamps(adoption?.update)).toEqual({
+      $set: { 'treeState.activeDays': ['2026-10-04', '2026-10-05'] },
+      $unset: { 'treeState.pendingDerivedDays': '' },
+    });
+    expect(result).toMatchObject({ awarded: true });
+    expect(result.treeState).toMatchObject({ streakDays: 3, lastActiveDate: '2026-10-06' });
   });
 });

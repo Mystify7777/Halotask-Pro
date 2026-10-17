@@ -6,6 +6,11 @@
  */
 
 export type TreeHealth = 'healthy' | 'wilting' | 'dead';
+/**
+ * Why the tree looks the way it does today (Issue #16). Exclusive; the SERVER decides it (GET /api/tree
+ * returns `status`), this copy only labels the cached/offline state. See treeLogic.deriveTreeStatus.
+ */
+export type TreeStatus = 'unstarted' | 'active' | 'at_risk' | 'wilting' | 'dead' | 'unrecorded';
 export type TreeStage = 'seed' | 'sprout' | 'young' | 'mature' | 'lush';
 
 /**
@@ -71,7 +76,7 @@ export interface GrowthResult {
   taskId: string;
   awarded: boolean;
   xpGained: number;
-  reason?: 'already_awarded' | 'ledger_full' | 'xp_ceiling';
+  reason?: 'already_awarded' | 'ledger_full' | 'xp_ceiling' | 'history_full';
   treeState: TreeSummaryJSON;
 }
 

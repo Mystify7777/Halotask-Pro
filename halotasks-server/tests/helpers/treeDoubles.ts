@@ -8,7 +8,7 @@ import type { Express } from 'express';
 //   * every operation is applied ATOMICALLY: match + apply happen in one synchronous block, after the
 //     (optional) async `hooks.before`, exactly like a single-document update on the server;
 //   * only the operators the Growth Tree code uses are supported ($ne, $exists, $gte, $lte on filters;
-//     $inc, $push, $addToSet, $set, $unset on updates). Anything else THROWS, so a change that starts using another
+//     $type:'array' and a top-level $or on filters; $inc, $push, $addToSet, $set, $unset on updates). Anything else THROWS, so a change that starts using another
 //     operator fails here loudly instead of being quietly accepted;
 //   * matching follows MongoDB's rules: `null` matches a missing or null field, `$ne` matches when no
 //     array element equals the value (or the field is missing), `$gte`/`$lte` only match numbers
@@ -91,6 +91,9 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
         return typeof actual === 'number' && typeof operand === 'number' && actual >= operand;
       case '$lte':
         return typeof actual === 'number' && typeof operand === 'number' && actual <= operand;
+      case '$type':
+        if (operand !== 'array') throw new Error(`treeDoubles: unsupported $type ${String(operand)}`);
+        return Array.isArray(actual);
       default:
         throw new Error(`treeDoubles: unsupported filter operator ${operator}`);
     }
@@ -100,6 +103,10 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
 const matches = (doc: Doc, filter: Filter): boolean =>
   Object.entries(filter).every(([path, condition]) => {
     if (path === '_id') return String(doc._id) === String(condition);
+    if (path === '$or') {
+      if (!Array.isArray(condition)) throw new Error('treeDoubles: $or needs an array');
+      return condition.some((clause) => matches(doc, clause as Filter));
+    }
     if (path.startsWith('$')) throw new Error(`treeDoubles: unsupported top-level operator ${path}`);
     return matchesField(getPath(doc, path), condition);
   });

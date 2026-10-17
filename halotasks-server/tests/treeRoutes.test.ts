@@ -263,9 +263,10 @@ describe('failure and retry semantics', () => {
 });
 
 describe('recovery when the award is recorded but its streak/derived write is not', () => {
-  // The derived write is the only user update that carries $unset (it clears the recovery marker).
-  const failNextDerivedWrite = () => users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => Boolean(op.update?.$unset) });
-  const marker = () => (users.tree(OWNER_A) as { pendingDerivedDays?: string[] }).pendingDerivedDays;
+  // The derived write is the findOneAndUpdate that $sets the streak (the award itself carries $inc/$push/$addToSet).
+  const failNextDerivedWrite = () => users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => (op.update?.$set as Record<string, unknown> | undefined)?.['treeState.streakDays'] !== undefined });
+  // The retained award-day history: the day is recorded with the XP even when the derived copy is not written.
+  const activeDays = () => (users.tree(OWNER_A) as { activeDays?: string[] }).activeDays;
   const incrementsApplied = () => users.applied.filter((o) => o.update?.$inc).length;
 
   it('PUT: the request fails and the task stays incomplete, XP is recorded once, and the retry finishes the job without a second award', async () => {
@@ -278,7 +279,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(failed.body).not.toHaveProperty('growth'); // no unpersisted projection is ever reported
     expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
     expect(users.tree(OWNER_A)).toMatchObject({ xp: 10, awardedTaskIds: [String(task._id)], streakDays: 0 });
-    expect(marker()).toBeDefined();
+    expect(activeDays()).toHaveLength(1); // the award day is recorded with the XP
 
     const retry = await complete(String(task._id));
 
@@ -287,7 +288,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(retry.body.growth).toMatchObject({ awarded: false, xpGained: 0, reason: 'already_awarded' });
     expect(retry.body.growth.treeState).toMatchObject({ xp: 10, streakDays: 1, health: 'healthy' });
     expect(users.tree(OWNER_A)).toMatchObject({ xp: 10, streakDays: 1 });
-    expect(marker()).toBeUndefined();
+    expect(activeDays()).toHaveLength(1);
     expect(incrementsApplied()).toBe(1);
   });
 
@@ -298,7 +299,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
 
     tasks.faults.push({ op: 'findOneAndUpdate', count: 1 });
     expect((await complete(String(task._id))).status).toBe(500);
-    expect(marker()).toBeUndefined(); // the second attempt already finished the derived write
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 1 }); // the second attempt already finished the derived write
     expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
 
     const third = await complete(String(task._id));
@@ -316,17 +317,21 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(res.status).toBe(201);
     expect(tasks.size()).toBe(1);
     expect(res.body.growth).toMatchObject({ awarded: true, xpGained: 10 });
-    // Read back from storage: the streak has NOT been advanced yet, and the response does not pretend it was.
-    expect(res.body.growth.treeState).toMatchObject({ xp: 10, streakDays: 0, lastActiveDate: null });
-    expect(marker()).toBeDefined();
+    // Read back from storage, never a projection: storage still holds the unreconciled copy plus the recorded day, but the
+    // response folds the recorded award day in memory, so the completion is not shown as an idle tree.
+    expect(res.body.growth.treeState).toMatchObject({ xp: 10, streakDays: 1, status: 'active', health: 'healthy' });
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 0, lastActiveDate: null });
+    expect(activeDays()).toHaveLength(1);
     expect(incrementsApplied()).toBe(1);
   });
 
   it('POST: even if the read-back ALSO fails, the task is kept and the request still succeeds (201, no growth block) — a retry must not create a second task', async () => {
+    users.seed(OWNER_A, emptyTree({ activeDays: [] })); // already adopted: a legacy tree would read once more to adopt
     failNextDerivedWrite();
     let userReads = 0;
-    // findById call 1 is authentication; call 2 is the read-back after the failed derived write.
-    users.faults.push({ op: 'findById', count: 1, when: () => (userReads += 1) === 2 });
+    // findById call 1 is authentication; call 2 is the award's pre-flight integrity read; call 3 is the read-back
+    // after the failed derived write.
+    users.faults.push({ op: 'findById', count: 1, when: () => (userReads += 1) === 3 });
 
     const res = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'offline done', completed: true });
 
@@ -335,7 +340,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(res.body).not.toHaveProperty('growth');
     expect(tasks.size()).toBe(1);
     expect(users.tree(OWNER_A)).toMatchObject({ xp: 10, awardedTaskIds: [String(res.body.task._id)] });
-    expect(marker()).toBeDefined();
+    expect(activeDays()).toHaveLength(1);
   });
 
   it('POST: the next completion finishes the leftover derived write (no lost streak day, no lost XP)', async () => {
@@ -348,12 +353,13 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(res.status).toBe(200);
     expect(res.body.growth).toMatchObject({ awarded: true });
     expect(res.body.growth.treeState).toMatchObject({ xp: 20, streakDays: 1 });
-    expect(marker()).toBeUndefined();
+    expect(users.tree(OWNER_A)).toMatchObject({ xp: 20, streakDays: 1 });
+    expect(activeDays()).toHaveLength(1); // two awards on one day are one day in the history
   });
 });
 
 describe('recovery across several UTC days (HTTP)', () => {
-  const failNextDerivedWrite = () => users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => Boolean(op.update?.$unset) });
+  const failNextDerivedWrite = () => users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => (op.update?.$set as Record<string, unknown> | undefined)?.['treeState.streakDays'] !== undefined });
   const at = (iso: string) => vi.setSystemTime(new Date(iso));
 
   beforeEach(() => vi.useFakeTimers({ toFake: ['Date'] }));
@@ -370,7 +376,7 @@ describe('recovery across several UTC days (HTTP)', () => {
     at('2026-10-06T09:00:00.000Z'); // Tuesday
     failNextDerivedWrite();
     expect((await complete(String(tuesday._id))).status).toBe(500);
-    expect(users.tree(OWNER_A)).toMatchObject({ xp: 20, streakDays: 0, pendingDerivedDays: ['2026-10-05', '2026-10-06'] });
+    expect(users.tree(OWNER_A)).toMatchObject({ xp: 20, streakDays: 0, activeDays: ['2026-10-05', '2026-10-06'] });
 
     at('2026-10-07T09:00:00.000Z'); // Wednesday: retry of Monday's completion
     const retry = await complete(String(monday._id));
@@ -379,8 +385,7 @@ describe('recovery across several UTC days (HTTP)', () => {
     expect(retry.body.task.completed).toBe(true);
     expect(retry.body.growth).toMatchObject({ awarded: false, reason: 'already_awarded' });
     expect(retry.body.growth.treeState).toMatchObject({ xp: 20, streakDays: 2, lastActiveDate: '2026-10-06', health: 'healthy' });
-    expect(users.tree(OWNER_A)).toMatchObject({ xp: 20, streakDays: 2, lastActiveDate: '2026-10-06' });
-    expect(users.tree(OWNER_A)).not.toHaveProperty('pendingDerivedDays');
+    expect(users.tree(OWNER_A)).toMatchObject({ xp: 20, streakDays: 2, lastActiveDate: '2026-10-06', activeDays: ['2026-10-05', '2026-10-06'] });
     expect(users.applied.filter((o) => o.update?.$inc)).toHaveLength(2); // two awards in total, never three
   });
 
@@ -401,6 +406,124 @@ describe('recovery across several UTC days (HTTP)', () => {
   });
 });
 
+describe('reset and recovery rules over HTTP (Issue #16)', () => {
+  const at = (iso: string) => vi.setSystemTime(new Date(iso));
+  const stored = () => users.tree(OWNER_A) as Record<string, unknown>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    users.seed(OWNER_A, emptyTree({ xp: 130, leaves: 6, stage: 'mature', health: 'healthy', streakDays: 6, lastActiveDate: '2026-10-06', awardedTaskIds: ['a'] }));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ['same day', '2026-10-06T22:00:00Z', 'active', 6, 'healthy'],
+    ['next day: today still open', '2026-10-07T00:00:00Z', 'at_risk', 6, 'healthy'],
+    ['one missed day', '2026-10-08T00:00:00Z', 'wilting', 0, 'wilting'],
+    ['still one missed day, end of that UTC day', '2026-10-08T23:59:59Z', 'wilting', 0, 'wilting'],
+    ['two missed days', '2026-10-09T00:00:00Z', 'dead', 0, 'dead'],
+    ['a year later', '2027-10-06T00:00:00Z', 'dead', 0, 'dead'],
+  ])('GET %s -> %s (streak %i, %s), with xp, leaves and stage untouched', async (_label, iso, status, streak, health) => {
+    at(iso);
+
+    const res = await request(app).get('/api/tree').set(as(OWNER_A));
+
+    expect(res.status).toBe(200);
+    expect(res.body.treeState).toMatchObject({ status, streakDays: streak, health, xp: 130, leaves: 6, stage: 'mature', awardedTaskIds: ['a'] });
+  });
+
+  it('a GET (and a no-op PATCH) at any idleness persists nothing', async () => {
+    const before = JSON.stringify(stored());
+    for (const iso of ['2026-10-07T12:00:00Z', '2026-10-08T12:00:00Z', '2026-10-20T12:00:00Z']) {
+      at(iso);
+      expect((await request(app).get('/api/tree').set(as(OWNER_A))).status).toBe(200);
+      expect((await request(app).patch('/api/tree').set(as(OWNER_A)).send({})).status).toBe(200);
+    }
+    expect(users.applied).toHaveLength(0);
+    expect(JSON.stringify(stored())).toBe(before);
+  });
+
+  it('two reads at the same instant agree, and repeated reads never change the answer', async () => {
+    at('2026-10-08T09:00:00Z');
+    const first = (await request(app).get('/api/tree').set(as(OWNER_A))).body.treeState;
+    const second = (await request(app).get('/api/tree').set(as(OWNER_A))).body.treeState;
+    expect({ ...second, lastCalculatedAt: undefined }).toEqual({ ...first, lastCalculatedAt: undefined });
+  });
+
+  it.each([
+    ['wilting', '2026-10-08T09:00:00Z'],
+    ['dead', '2026-10-20T09:00:00Z'],
+  ])('one completion restores a %s tree to healthy immediately; the streak restarts at 1 and XP only grows', async (_label, iso) => {
+    at(iso);
+    const task = tasks.seed(OWNER_A);
+
+    const res = await complete(String(task._id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.growth.treeState).toMatchObject({ status: 'active', health: 'healthy', streakDays: 1, xp: 140, leaves: 7, stage: 'mature' });
+    const get = await request(app).get('/api/tree').set(as(OWNER_A));
+    expect(get.body.treeState).toMatchObject({ status: 'active', health: 'healthy', streakDays: 1, xp: 140 });
+  });
+
+  it('completing the day after the last one continues the streak (no reset without a missed day)', async () => {
+    at('2026-10-07T09:00:00Z');
+    const task = tasks.seed(OWNER_A);
+    const res = await complete(String(task._id));
+    expect(res.body.growth.treeState).toMatchObject({ status: 'active', streakDays: 7, xp: 140 });
+  });
+
+  it('un-completing a task never lowers xp or the stage, and cannot revive a dead tree', async () => {
+    at('2026-10-20T09:00:00Z');
+    const task = tasks.seed(OWNER_A, { completed: true });
+    const res = await complete(String(task._id), false);
+    expect(res.status).toBe(200);
+    expect(stored()).toMatchObject({ xp: 130, streakDays: 6, lastActiveDate: '2026-10-06' });
+    expect((await request(app).get('/api/tree').set(as(OWNER_A))).body.treeState).toMatchObject({ status: 'dead', xp: 130, stage: 'mature' });
+  });
+});
+
+describe('recorded-but-unreconciled award on a long-idle tree (Issue #16 review)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T09:00:00Z'));
+    users.seed(OWNER_A, emptyTree({ xp: 130, leaves: 6, stage: 'mature', health: 'dead', streakDays: 6, lastActiveDate: '2026-10-01', awardedTaskIds: ['a'] }));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('POST with a failed derived write: the fallback response AND a later GET show a healthy restored tree; storage is untouched by both', async () => {
+    users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => (op.update?.$set as Record<string, unknown> | undefined)?.['treeState.streakDays'] !== undefined });
+
+    const res = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'back again', completed: true });
+
+    expect(res.status).toBe(201);
+    expect(res.body.growth.treeState).toMatchObject({ status: 'active', health: 'healthy', streakDays: 1, lastActiveDate: '2026-10-20', xp: 140 });
+    const stored = JSON.stringify(users.tree(OWNER_A));
+    // The legacy tree adopted its history (6 implied days ending 2026-10-01) and the award day was recorded with the XP.
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 6, lastActiveDate: '2026-10-01', activeDays: ['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-20'] });
+    const writesAfterAward = users.applied.length;
+
+    const get = await request(app).get('/api/tree').set(as(OWNER_A));
+
+    expect(get.body.treeState).toMatchObject({ status: 'active', health: 'healthy', streakDays: 1, lastActiveDate: '2026-10-20', xp: 140 });
+    expect(users.applied).toHaveLength(writesAfterAward); // the GET wrote nothing
+    expect(JSON.stringify(users.tree(OWNER_A))).toBe(stored);
+  });
+
+  it('PUT with a failed derived write answers 500, yet a GET already shows the recorded completion; the retry then reconciles it', async () => {
+    const task = tasks.seed(OWNER_A);
+    users.faults.push({ op: 'findOneAndUpdate', count: 1, when: (op) => (op.update?.$set as Record<string, unknown> | undefined)?.['treeState.streakDays'] !== undefined });
+    expect((await complete(String(task._id))).status).toBe(500);
+
+    const get = await request(app).get('/api/tree').set(as(OWNER_A));
+    expect(get.body.treeState).toMatchObject({ status: 'active', health: 'healthy', streakDays: 1, xp: 140 });
+
+    const retry = await complete(String(task._id));
+    expect(retry.status).toBe(200);
+    expect(retry.body.growth.treeState).toMatchObject({ status: 'active', streakDays: 1, xp: 140 });
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 1, lastActiveDate: '2026-10-20', xp: 140 });
+  });
+});
+
 describe('what the read endpoints do with damaged stored data', () => {
   const damaged = () =>
     users.seed(OWNER_A, emptyTree({ xp: Infinity, streakDays: -3, lastActiveDate: 'junk', leaves: 9999, stage: 'lush', health: 'healthy', awardedTaskIds: ['ok', '', 7], pendingDerivedDays: ['2026-10-05'] }));
@@ -414,7 +537,8 @@ describe('what the read endpoints do with damaged stored data', () => {
 
     for (const res of [get, noop]) {
       expect(res.status).toBe(200);
-      expect(res.body.treeState).toMatchObject({ xp: 0, streakDays: 0, lastActiveDate: null, leaves: 0, stage: 'seed', awardedTaskIds: ['ok'] });
+      // The recorded 2026-10-05 award is folded into the response (streak 1) but long ago: the tree reads as dead.
+      expect(res.body.treeState).toMatchObject({ xp: 0, streakDays: 0, status: 'dead', lastActiveDate: '2026-10-05', leaves: 0, stage: 'seed', awardedTaskIds: ['ok'] });
       expect(res.body.treeState).not.toHaveProperty('pendingDerivedDays');
     }
     expect(users.applied).toEqual([]);
@@ -429,7 +553,10 @@ describe('what the read endpoints do with damaged stored data', () => {
 
     expect(res.status).toBe(200);
     expect(users.tree(OWNER_A)).toMatchObject({ xp: 10, streakDays: 1, leaves: 0, stage: 'seed', health: 'healthy', awardedTaskIds: ['ok', '', 7, String(task._id)] });
+    // The legacy marker day was folded into the adopted history and the marker removed.
     expect(users.tree(OWNER_A)).not.toHaveProperty('pendingDerivedDays');
+    expect((users.tree(OWNER_A) as { activeDays: string[] }).activeDays).toHaveLength(2);
+    expect((users.tree(OWNER_A) as { activeDays: string[] }).activeDays[0]).toBe('2026-10-05');
   });
 });
 
@@ -440,7 +567,7 @@ describe('GET /api/tree', () => {
     const res = await request(app).get('/api/tree').set(as(OWNER_A));
 
     expect(res.status).toBe(200);
-    expect(Object.keys(res.body.treeState).sort()).toEqual(['awardedTaskIds', 'health', 'lastActiveDate', 'lastCalculatedAt', 'leaves', 'stage', 'streakDays', 'xp']);
+    expect(Object.keys(res.body.treeState).sort()).toEqual(['awardedTaskIds', 'daysSinceActive', 'health', 'lastActiveDate', 'lastCalculatedAt', 'leaves', 'stage', 'status', 'streakDays', 'xp']);
     expect(res.body.treeState).toMatchObject({ xp: 130, leaves: 6, stage: 'mature', awardedTaskIds: ['a'] });
   });
 
