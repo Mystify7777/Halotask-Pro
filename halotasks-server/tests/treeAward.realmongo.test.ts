@@ -170,3 +170,103 @@ describe('real MongoDB: legacy adoption', () => {
     expect(tree.streakDays).toBe(expectedStreak);
   });
 });
+
+// Issue #24 — concurrent awards of DIFFERENT tasks. The same-task race is covered above; this is the other half of
+// "no lost updates": many writers $inc/$push on one user document at once. With no injected fault, one call per task can
+// end in exactly two ways, and BOTH mean the award is recorded: it resolves with awarded:true, or it throws
+// derived_unpersisted (the award is recorded, only its streak copy is not, and a retry reconciles it). Anything else
+// (a `conflict`, a driver error, awarded:false) is unexpected and fails the test instead of being read as contention.
+describe('real MongoDB: concurrent awards of different tasks, and isolation between users', () => {
+  const adopted = (over: Record<string, unknown> = {}) => ({
+    xp: 0, streakDays: 0, lastActiveDate: null, awardedTaskIds: [], activeDays: [], ...over,
+  });
+
+  /**
+   * The state the moment a burst settles. Every call recorded its award, so the ledger holds each id exactly once and xp is
+   * exactly one award per id on top of `startingXp`: nothing lost, nothing doubled, nothing fabricated.
+   */
+  const expectEveryAwardRecordedOnce = (
+    ledger: string[],
+    xp: number,
+    startingXp: number,
+    ids: string[],
+    settled: PromiseSettledResult<{ awarded: boolean }>[],
+  ) => {
+    settled.forEach((outcome, i) => {
+      if (outcome.status === 'fulfilled') {
+        expect(outcome.value.awarded, `award ${ids[i]}`).toBe(true); // one call per task: it can only have been the first award
+      } else {
+        expect(outcome.reason, `award ${ids[i]}`).toBeInstanceOf(TreeAwardError);
+        expect((outcome.reason as TreeAwardError).kind, `award ${ids[i]}`).toBe('derived_unpersisted');
+      }
+    });
+    expect([...ledger].sort()).toEqual([...ids].sort());
+    expect(xp).toBe(startingXp + XP_PER_COMPLETION * ids.length);
+  };
+
+  it.each([8, 25])('%i concurrent awards of different tasks for one user: unique ledger, exact xp, and a retry converges', async (n) => {
+    const id = await seed(adopted());
+    const ids = Array.from({ length: n }, (_, i) => task(i + 1));
+
+    const settled = await Promise.allSettled(ids.map((t) => awardTaskCompletion(id, t, NOW)));
+    const burst = await rawTree(id);
+    expectEveryAwardRecordedOnce(burst.awardedTaskIds as string[], burst.xp as number, 0, ids, settled);
+
+    // Retrying every task (what a client does after a failed request) awards nothing twice and finishes any
+    // derived write that contention left behind.
+    for (const t of ids) await awardTaskCompletion(id, t, NOW);
+    const done = await rawTree(id);
+    expect([...(done.awardedTaskIds as string[])].sort()).toEqual([...ids].sort());
+    expect(done.xp).toBe(XP_PER_COMPLETION * n);
+    expect(done.activeDays).toEqual([TODAY]);
+    expect(done.lastActiveDate).toBe(TODAY);
+    expect(done.streakDays).toBe(1);
+
+    // And once converged, a full second pass changes nothing at all.
+    const before = JSON.stringify(await raw(id));
+    await Promise.all(ids.map((t) => awardTaskCompletion(id, t, NOW)));
+    expect(JSON.stringify(await raw(id))).toBe(before);
+  });
+
+  it('a legacy tree (no history yet) receiving concurrent awards of different tasks loses and duplicates nothing', async () => {
+    const id = await seed({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['old'] });
+    const ids = Array.from({ length: 12 }, (_, i) => task(i + 1));
+
+    const settled = await Promise.allSettled(ids.map((t) => awardTaskCompletion(id, t, NOW)));
+    const burst = await rawTree(id);
+    const ledger = (burst.awardedTaskIds as string[]).filter((t) => t !== 'old');
+    expectEveryAwardRecordedOnce(ledger, (burst.xp as number) - 30, 0, ids, settled);
+    expect(burst.awardedTaskIds).toContain('old'); // the pre-existing entry is never dropped
+
+    for (const t of ids) await awardTaskCompletion(id, t, NOW);
+    const done = await rawTree(id);
+    expect(done.xp).toBe(30 + XP_PER_COMPLETION * ids.length);
+    expect(new Set(done.awardedTaskIds as string[]).size).toBe(ids.length + 1);
+  });
+
+  it('two users awarded the SAME task ids at once stay independent, and a bystander document is never touched', async () => {
+    const a = await seed(adopted());
+    const b = await seed(adopted());
+    const bystander = await seed(adopted({ xp: 70, streakDays: 1, lastActiveDate: '2026-10-05', awardedTaskIds: ['o1'], activeDays: ['2026-10-05'] }));
+    const bystanderBefore = JSON.stringify(await raw(bystander));
+    const ids = Array.from({ length: 10 }, (_, i) => task(i + 1));
+
+    const settled = await Promise.allSettled([
+      ...ids.map((t) => awardTaskCompletion(a, t, NOW)),
+      ...ids.map((t) => awardTaskCompletion(b, t, NOW)),
+    ]);
+    const outcomes = { a: settled.slice(0, ids.length), b: settled.slice(ids.length) };
+    const treeA = await rawTree(a);
+    const treeB = await rawTree(b);
+    expectEveryAwardRecordedOnce(treeA.awardedTaskIds as string[], treeA.xp as number, 0, ids, outcomes.a);
+    expectEveryAwardRecordedOnce(treeB.awardedTaskIds as string[], treeB.xp as number, 0, ids, outcomes.b);
+
+    for (const user of [a, b]) for (const t of ids) await awardTaskCompletion(user, t, NOW);
+    for (const user of [a, b]) {
+      const tree = await rawTree(user);
+      expect([...(tree.awardedTaskIds as string[])].sort()).toEqual([...ids].sort());
+      expect(tree.xp).toBe(XP_PER_COMPLETION * ids.length);
+    }
+    expect(JSON.stringify(await raw(bystander))).toBe(bystanderBefore);
+  });
+});

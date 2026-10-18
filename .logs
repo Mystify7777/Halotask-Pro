@@ -17,6 +17,20 @@
   ],
   "entries": [
     {
+      "date": "2026-10-18",
+      "category": "Backend",
+      "title": "add real-MongoDB concurrency and isolation tests for the Growth Tree award (Issue #24)",
+      "description": "Test-only change; no production code changed. Issue #24 (server-authoritative Growth Tree) was already implemented; these tests add coverage of its atomicity and failure handling against a real MongoDB. tests/treeAward.realmongo.test.ts gains award-level concurrency cases (8 and 25 different-task awards for one user, a legacy tree under the same burst, two users awarded the same task ids with a bystander document left byte-identical). With no injected fault a call may only resolve awarded:true or throw derived_unpersisted (the award is recorded); anything else fails. New tests/treeRoutes.realmongo.test.ts drives the real Express app, auth middleware, Mongoose models and award code over HTTP against MongoMemoryServer. Concurrent bursts (PUT of different tasks on a new and on an adopted account, duplicate PUTs of one task, POSTs of already-completed tasks, a burst with the first four derived writes failed, two users plus a bystander with cross-account PUTs and forged PATCHes) accept only the documented outcomes: 200, or a 500 whose body is exactly the documented derived_unpersisted message with the matching logged TreeAwardError; POST bursts must be all 201; response shapes are pinned to the existing route contract. Deterministic failure paths (new helper tests/helpers/driverFaults.ts rejects exactly one planned driver command and passes everything else to the real database) cover PUT with a failed derived write, award or task write, and POST with a failed derived write, derived write plus read-back, award, and award plus cleanup (the documented, accepted gap), each checking task, ledger, xp and reconciliation state and the retry. Execution status, kept separate on purpose. Earlier sandbox runs: the MongoDB binary download was blocked, so api.routes, treeAward.realmongo and treeRoutes.realmongo could not start (33 files passed, 3 failed with DownloadError; 1526 tests passed, 73 skipped); that run says nothing about the new tests. Maintainer run on Windows against a real MongoDB (full server suite): 36 files passed, 1,605 tests passed, 1 todo, including treeAward.realmongo, treeRoutes.realmongo and api.routes. Not yet run in CI. Limits of that evidence: the one todo is a KNOWN GAP, a POST whose award fails and whose cleanup also fails leaves a completed task with no award and the retry makes a second task (characterised by a test, not fixed, tracked in its own issue), so the Growth Tree is not shown to have complete failure-path integrity; the fault-trace assertions cover only the commands the helper wraps. The fault helper is covered by MongoDB-free tests/driverFaults.test.ts (nothing fails unless planned, a fault hits only its named command, reset() cannot leak plans, restore() is idempotent) and records an ordered command trace so the read-back tests prove which command was failed. The award-plus-cleanup case is labelled a KNOWN GAP (characterised, not endorsed) with an it.todo for its remediation, to be tracked in its own issue.",
+      "files": [
+        "halotasks-server/tests/treeAward.realmongo.test.ts",
+        "halotasks-server/tests/treeRoutes.realmongo.test.ts",
+        "halotasks-server/tests/helpers/driverFaults.ts",
+        "halotasks-server/tests/driverFaults.test.ts"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-17",
       "category": "Config",
       "title": "fail fast when the production API base URL is missing or invalid (Issue #36)",
@@ -994,5 +1008,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-17T17:31:11.000Z"
+  "lastUpdated": "2026-10-18T01:41:50.047Z"
 }
