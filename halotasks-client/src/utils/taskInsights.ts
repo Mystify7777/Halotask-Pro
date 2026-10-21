@@ -1,6 +1,5 @@
 import { Task } from '../types/task';
-
-const getStartOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+import { compareDeadlines, getDueState } from './deadline';
 
 const getDayKey = (date: Date) => {
   const year = date.getFullYear();
@@ -22,61 +21,31 @@ const parseTaskDate = (value?: string) => {
   return parsed;
 };
 
+// Section membership (Issue #10). Date-only tasks are classified by their due DAY against the local today (the day
+// is the UTC date of the stored due date, never its local rendering, which is a day early west of UTC). A task with a
+// due time is classified by its exact deadline: once that moment has passed it is overdue, even earlier the same day.
+// Sections are disjoint except that `upcoming` is every not-yet-overdue task due today or later (as before).
+
 export const getOverdueTasks = (tasks: Task[]) => {
-  const todayStart = getStartOfDay(new Date()).getTime();
-
-  return tasks.filter((task) => {
-    if (task.completed) {
-      return false;
-    }
-
-    const dueDate = parseTaskDate(task.dueDate);
-    if (!dueDate) {
-      return false;
-    }
-
-    return getStartOfDay(dueDate).getTime() < todayStart;
-  });
+  const now = new Date();
+  return tasks.filter((task) => !task.completed && getDueState(task, now) === 'overdue');
 };
 
 export const getDueTodayTasks = (tasks: Task[]) => {
-  const todayKey = getDayKey(new Date());
-
-  return tasks.filter((task) => {
-    if (task.completed) {
-      return false;
-    }
-
-    const dueDate = parseTaskDate(task.dueDate);
-    if (!dueDate) {
-      return false;
-    }
-
-    return getDayKey(dueDate) === todayKey;
-  });
+  const now = new Date();
+  return tasks.filter((task) => !task.completed && getDueState(task, now) === 'today');
 };
 
 export const getUpcomingTasks = (tasks: Task[], limit = 5) => {
-  const todayStart = getStartOfDay(new Date()).getTime();
+  const now = new Date();
 
   return tasks
     .filter((task) => {
-      if (task.completed) {
-        return false;
-      }
-
-      const dueDate = parseTaskDate(task.dueDate);
-      if (!dueDate) {
-        return false;
-      }
-
-      return getStartOfDay(dueDate).getTime() >= todayStart;
+      if (task.completed) return false;
+      const state = getDueState(task, now);
+      return state === 'today' || state === 'later';
     })
-    .sort((a, b) => {
-      const dueA = parseTaskDate(a.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      const dueB = parseTaskDate(b.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      return dueA - dueB;
-    })
+    .sort(compareDeadlines)
     .slice(0, limit);
 };
 

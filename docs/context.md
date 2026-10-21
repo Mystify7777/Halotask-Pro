@@ -316,6 +316,29 @@ an out-of-range value) is rejected the same way regardless of which
 endpoint is called. See `docs/logs.md` for the full list of limits (title,
 description, tag length/count, estimated-minutes range).
 
+## Task Start Time and Due Time (Issues #9, #10)
+
+Both fields are optional and independent of the legacy `dueDate`.
+
+| Field | Format | Meaning |
+| --- | --- | --- |
+| `dueDate` | `YYYY-MM-DD` (unchanged) | Stored as UTC midnight; the UTC date part is the calendar day the user picked. |
+| `dueTime` | `"HH:mm"` (24h) | Wall-clock time on `dueDate`. Needs a `dueDate`. The deadline instant is derived in the viewer's local zone and never persisted. |
+| `startTime` | ISO 8601 with `Z` or `±hh:mm` | An absolute instant. It has no date anchor, so a start time alone is valid. |
+
+- Parsing is strict: Feb 30, `24:00`, zone-less datetimes and non-strings are 400.
+- A `dueTime` with no `dueDate` (on create, or on update with no stored date) is 400.
+- Update: `null` or `''` clears a field. Clearing `dueDate` also clears `dueTime`. Clearing the date while setting a time is 400.
+- Setting `dueTime` alone relies on the stored date; if it is removed concurrently the update returns 409.
+- A date-only task keeps its legacy deadline (UTC midnight). It is not turned into a local-midnight deadline.
+- Client logic lives in `halotasks-client/src/utils/deadline.ts` (sorting, overdue/today/upcoming, display). Reminders reuse the existing scheduler; the explicit-start window ends at the exact deadline, otherwise start + buffer.
+- No migration: old documents simply lack the fields.
+- Model invariant: the schema validator rejects a `dueTime` without a `dueDate` on documents (create/save) and on an update that itself removes or nulls the date. It cannot see the stored document when an update sets only `dueTime`; the controller's `dueDate: { $exists: true, $ne: null }` filter (409 on no match) guards that. Writes that bypass validators (`updateOne` without `runValidators`, bulk writes, a lone `$unset: { dueDate }`) are not protected.
+- Offline 409: when the queue replays an update that sets `dueTime` (without `dueDate`) and gets 409, it sends the edit once more with `dueTime: null`, adopts the server task, and tells the user the due time was not kept. One extra request per run, never a loop; if that request fails transiently the original entry is kept. Any other 409 is still discarded as a permanent 4xx.
+- Reminder identity: a task created offline keeps a client-only `clientKey` (its first `local-…` id) after sync, and the scheduler key and notification tag use `clientKey ?? _id`. This keeps an already-fired reminder from re-arming when the id changes. It holds within the persisted cache and the browser session; it does not cover another device, a cleared cache or a new session.
+- "Start now" names a clock time only for a task with a `dueTime`; date-only tasks get the generic message.
+- Known limits: reminders are client-side only (the only server email is for authentication, so there is no task email scheduling to feed); date-only reminders still use UTC midnight.
+
 ## History: Source of Truth, Calendar Days, and API (Issue #31)
 
 **Model.** The history of one calendar day is the **set of tasks completed that day, keyed by

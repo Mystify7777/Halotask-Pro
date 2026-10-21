@@ -281,7 +281,16 @@ export function createTaskStore() {
       enter('findOneAndUpdate', filter);
       const task = owns(filter);
       if (!task) return null;
-      Object.assign(task, update);
+      // Mirror MongoDB: `$set` assigns, `$unset` removes, and an `$exists` precondition on the filter must hold.
+      for (const [key, cond] of Object.entries(filter)) {
+        if (cond && typeof cond === 'object' && '$exists' in (cond as Doc)) {
+          const present = task[key] !== undefined && ((cond as Doc).$ne === undefined || task[key] !== (cond as Doc).$ne);
+          if (present !== Boolean((cond as Doc).$exists)) return null;
+        }
+      }
+      const { $set, $unset, ...plain } = update as { $set?: Doc; $unset?: Doc } & Doc;
+      Object.assign(task, plain, $set ?? {});
+      for (const key of Object.keys($unset ?? {})) delete task[key];
       return { ...task };
     },
     findOneAndDelete: async (filter: Filter) => {

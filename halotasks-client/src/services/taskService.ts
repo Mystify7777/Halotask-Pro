@@ -1,10 +1,5 @@
 import { apiClient, type BoundSession, type SessionRequestConfig } from './api';
-import { Task, TaskCreatePayload, TaskListResponse, TaskResponse } from '../types/task';
-
-type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
-  completed?: boolean;
-  dueDate?: string | null;
-};
+import { Task, TaskCreatePayload, TaskListResponse, TaskResponse, TaskUpdatePayload } from '../types/task';
 
 // Matches the server's bounded max page size (halotasks-server/src/utils/pagination.ts).
 // Requesting this explicitly on every call means the server's own default

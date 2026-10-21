@@ -10,6 +10,7 @@ import {
   getWorkDoneToday,
 } from '../../utils/taskInsights';
 import InsightModal from './InsightModal';
+import { compareDeadlines } from '../../utils/deadline';
 
 type SmartSectionsProps = {
   tasks: Task[];
@@ -72,15 +73,11 @@ export default function SmartSections({ tasks, onToggleTask, todayHistory }: Sma
 
   // ── Task subsets for each modal (sorted) ──────────────────────────────────
   const modalTasks: Record<InsightCardVariant, Task[]> = {
-    'overdue': [...overdueTasks].sort(
-      (a, b) => new Date(a.dueDate ?? 0).getTime() - new Date(b.dueDate ?? 0).getTime(),
-    ),
+    'overdue': [...overdueTasks].sort(compareDeadlines),
     'due-today': [...dueTodayTasks].sort(
       (a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority],
     ),
-    'upcoming': getUpcomingTasks(tasks, Number.MAX_SAFE_INTEGER).sort(
-      (a, b) => new Date(a.dueDate ?? 0).getTime() - new Date(b.dueDate ?? 0).getTime(),
-    ),
+    'upcoming': getUpcomingTasks(tasks, Number.MAX_SAFE_INTEGER).sort(compareDeadlines),
         'completed': [...completedTodayTasks].sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     ),

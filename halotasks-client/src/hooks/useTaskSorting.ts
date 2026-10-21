@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Task } from '../types/task';
+import { compareDeadlines, dueDayKey } from '../utils/deadline';
 
 export type TaskSortOption =
   | 'dueSoonest'
@@ -42,39 +43,14 @@ export const useTaskSorting = (tasks: Task[], sortBy: TaskSortOption) => {
     const sorted = [...tasks];
 
     sorted.sort((a, b) => {
-      const aDue = toTimeOrNull(a.dueDate);
-      const bDue = toTimeOrNull(b.dueDate);
-
       switch (sortBy) {
-        case 'dueSoonest': {
-          if (aDue === null && bDue === null) {
-            return 0;
-          }
-
-          if (aDue === null) {
-            return 1;
-          }
-
-          if (bDue === null) {
-            return -1;
-          }
-
-          return aDue - bDue;
-        }
+        // Exact deadline where there is one (due day, then due time); date-only tasks keep their established
+        // by-day order, and tasks with no due date stay last in both directions.
+        case 'dueSoonest':
+          return compareDeadlines(a, b);
         case 'dueLatest': {
-          if (aDue === null && bDue === null) {
-            return 0;
-          }
-
-          if (aDue === null) {
-            return 1;
-          }
-
-          if (bDue === null) {
-            return -1;
-          }
-
-          return bDue - aDue;
+          if (dueDayKey(a.dueDate) === null || dueDayKey(b.dueDate) === null) return compareDeadlines(a, b);
+          return compareDeadlines(b, a);
         }
         case 'priorityHigh':
           return priorityRank[b.priority] - priorityRank[a.priority];

@@ -11,10 +11,13 @@ import {
   TAGS_MAX_COUNT,
   TAG_MAX_LENGTH,
   TITLE_MAX_LENGTH,
+  isClearValue,
   isNonEmptyTitle,
+  isValidDueTime,
   isValidEstimatedMinutes,
   isValidPriority,
   parseDueDate,
+  parseStartTime,
 } from '../utils/taskValidators';
 
 const isValidObjectId = (id: unknown): boolean => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id);
@@ -33,6 +36,8 @@ const respondIfMongooseInputError = (error: unknown, res: Response): boolean => 
   return false;
 };
 
+const DUE_TIME_NEEDS_DUE_DATE = 'dueTime requires a dueDate';
+
 type ParsedTaskBody = {
   title?: string;
   description?: string;
@@ -40,6 +45,10 @@ type ParsedTaskBody = {
   priority?: string;
   tags?: string[];
   dueDate?: Date;
+  dueTime?: string;
+  startTime?: Date;
+  /** Optional fields the request asked to clear (`null` or `''`). Meaningful on update; ignored on create. */
+  clear: { dueDate: boolean; dueTime: boolean; startTime: boolean };
   estimatedMinutes?: number;
   reminderSent?: boolean;
 };
@@ -58,7 +67,7 @@ const parseTaskBody = (
   body: Record<string, unknown>,
   { requireTitle }: { requireTitle: boolean },
 ): ParseResult => {
-  const result: ParsedTaskBody = {};
+  const result: ParsedTaskBody = { clear: { dueDate: false, dueTime: false, startTime: false } };
 
   if (body.title !== undefined) {
     if (typeof body.title !== 'string' || !isNonEmptyTitle(body.title)) {
@@ -119,6 +128,31 @@ const parseTaskBody = (
     }
     if (parsedDueDate.value !== undefined) {
       result.dueDate = parsedDueDate.value;
+    } else {
+      result.clear.dueDate = true; // null / '' : remove the due date (before this, an update silently ignored it)
+    }
+  }
+
+  // Due time (Issue #10) and start time (Issue #9): optional, strict, and clearable the same way.
+  if (body.dueTime !== undefined) {
+    if (isClearValue(body.dueTime)) {
+      result.clear.dueTime = true;
+    } else if (!isValidDueTime(body.dueTime)) {
+      return { ok: false, message: 'dueTime must be a time of day in HH:mm (24-hour) form' };
+    } else {
+      result.dueTime = body.dueTime;
+    }
+  }
+
+  if (body.startTime !== undefined) {
+    if (isClearValue(body.startTime)) {
+      result.clear.startTime = true;
+    } else {
+      const parsedStartTime = parseStartTime(body.startTime);
+      if (!parsedStartTime.ok) {
+        return { ok: false, message: 'startTime must be an ISO 8601 date-time with a time zone (e.g. 2026-10-20T09:30:00Z)' };
+      }
+      result.startTime = parsedStartTime.value;
     }
   }
 
@@ -188,6 +222,11 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
     }
     const payload = parsed.value;
 
+    // A due time is only a part of a deadline: it needs the due date it belongs to.
+    if (payload.dueTime !== undefined && payload.dueDate === undefined) {
+      return res.status(400).json({ message: DUE_TIME_NEEDS_DUE_DATE });
+    }
+
     const task = await Task.create({
       userId: req.user.id,
       title: payload.title,
@@ -196,6 +235,8 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
       priority: payload.priority ?? 'medium',
       tags: payload.tags ?? [],
       dueDate: payload.dueDate,
+      dueTime: payload.dueTime,
+      startTime: payload.startTime,
       estimatedMinutes: payload.estimatedMinutes ?? 0,
       reminderSent: payload.reminderSent ?? false,
       completedAt: payload.completed ? new Date() : null,
@@ -259,6 +300,18 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
       return res.status(404).json({ message: 'Task not found' });
     }
 
+    // Deadline fields (Issue #10): the due time must always sit next to a due date.
+    //  - a due time in the request needs a due date, either in the request or already on the task;
+    //  - clearing the due date clears the due time with it (a time with no day is meaningless), but a request
+    //    that clears the date AND sets a time contradicts itself and is rejected.
+    const dueDateAfter = payload.clear.dueDate ? false : payload.dueDate !== undefined || currentTask.dueDate != null;
+    if (payload.dueTime !== undefined && !dueDateAfter) {
+      return res.status(400).json({ message: DUE_TIME_NEEDS_DUE_DATE });
+    }
+    // The time is being set against the due date ALREADY stored (the request did not send one). Another request
+    // could clear that date between this read and the write, so the write itself requires the date to still be there.
+    const relyOnStoredDueDate = payload.dueTime !== undefined && payload.dueDate === undefined;
+
     const nextCompleted = payload.completed ?? currentTask.completed;
     const wasCompleted = currentTask.completed;
 
@@ -279,13 +332,15 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
       growth = await awardTaskCompletion(req.user.id, String(currentTask._id));
     }
 
-    const update = {
+    const set = {
       ...(payload.title !== undefined ? { title: payload.title } : {}),
       ...(payload.description !== undefined ? { description: payload.description } : {}),
       ...(payload.completed !== undefined ? { completed: payload.completed } : {}),
       ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
       ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
       ...(payload.dueDate !== undefined ? { dueDate: payload.dueDate } : {}),
+      ...(payload.dueTime !== undefined ? { dueTime: payload.dueTime } : {}),
+      ...(payload.startTime !== undefined ? { startTime: payload.startTime } : {}),
       ...(payload.estimatedMinutes !== undefined ? { estimatedMinutes: payload.estimatedMinutes } : {}),
       ...(payload.reminderSent !== undefined ? { reminderSent: payload.reminderSent } : {}),
       ...(payload.completed !== undefined
@@ -293,11 +348,31 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
         : {}),
     };
 
+    // `null` / '' remove a field outright; the due time goes with a cleared due date.
+    const unset = {
+      ...(payload.clear.dueDate ? { dueDate: 1, dueTime: 1 } : {}),
+      ...(payload.clear.dueTime && payload.dueTime === undefined ? { dueTime: 1 } : {}),
+      ...(payload.clear.startTime ? { startTime: 1 } : {}),
+    };
+
     const task = await Task.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user.id },
-      update,
+      {
+        _id: req.params.id,
+        userId: req.user.id,
+        ...(relyOnStoredDueDate ? { dueDate: { $exists: true, $ne: null } } : {}),
+      },
+      {
+        ...(Object.keys(set).length > 0 ? { $set: set } : {}),
+        ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+      },
       { returnDocument: 'after', runValidators: true },
     );
+
+    if (!task && relyOnStoredDueDate) {
+      // The task existed a moment ago (read above), so the only way to miss is that its due date was removed or the
+      // task was deleted in between. Nothing was written.
+      return res.status(409).json({ message: 'Task changed while it was being updated; reload and try again' });
+    }
 
     return res.json({ task, ...(growth ? { growth } : {}) });
   } catch (error) {

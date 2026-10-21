@@ -17,6 +17,24 @@
   ],
   "entries": [
     {
+      "date": "2026-10-21",
+      "category": "Feature",
+      "title": "add optional task start time and due time (Issues #9, #10)",
+      "description": "Optional dueTime (HH:mm wall clock, requires dueDate) and startTime (ISO instant) across model, validation, API, offline queue, forms, card display, sorting, smart sections and reminders. dueDate semantics unchanged; no migration. Also fixes PUT dueDate:null being ignored and UTC-minus day classification. Real-MongoDB suite tests/taskTimes.realmongo.test.ts was NOT executed in the sandbox (MongoDB binary download blocked); run it locally. Review follow-up: offline 409 on a due-time edit is reconciled (one bounded resend with dueTime cleared, user told) instead of discarded; reminders keep one identity across the offline local-to-server id change via a client-only clientKey; start-now names a time only for an explicit dueTime; the Mongoose schema enforces dueTime-needs-dueDate for documents and self-contained updates.",
+      "files": [
+        "halotasks-server/src/controllers/task.controller.ts",
+        "halotasks-server/src/models/Task.model.ts",
+        "halotasks-server/src/utils/taskValidators.ts",
+        "halotasks-client/src/utils/deadline.ts",
+        "halotasks-client/src/reminders/deadlineLogic.ts",
+        "halotasks-client/src/reminders/identity.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-server/tests/taskModel.invariant.test.ts"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-18",
       "category": "Backend",
       "title": "add real-MongoDB concurrency and isolation tests for the Growth Tree award (Issue #24)",

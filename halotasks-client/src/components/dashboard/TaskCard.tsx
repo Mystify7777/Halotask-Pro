@@ -1,5 +1,6 @@
 import { Task } from '../../types/task';
 import { getDateBadgeClass } from '../../utils/dateHelpers';
+import { formatDueLabel, formatStartLabel } from '../../utils/deadline';
 import { normalizeTag } from '../../utils/tagHelpers';
 import styles from './TaskCard.module.css';
 
@@ -15,25 +16,6 @@ type TaskCardProps = {
   onToggleTagFilter:  (tag: string) => void;
   onToggleSelect:     (taskId: string) => void;
 };
-
-function formatDueLabel(dueDate?: string): string {
-  if (!dueDate) return '';
-  const date = new Date(dueDate);
-  if (isNaN(date.getTime())) return '';
-
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  if (sameDay(date, today)) return 'Due today';
-  if (sameDay(date, tomorrow)) return 'Due tomorrow';
-  return `Due ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
-}
 
 const PRIORITY_DOT: Record<string, string> = {
   high: 'high',
@@ -61,8 +43,9 @@ export default function TaskCard({
 }: TaskCardProps) {
   const isActioning = activeActionTaskId === task._id;
   const isDisabled = isActioning || bulkActionLoading;
-  const dueLabel = formatDueLabel(task.dueDate);
-  const dueClass = getDateBadgeClass(task.dueDate);
+  const dueLabel = formatDueLabel(task);
+  const startLabel = formatStartLabel(task.startTime);
+  const dueClass = getDateBadgeClass(task.dueDate, task.dueTime);
   const dotClass = PRIORITY_DOT[task.priority] ?? 'low';
 
   return (
@@ -95,6 +78,7 @@ export default function TaskCard({
           </span>
 
           {dueLabel && <span className={`${dueClass} ${styles.metaItem}`}>{dueLabel}</span>}
+          {startLabel && <span className={`date-muted ${styles.metaItem}`}>{startLabel}</span>}
 
           {task.estimatedMinutes > 0 && (
             <span className={styles.metaItem}>

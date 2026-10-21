@@ -1,13 +1,41 @@
 import { captureSession, isSameSession, isSessionChangedError } from '../services/api';
 import { taskService } from '../services/taskService';
-import { TaskCreatePayload, Task } from '../types/task';
+import { TaskCreatePayload, TaskUpdatePayload, Task } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
 import { getSyncQueue, setSyncQueue, SyncQueueRecord } from './syncQueue';
 
-type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
-  completed?: boolean;
-  dueDate?: string | null;
+/**
+ * The queue merges later edits into earlier entries ({...old, ...new}), so a merged payload can in principle hold a due
+ * time next to a cleared or missing due date. The server rejects that with a 400, and a 400 permanently discards the
+ * entry, which would lose the user's whole edit. A due time only exists next to a due date, so drop it here; the server
+ * still validates everything that is sent.
+ */
+export const withConsistentDeadline = <T extends { dueDate?: string | null; dueTime?: string | null }>(
+  payload: T,
+  kind: 'create' | 'update',
+): T => {
+  if (payload.dueTime === undefined || payload.dueTime === null) return payload;
+  // A create has no stored date to fall back on; an update only loses its time when it clears the date itself.
+  const hasNoDueDate = kind === 'create' ? !payload.dueDate : 'dueDate' in payload && !payload.dueDate;
+  return hasNoDueDate ? { ...payload, dueTime: null } : payload;
 };
+
+/**
+ * The server answers 409 to an update that sets a due time and relies on the task's stored due date when that date was
+ * removed meanwhile (for example on another device). The edit is not wrong, the world changed under it, so it must not
+ * be discarded like a permanent 4xx. See reconcileDueDateConflict.
+ */
+const isDueDateConflict = (error: unknown, payload: TaskUpdatePayload): boolean =>
+  httpStatusOf(error) === 409 && typeof payload.dueTime === 'string' && payload.dueDate === undefined;
+
+/**
+ * Reconciliation for that conflict, bounded to ONE extra request per queue run (never a retry loop): resend the edit
+ * with its due time cleared. Every other field of the edit still lands, and the server's answer, which has no due date,
+ * replaces the local copy so the UI stops showing a time the server cannot hold. The user is told (onDueTimeConflict)
+ * that the due time was not kept. If this request itself fails, the original entry is kept or handled like any other
+ * failure; nothing is retried in a loop.
+ */
+const withoutDueTime = (payload: TaskUpdatePayload): TaskUpdatePayload => ({ ...payload, dueTime: null });
 
 type ProcessSyncQueueParams = {
   onTaskCreated: (localTaskId: string, serverTask: Task) => void;
@@ -18,6 +46,11 @@ type ProcessSyncQueueParams = {
    * still signed in, like the other callbacks. Optional: callers that do not show the tree can omit it.
    */
   onGrowth?: (growth: GrowthResult) => void;
+  /**
+   * A queued due-time edit could not be kept because the task's due date was removed on the server. The rest of the
+   * edit was applied (and passed to onTaskUpdated). Optional so callers that show no messages can omit it.
+   */
+  onDueTimeConflict?: (taskId: string, dueTime: string) => void;
 };
 
 export type ProcessSyncQueueResult = {
@@ -68,6 +101,7 @@ export const processSyncQueue = async ({
   onTaskUpdated,
   onTaskDeleted,
   onGrowth,
+  onDueTimeConflict,
 }: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
   // A queue may only be worked by its owner, with the owner's credential. Bind BOTH now — the account
   // and the token it is signed in with — and use them for everything below:
@@ -111,7 +145,7 @@ export const processSyncQueue = async ({
     try {
       if (entry.type === 'create') {
         const localTaskId = entry.taskId;
-        const payload = (entry.payload ?? {}) as TaskCreatePayload;
+        const payload = withConsistentDeadline((entry.payload ?? {}) as TaskCreatePayload, 'create');
         const response = await taskService.createTask(payload, { session });
 
         if (localTaskId) {
@@ -140,9 +174,18 @@ export const processSyncQueue = async ({
           continue;
         }
 
-        const payload = (entry.payload ?? {}) as TaskUpdatePayload;
-        const response = await taskService.updateTask(resolvedTaskId, payload, { session });
+        const payload = withConsistentDeadline((entry.payload ?? {}) as TaskUpdatePayload, 'update');
+        let response;
+        let conflictedDueTime: string | null = null;
+        try {
+          response = await taskService.updateTask(resolvedTaskId, payload, { session });
+        } catch (error) {
+          if (!isDueDateConflict(error, payload)) throw error;
+          conflictedDueTime = payload.dueTime as string;
+          response = await taskService.updateTask(resolvedTaskId, withoutDueTime(payload), { session });
+        }
         if (stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+        if (conflictedDueTime !== null && stillSignedIn()) onDueTimeConflict?.(resolvedTaskId, conflictedDueTime);
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
         processed += 1;

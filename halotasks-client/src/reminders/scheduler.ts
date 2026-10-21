@@ -1,5 +1,6 @@
 import { Task } from '../types/task';
-import { getSmartStartWindows, getTasksDueInNextHour, getTasksOverdueNow } from './deadlineLogic';
+import { getSmartStartWindows, getTasksDueInNextHour, getTasksOverdueNow, reminderSchedulePart } from './deadlineLogic';
+import { reminderIdentity } from './identity';
 import { isWithinQuietHours, ReminderSettings } from './settings';
 
 type ReminderType = 'due-soon' | 'overdue' | 'work-session-soon' | 'start-now';
@@ -45,8 +46,7 @@ export const createReminderScheduler = ({
   const notifiedInSession = loadFiredKeys();
 
   const makeKey = (task: Task, type: ReminderType) => {
-    const duePart = task.dueDate ?? 'no-due-date';
-    return `${type}:${task._id}:${duePart}`;
+    return `${type}:${reminderIdentity(task)}:${reminderSchedulePart(task)}`;
   };
 
   const dispatchIfNeeded = (task: Task, type: ReminderType) => {
@@ -82,12 +82,12 @@ export const createReminderScheduler = ({
       overdue.forEach((task) => dispatchIfNeeded(task, 'overdue'));
     }
 
-    smartStartWindows.forEach(({ task, dueTime, latestStartTime, notifyAtTime }) => {
+    smartStartWindows.forEach(({ task, latestStartTime, notifyAtTime, windowEndTime }) => {
       if (settings.workSessionSoonEnabled && nowTime >= notifyAtTime && nowTime < latestStartTime) {
         dispatchIfNeeded(task, 'work-session-soon');
       }
 
-      if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < dueTime) {
+      if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < windowEndTime) {
         dispatchIfNeeded(task, 'start-now');
       }
     });

@@ -230,6 +230,8 @@ export default function DashboardPage() {
               title={tasksHook.title}
               priority={tasksHook.priority}
               dueDate={tasksHook.dueDate}
+              dueTime={tasksHook.dueTime}
+              startTime={tasksHook.startTime}
               estimatedMinutes={tasksHook.estimatedMinutes}
               creatingTask={tasksHook.creatingTask}
               tags={tasksHook.createTags}
@@ -239,6 +241,8 @@ export default function DashboardPage() {
               onTitleChange={tasksHook.setTitle}
               onPriorityChange={tasksHook.setPriority}
               onDueDateChange={tasksHook.setDueDate}
+              onDueTimeChange={tasksHook.setDueTime}
+              onStartTimeChange={tasksHook.setStartTime}
               onEstimatedMinutesChange={tasksHook.setEstimatedMinutes}
               onTagInputChange={tasksHook.setCreateTagInput}
               onAddTag={tasksHook.addCreateTag}
@@ -400,6 +404,8 @@ export default function DashboardPage() {
         title={tasksHook.title}
         priority={tasksHook.priority}
         dueDate={tasksHook.dueDate}
+        dueTime={tasksHook.dueTime}
+        startTime={tasksHook.startTime}
         estimatedMinutes={tasksHook.estimatedMinutes}
         creatingTask={tasksHook.creatingTask}
         tags={tasksHook.createTags}
@@ -409,6 +415,8 @@ export default function DashboardPage() {
         onTitleChange={tasksHook.setTitle}
         onPriorityChange={tasksHook.setPriority}
         onDueDateChange={tasksHook.setDueDate}
+        onDueTimeChange={tasksHook.setDueTime}
+        onStartTimeChange={tasksHook.setStartTime}
         onEstimatedMinutesChange={tasksHook.setEstimatedMinutes}
         onTagInputChange={tasksHook.setCreateTagInput}
         onAddTag={tasksHook.addCreateTag}

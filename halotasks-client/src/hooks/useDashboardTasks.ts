@@ -6,14 +6,16 @@ import { TaskSortOption, useTaskSorting } from './useTaskSorting';
 import { useTagSuggestions } from './useTagSuggestions';
 import { enqueueSyncAction } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
-import { Priority, Task, TaskCreatePayload } from '../types/task';
+import { Priority, Task, TaskCreatePayload, TaskUpdatePayload } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
 import { formatDateForInput } from '../utils/dateHelpers';
+import { isoToStartInput, isValidDueTime, startInputToIso } from '../utils/deadline';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 import { setCachedTasks } from '../offline/cache';
 import { updateTodaySnapshot } from '../offline/history';
 import type { TaskEditState } from '../components/dashboard/types';
 import type { SyncStatus } from './useDashboardSync';
+import { keepReminderIdentity } from '../reminders/identity';
 
 type AddTagResult = {
   message: string | null;
@@ -23,11 +25,6 @@ type AddTagResult = {
 const getTodayDateString = (): string => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate'> & {
-  completed?: boolean;
-  dueDate?: string | null;
 };
 
 type SyncBridge = {
@@ -65,6 +62,8 @@ export function useDashboardTasks({
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [dueDate, setDueDate] = useState(getTodayDateString);
+  const [dueTime, setDueTime] = useState('');
+  const [startTime, setStartTime] = useState('');
   const [createTags, setCreateTags] = useState<string[]>(['personal']);
   const [createTagInput, setCreateTagInput] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState('30');
@@ -131,6 +130,8 @@ export function useDashboardTasks({
       priority: payload.priority,
       tags: payload.tags ?? [],
       dueDate: payload.dueDate,
+      dueTime: payload.dueTime,
+      startTime: payload.startTime,
       estimatedMinutes: payload.estimatedMinutes ?? 0,
       reminderSent: false,
       createdAt: now,
@@ -206,6 +207,9 @@ export function useDashboardTasks({
         priority,
         tags: sanitizeTags(createTags),
         dueDate: dueDate || undefined,
+        // A due time only exists next to a due date; a start time is stored as the instant the user's local entry names.
+        dueTime: dueDate && isValidDueTime(dueTime) ? dueTime : undefined,
+        startTime: startInputToIso(startTime) ?? undefined,
         estimatedMinutes:
           estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
             ? parsedEstimatedMinutes
@@ -228,6 +232,8 @@ export function useDashboardTasks({
         setTitle('');
         setPriority('medium');
         setDueDate(getTodayDateString());
+        setDueTime('');
+        setStartTime('');
         setCreateTags(['personal']);
         setCreateTagInput('');
         setEstimatedMinutes('30');
@@ -240,6 +246,8 @@ export function useDashboardTasks({
       setTitle('');
       setPriority('medium');
       setDueDate(getTodayDateString());
+      setDueTime('');
+      setStartTime('');
       setCreateTags(['personal']);
       setCreateTagInput('');
       setEstimatedMinutes('30');
@@ -291,7 +299,7 @@ export function useDashboardTasks({
     try {
       setActiveActionTaskId(task._id);
       const response = await taskService.updateTask(task._id, { completed: nextCompleted });
-      persistTasks((current) => current.map((item) => (item._id === task._id ? response.task : item)));
+      persistTasks((current) => current.map((item) => (item._id === task._id ? keepReminderIdentity(response.task, item) : item)));
 
       applyServerGrowth(response.growth);
 
@@ -658,6 +666,8 @@ export function useDashboardTasks({
       tags: sanitizeTags(task.tags),
       tagInput: '',
       dueDate: formatDateForInput(task.dueDate),
+      dueTime: task.dueDate && isValidDueTime(task.dueTime) ? task.dueTime : '',
+      startTime: isoToStartInput(task.startTime),
       estimatedMinutes: task.estimatedMinutes > 0 ? String(task.estimatedMinutes) : '',
     });
   };
@@ -676,11 +686,21 @@ export function useDashboardTasks({
     setStatusInfo(null);
 
     const parsedEstimatedMinutes = Number(editState.estimatedMinutes);
+    // The start input only holds minutes. If the user did not change it, send the stored instant back untouched
+    // rather than a re-rounded copy, so saving an unrelated edit can never alter (or erase) a start time.
+    const existingStart = latestTasksRef.current.find((item) => item._id === taskId)?.startTime;
+    const startTimeValue =
+      editState.startTime === isoToStartInput(existingStart) && existingStart
+        ? existingStart
+        : startInputToIso(editState.startTime);
     const payload: TaskUpdatePayload = {
       title: editState.title.trim(),
       priority: editState.priority,
       tags: sanitizeTags(editState.tags),
       dueDate: editState.dueDate || null,
+      // Always sent, `null` meaning "clear": the server never keeps a due time without a due date.
+      dueTime: editState.dueDate && isValidDueTime(editState.dueTime) ? editState.dueTime : null,
+      startTime: startTimeValue,
       estimatedMinutes:
         editState.estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
           ? parsedEstimatedMinutes
@@ -697,6 +717,8 @@ export function useDashboardTasks({
                 priority: payload.priority ?? item.priority,
                 tags: payload.tags ?? item.tags,
                 dueDate: payload.dueDate ?? undefined,
+                dueTime: payload.dueTime ?? undefined,
+                startTime: payload.startTime ?? undefined,
                 estimatedMinutes: payload.estimatedMinutes ?? item.estimatedMinutes,
                 updatedAt: new Date().toISOString(),
                 pendingSync: true,
@@ -722,7 +744,7 @@ export function useDashboardTasks({
       setActiveActionTaskId(taskId);
       const response = await taskService.updateTask(taskId, payload);
 
-      persistTasks((current) => current.map((item) => (item._id === taskId ? response.task : item)));
+      persistTasks((current) => current.map((item) => (item._id === taskId ? keepReminderIdentity(response.task, item) : item)));
       applyServerGrowth(response.growth);
       handleCancelEditing();
       setStatusInfo('Task updated successfully.');
@@ -748,7 +770,15 @@ export function useDashboardTasks({
     priority,
     setPriority,
     dueDate,
-    setDueDate,
+    // A due time only exists next to a due date, so clearing the date clears the time too.
+    setDueDate: (value: string) => {
+      setDueDate(value);
+      if (!value) setDueTime('');
+    },
+    dueTime,
+    setDueTime,
+    startTime,
+    setStartTime,
     createTags,
     createTagInput,
     setCreateTagInput,

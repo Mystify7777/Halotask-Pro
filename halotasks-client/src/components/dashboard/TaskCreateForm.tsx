@@ -12,6 +12,8 @@ export type TaskCreateFormProps = {
   title: string;
   priority: Priority;
   dueDate: string;
+  dueTime: string;
+  startTime: string;
   estimatedMinutes: string;
   creatingTask: boolean;
   tags: string[];
@@ -23,6 +25,8 @@ export type TaskCreateFormProps = {
   onTitleChange: (value: string) => void;
   onPriorityChange: (value: Priority) => void;
   onDueDateChange: (value: string) => void;
+  onDueTimeChange: (value: string) => void;
+  onStartTimeChange: (value: string) => void;
   onEstimatedMinutesChange: (value: string) => void;
   onTagInputChange: (value: string) => void;
   onAddTag: (tag: string) => AddTagResult;
@@ -45,6 +49,8 @@ export default function TaskCreateForm({
   title,
   priority,
   dueDate,
+  dueTime,
+  startTime,
   estimatedMinutes,
   creatingTask,
   tags,
@@ -56,6 +62,8 @@ export default function TaskCreateForm({
   onTitleChange,
   onPriorityChange,
   onDueDateChange,
+  onDueTimeChange,
+  onStartTimeChange,
   onEstimatedMinutesChange,
   onTagInputChange,
   onAddTag,
@@ -110,6 +118,8 @@ export default function TaskCreateForm({
             title={title}
             priority={priority}
             dueDate={dueDate}
+            dueTime={dueTime}
+            startTime={startTime}
             estimatedMinutes={estimatedMinutes}
             tags={tags}
             tagInput={tagInput}
@@ -120,6 +130,8 @@ export default function TaskCreateForm({
             onTitleChange={onTitleChange}
             onPriorityChange={onPriorityChange}
             onDueDateChange={onDueDateChange}
+            onDueTimeChange={onDueTimeChange}
+            onStartTimeChange={onStartTimeChange}
             onEstimatedMinutesChange={onEstimatedMinutesChange}
             onTagInputChange={onTagInputChange}
             onAddTag={onAddTag}

@@ -5,6 +5,7 @@ import { processSyncQueue } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
 import type { Task } from '../types/task';
+import { keepReminderIdentity } from '../reminders/identity';
 import type { GrowthResult } from '../growth/treeTypes';
 
 export type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline' | 'errors-pending';
@@ -66,16 +67,22 @@ export function useDashboardSync({
     const result = await processSyncQueue({
       onTaskCreated: (localTaskId, serverTask) => {
         persistTasks((current) =>
-          current.map((task) => (task._id === localTaskId ? { ...serverTask, pendingSync: false } : task)),
+          current.map((task) =>
+            task._id === localTaskId ? { ...keepReminderIdentity(serverTask, task, localTaskId), pendingSync: false } : task,
+          ),
         );
       },
       onTaskUpdated: (taskId, serverTask) => {
-        persistTasks((current) => current.map((task) => (task._id === taskId ? { ...serverTask, pendingSync: false } : task)));
+        persistTasks((current) =>
+          current.map((task) => (task._id === taskId ? { ...keepReminderIdentity(serverTask, task), pendingSync: false } : task)),
+        );
       },
       onTaskDeleted: (taskId) => {
         persistTasks((current) => current.filter((task) => task._id !== taskId));
       },
       onGrowth: (growth) => applyServerGrowth?.(growth),
+      onDueTimeConflict: () =>
+        setStatusInfo('A due time was not saved because the task’s due date was removed elsewhere. Your other changes were kept.'),
     });
 
     if (result.remaining > 0) {
@@ -94,7 +101,9 @@ export function useDashboardSync({
     setSyncStatus('syncing');
 
     const response = await taskService.getTasks();
-    const freshTasks = response.tasks.map((task) => ({ ...task, pendingSync: false }));
+    // The server does not know the local id a task was created under; carry it over from the cached copy.
+    const cachedById = new Map((await getCachedTasks()).map((task) => [task._id, task]));
+    const freshTasks = response.tasks.map((task) => ({ ...keepReminderIdentity(task, cachedById.get(task._id)), pendingSync: false }));
     setTasks(freshTasks);
     await setCachedTasks(freshTasks);
 

@@ -45,13 +45,18 @@ export default function TaskEditForm({
         title={editState.title}
         priority={editState.priority}
         dueDate={editState.dueDate}
+        dueTime={editState.dueTime}
+        startTime={editState.startTime}
         estimatedMinutes={editState.estimatedMinutes}
         tags={editState.tags}
         tagInput={editState.tagInput}
         tagSuggestions={editTagSuggestions}
         onTitleChange={(value) => patch(onEditStateChange, { title: value })}
         onPriorityChange={(value) => patch(onEditStateChange, { priority: value as Priority })}
-        onDueDateChange={(value) => patch(onEditStateChange, { dueDate: value })}
+        // A due time only exists next to a due date, so clearing the date clears the time with it.
+        onDueDateChange={(value) => patch(onEditStateChange, value ? { dueDate: value } : { dueDate: '', dueTime: '' })}
+        onDueTimeChange={(value) => patch(onEditStateChange, { dueTime: value })}
+        onStartTimeChange={(value) => patch(onEditStateChange, { startTime: value })}
         onEstimatedMinutesChange={(value) => patch(onEditStateChange, { estimatedMinutes: value })}
         onTagInputChange={(value) => patch(onEditStateChange, { tagInput: value })}
         onAddTag={onAddEditTag}
