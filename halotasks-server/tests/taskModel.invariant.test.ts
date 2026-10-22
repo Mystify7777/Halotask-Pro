@@ -13,7 +13,7 @@ const userId = new mongoose.Types.ObjectId();
 const base = { userId, title: 'x' };
 
 beforeAll(async () => {
-  Task = (await import('../src/models/Task.model')).default;
+  Task = (await import('../src/models/Task.model.js')).default;
 });
 
 const update = (u: Record<string, unknown>) =>

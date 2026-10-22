@@ -19,6 +19,17 @@
     {
       "date": "2026-10-22",
       "category": "Backend",
+      "title": "fix emitted module extension in task model invariant test",
+      "description": "Updated the Task model import in taskModel.invariant.test.ts to use the emitted .js extension, matching the server's ESM/NodeNext module resolution and allowing the invariant test to load the model correctly.",
+      "files": [
+        "halotasks-server/tests/taskModel.invariant.test.ts"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-10-22",
+      "category": "Backend",
       "title": "explicit error code for the offline due-time conflict (Issue #43)",
       "description": "The 409 for a due-time edit whose due date was removed now carries code TASK_DUE_DATE_REMOVED in the existing { message, code } shape; other misses keep the plain 409. The offline queue recovers only on that exact code (object body, strict equality) plus an edit with a dueTime, instead of treating any 409 with that payload shape as the conflict. Recovery stays bounded to one extra request per run. Tests cover the server contract, matching and non-matching codes, malformed bodies, and bounded retries. Real-MongoDB assertion added to taskTimes.realmongo.test.ts is not executed in the sandbox.",
       "files": [
