@@ -21,16 +21,27 @@ export const withConsistentDeadline = <T extends { dueDate?: string | null; dueT
 };
 
 /**
- * The server answers 409 to an update that sets a due time and relies on the task's stored due date when that date was
- * removed meanwhile (for example on another device). The edit is not wrong, the world changed under it, so it must not
- * be discarded like a permanent 4xx. See reconcileDueDateConflict.
+ * The `code` the server puts in the body of the 409 it returns when an update sets a due time against the stored due
+ * date and that date was removed before the write (Issue #43). Must match halotasks-server TASK_DUE_DATE_REMOVED.
  */
-const isDueDateConflict = (error: unknown, payload: TaskUpdatePayload): boolean =>
-  httpStatusOf(error) === 409 && typeof payload.dueTime === 'string' && payload.dueDate === undefined;
+export const TASK_DUE_DATE_REMOVED = 'TASK_DUE_DATE_REMOVED';
 
 /**
- * Reconciliation for that conflict, bounded to ONE extra request per queue run (never a retry loop): resend the edit
- * with its due time cleared. Every other field of the edit still lands, and the server's answer, which has no due date,
+ * True only for that exact conflict: a 409 whose body is an object with `code` strictly equal to the code above. The
+ * message text and the payload are never consulted for the decision, and any other shape (no body, a string, an
+ * array, a missing, wrong-typed or different code) is NOT this conflict, so every other 409 takes the normal error
+ * path. The edit must also carry a due time, since that is what the recovery sends again, cleared.
+ */
+const isDueDateConflict = (error: unknown, payload: TaskUpdatePayload): boolean => {
+  if (httpStatusOf(error) !== 409 || typeof payload.dueTime !== 'string') return false;
+  const body = (error as { response?: { data?: unknown } }).response?.data;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
+  return (body as { code?: unknown }).code === TASK_DUE_DATE_REMOVED;
+};
+
+/**
+ * Recovery for that conflict, bounded to ONE extra request per queue run (never a retry loop): resend the edit with
+ * its due time cleared. Every other field of the edit still lands, and the server's answer, which has no due date,
  * replaces the local copy so the UI stops showing a time the server cannot hold. The user is told (onDueTimeConflict)
  * that the due time was not kept. If this request itself fails, the original entry is kept or handled like any other
  * failure; nothing is retried in a loop.

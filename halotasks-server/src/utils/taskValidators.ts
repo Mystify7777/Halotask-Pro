@@ -39,6 +39,13 @@ export function parseDueDate(raw: unknown): { ok: true; value: Date | undefined 
 export const isClearValue = (raw: unknown): boolean => raw === null || raw === '';
 
 /**
+ * Machine-readable `code` of the 409 returned when an update sets a dueTime against the stored dueDate and that date
+ * was removed before the write (Issue #43). Stable API contract: clients branch on it, never on the message. Specific
+ * to this conflict; no other response uses it.
+ */
+export const TASK_DUE_DATE_REMOVED = 'TASK_DUE_DATE_REMOVED';
+
+/**
  * Due time (Issue #10): a wall-clock time of day, `HH:mm` in 24-hour form. It only means something next to a due
  * date (the deadline is that calendar day plus this time, read in the viewer's local zone), so it is never an
  * instant and never carries a zone.

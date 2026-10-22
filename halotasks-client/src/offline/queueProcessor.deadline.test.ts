@@ -30,7 +30,11 @@ import { taskService } from '../services/taskService';
 import { processSyncQueue, withConsistentDeadline } from './queueProcessor';
 
 const USER = { id: 'user-a', name: 'Alice', email: 'a@example.com' };
-const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { response: { status } });
+const httpError = (status: number, data?: unknown) => Object.assign(new Error(`HTTP ${status}`), { response: { status, data } });
+const CODE = 'TASK_DUE_DATE_REMOVED';
+const MESSAGE = 'Task changed while it was being updated; reload and try again';
+/** The exact 409 the server sends when a due-time edit finds its due date gone (halotasks-server task.controller). */
+const dueDateConflict = () => httpError(409, { message: MESSAGE, code: CODE });
 const serverTask = (id: string, extra: Partial<Task> = {}) => ({ task: { _id: id, ...extra } as Task });
 const callbacks = () => ({ onTaskCreated: vi.fn(), onTaskUpdated: vi.fn(), onTaskDeleted: vi.fn() });
 const queue = () => getSyncQueue(USER.id);
@@ -211,16 +215,17 @@ describe('legacy queue entries (queued before these fields existed)', () => {
   });
 });
 
-// Review follow-up: the server answers 409 to an update that sets a due time while relying on the stored due date, when
-// that date was removed meanwhile. The real queue processor, real queue storage and real status handling run here; only
-// the HTTP service is replaced, so these prove what the client does with the response, not what the server returns.
-describe('409: a due-time edit whose due date was removed elsewhere is reconciled, not discarded', () => {
+// The server answers 409 + code TASK_DUE_DATE_REMOVED to an update that sets a due time against the stored due date when
+// that date was removed meanwhile (Issue #43). The real queue processor, real queue storage and real status handling run
+// here; only the HTTP service is replaced, so these prove what the client does with the response, not what the server
+// returns (tests/taskRoutes.test.ts and tests/taskTimes.realmongo.test.ts pin the server side of the contract).
+describe('409 TASK_DUE_DATE_REMOVED: a due-time edit whose due date was removed elsewhere is reconciled, not discarded', () => {
   const lastCall = (n: number) => vi.mocked(taskService.updateTask).mock.calls[n];
 
   it('resends the edit with the due time cleared, adopts the server task and reports the conflict', async () => {
     await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { title: 'Renamed', dueTime: '09:00' } });
     vi.mocked(taskService.updateTask)
-      .mockRejectedValueOnce(httpError(409))
+      .mockRejectedValueOnce(dueDateConflict())
       .mockResolvedValueOnce(serverTask('srv-1', { title: 'Renamed' }));
     const cb = { ...callbacks(), onDueTimeConflict: vi.fn() };
 
@@ -237,7 +242,7 @@ describe('409: a due-time edit whose due date was removed elsewhere is reconcile
 
   it('a due-time-only edit is reconciled the same way (so the cached task is replaced by the server truth)', async () => {
     await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { dueTime: '09:00' } });
-    vi.mocked(taskService.updateTask).mockRejectedValueOnce(httpError(409)).mockResolvedValueOnce(serverTask('srv-1'));
+    vi.mocked(taskService.updateTask).mockRejectedValueOnce(dueDateConflict()).mockResolvedValueOnce(serverTask('srv-1'));
     const cb = callbacks();
 
     await processSyncQueue(cb);
@@ -248,7 +253,7 @@ describe('409: a due-time edit whose due date was removed elsewhere is reconcile
 
   it('is bounded: if the reconciling request fails transiently the ORIGINAL entry is kept, with one extra request per run', async () => {
     await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { title: 'Renamed', dueTime: '09:00' } });
-    vi.mocked(taskService.updateTask).mockRejectedValueOnce(httpError(409)).mockRejectedValueOnce(httpError(503));
+    vi.mocked(taskService.updateTask).mockRejectedValueOnce(dueDateConflict()).mockRejectedValueOnce(httpError(503));
     const cb = { ...callbacks(), onDueTimeConflict: vi.fn() };
 
     const result = await processSyncQueue(cb);
@@ -260,44 +265,122 @@ describe('409: a due-time edit whose due date was removed elsewhere is reconcile
     expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
 
     // The next run is again exactly one conflict plus one reconciling request, never an unbounded loop.
-    vi.mocked(taskService.updateTask).mockRejectedValueOnce(httpError(409)).mockRejectedValueOnce(httpError(503));
+    vi.mocked(taskService.updateTask).mockRejectedValueOnce(dueDateConflict()).mockRejectedValueOnce(httpError(503));
     await processSyncQueue(callbacks());
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(4);
+  });
+
+  it('cannot loop: if the reconciling request is answered with the SAME conflict there is no third request and no further recovery', async () => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { title: 'x', dueTime: '09:00' } });
+    vi.mocked(taskService.updateTask).mockRejectedValue(dueDateConflict());
+    const cb = { ...callbacks(), onDueTimeConflict: vi.fn() };
+
+    const result = await processSyncQueue(cb);
+
+    expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(2);
+    expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
+    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 }); // handled by the normal permanent-4xx path
   });
 
   it('if the reconciling request is rejected with a 401 the entry and everything after it are kept', async () => {
     await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { dueTime: '09:00' } });
     await enqueueSyncAction({ type: 'update', taskId: 'srv-2', payload: { title: 'later' } });
-    vi.mocked(taskService.updateTask).mockRejectedValueOnce(httpError(409)).mockRejectedValueOnce(httpError(401));
+    vi.mocked(taskService.updateTask).mockRejectedValueOnce(dueDateConflict()).mockRejectedValueOnce(httpError(401));
 
     const result = await processSyncQueue(callbacks());
 
     expect(result.remaining).toBe(2);
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(2);
   });
+});
+
+describe('every other 409 takes the normal error path (no recovery, no extra request)', () => {
+  const DUE_TIME_EDIT = { title: 'x', dueTime: '09:00' };
 
   it.each([
-    ['no due time in the edit', { title: 'x' }],
-    ['a due date in the same edit (the server does not rely on the stored date)', { dueDate: '2026-10-22', dueTime: '09:00' }],
-    ['a due time clear', { dueTime: null }],
-  ])('a 409 for %s is not this conflict: no extra request, handled as before (discarded)', async (_label, payload) => {
-    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload });
-    vi.mocked(taskService.updateTask).mockRejectedValue(httpError(409));
+    ['an unrelated 409 with a different code', { message: 'Email already registered', code: 'EMAIL_TAKEN' }],
+    ['the same message but NO code', { message: MESSAGE }],
+    ['the same message with a different code', { message: MESSAGE, code: 'SOMETHING_ELSE' }],
+    ['the right code in the wrong case', { message: MESSAGE, code: 'task_due_date_removed' }],
+    ['the right code with whitespace', { message: MESSAGE, code: ` ${CODE} ` }],
+    ['the code as an array', { message: MESSAGE, code: [CODE] }],
+    ['the code as a number', { message: MESSAGE, code: 409 }],
+    ['the code as an object', { message: MESSAGE, code: { value: CODE } }],
+    ['a null code', { message: MESSAGE, code: null }],
+    ['the code nested one level down', { message: MESSAGE, error: { code: CODE } }],
+    ['no body at all', undefined],
+    ['a null body', null],
+    ['a string body that mentions the code', CODE],
+    ['an array body', [{ code: CODE }]],
+    ['an empty object', {}],
+  ])('409 with %s: one request, discarded as before, no notification', async (_label, data) => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: DUE_TIME_EDIT });
+    vi.mocked(taskService.updateTask).mockRejectedValue(httpError(409, data));
     const cb = { ...callbacks(), onDueTimeConflict: vi.fn() };
 
     const result = await processSyncQueue(cb);
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(cb.onTaskUpdated).not.toHaveBeenCalled();
     expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Discarding permanently failed entry'), 'update', 'srv-1', expect.anything());
   });
 
-  it('other permanent errors on a due-time edit are still discarded without a reconciling request', async () => {
-    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { dueTime: '09:00' } });
-    vi.mocked(taskService.updateTask).mockRejectedValue(httpError(404));
+  it('an error with no response at all is a transient failure: the entry is kept, nothing is recovered', async () => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: DUE_TIME_EDIT });
+    vi.mocked(taskService.updateTask).mockRejectedValue(new Error('Network Error'));
+
+    const result = await processSyncQueue(callbacks());
+
+    expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ processed: 0, failed: 1, remaining: 1 });
+  });
+
+  it('the right code on an edit with no due time is not recovered (there is nothing to clear)', async () => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { title: 'x' } });
+    vi.mocked(taskService.updateTask).mockRejectedValue(dueDateConflict());
+
+    const result = await processSyncQueue(callbacks());
+
+    expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+  });
+
+  it('the right code on a due-time CLEAR (null) is not recovered either', async () => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { dueTime: null } });
+    vi.mocked(taskService.updateTask).mockRejectedValue(dueDateConflict());
 
     await processSyncQueue(callbacks());
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([404, 400, 403, 422])('a %i on a due-time edit is still discarded without a reconciling request', async (status) => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: DUE_TIME_EDIT });
+    vi.mocked(taskService.updateTask).mockRejectedValue(httpError(status, { message: MESSAGE, code: CODE }));
+
+    await processSyncQueue(callbacks());
+
+    expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 429, 500, 503])('a transient %i on a due-time edit keeps the entry, as before', async (status) => {
+    await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: DUE_TIME_EDIT });
+    vi.mocked(taskService.updateTask).mockRejectedValue(httpError(status));
+
+    const result = await processSyncQueue(callbacks());
+
+    expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
+    expect(result.remaining).toBe(1);
+  });
+
+  it('a 409 carrying the code on a create is never recovered', async () => {
+    await enqueueSyncAction({ type: 'create', taskId: 'local-1', payload: { ...TIMED } });
+    vi.mocked(taskService.createTask).mockRejectedValue(dueDateConflict());
+    const result = await processSyncQueue(callbacks());
+    expect(vi.mocked(taskService.createTask)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(taskService.updateTask)).not.toHaveBeenCalled();
+    expect(result.remaining).toBe(0);
   });
 });

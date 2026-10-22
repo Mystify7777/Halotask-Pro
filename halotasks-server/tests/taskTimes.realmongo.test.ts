@@ -305,6 +305,8 @@ describe('real MongoDB: concurrent requests', () => {
       // because the date was already gone: 400 if it saw that when it read, 409 if it changed between read and write.
       expect(cleared.status, `round ${round}: clear -> ${JSON.stringify(cleared.body)}`).toBe(200);
       expect([200, 400, 409], `round ${round}: set time -> ${timed.status} ${JSON.stringify(timed.body)}`).toContain(timed.status);
+      // A 409 here is always the recoverable conflict, and says so with the documented code (Issue #43).
+      if (timed.status === 409) expect(timed.body, `round ${round}`).toEqual({ message: expect.any(String), code: 'TASK_DUE_DATE_REMOVED' });
       outcomes.add(String(timed.status));
 
       const doc = await raw(id);

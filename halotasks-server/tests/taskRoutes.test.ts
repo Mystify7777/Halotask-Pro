@@ -17,6 +17,7 @@ const db = vi.hoisted(() => ({
   nextId: 1,
   /** Runs inside findOneAndUpdate before the write, to simulate another request landing between a read and a write. */
   beforeUpdate: undefined as (() => void) | undefined,
+  beforeNextFindOne: undefined as (() => void) | undefined,
 }));
 
 const OWNER_A = '665f1c2e9b1e8a00000000aa';
@@ -65,6 +66,9 @@ async function loadApp(): Promise<Express> {
       },
       findOne: async (filter: Record<string, unknown>) => {
         db.queries.push({ op: 'findOne', filter });
+        const hook = db.beforeNextFindOne;
+        db.beforeNextFindOne = undefined;
+        hook?.();
         return owns(filter);
       },
       findOneAndUpdate: async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
@@ -110,6 +114,7 @@ beforeEach(() => {
   db.queries.length = 0;
   db.nextId = 1;
   db.beforeUpdate = undefined;
+  db.beforeNextFindOne = undefined;
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
@@ -529,8 +534,52 @@ describe('start time and due time (Issues #9, #10)', () => {
       const res = await update(app, id, { dueTime: '09:00' });
 
       expect(res.status).toBe(409);
+      // Issue #43: a stable machine-readable code, in the existing { message, code } error shape.
+      expect(res.body).toEqual({ message: 'Task changed while it was being updated; reload and try again', code: 'TASK_DUE_DATE_REMOVED' });
       expect(db.tasks.get(id)?.dueTime).toBeUndefined();
       expect(db.tasks.get(id)?.dueDate).toBeUndefined();
+    });
+
+    it('answers the plain 409, with no code, when the task was deleted between the read and the write (not the recoverable conflict)', async () => {
+      const app = await loadApp();
+      const id = (await create(app, { dueDate: '2026-10-20' })).body.task._id as string;
+      db.beforeUpdate = () => {
+        db.tasks.delete(id);
+      };
+
+      const res = await update(app, id, { dueTime: '09:00' });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ message: 'Task changed while it was being updated; reload and try again' });
+      expect(res.body).not.toHaveProperty('code');
+    });
+
+    it('answers 409 WITHOUT the code when the due date is back by the time the conflict is re-read', async () => {
+      const app = await loadApp();
+      const id = (await create(app, { dueDate: '2026-10-20' })).body.task._id as string;
+      db.beforeUpdate = () => {
+        delete db.tasks.get(id)!.dueDate; // gone for the write ...
+        db.beforeNextFindOne = () => {
+          db.tasks.get(id)!.dueDate = new Date('2026-10-21'); // ... and set again before the re-read
+        };
+      };
+
+      const res = await update(app, id, { dueTime: '09:00' });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ message: 'Task changed while it was being updated; reload and try again' });
+      expect(res.body).not.toHaveProperty('code');
+    });
+
+    it('no other response carries the code: validation errors and successes', async () => {
+      const app = await loadApp();
+      const id = (await create(app, { title: 'no date' })).body.task._id as string;
+      const noDate = await update(app, id, { dueTime: '09:00' });
+      expect(noDate.status).toBe(400);
+      expect(noDate.body).not.toHaveProperty('code');
+      const ok = await update(app, id, { title: 'renamed' });
+      expect(ok.status).toBe(200);
+      expect(JSON.stringify(ok.body)).not.toContain('TASK_DUE_DATE_REMOVED');
     });
   });
 

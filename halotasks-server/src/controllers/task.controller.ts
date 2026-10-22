@@ -10,6 +10,7 @@ import {
   DESCRIPTION_MAX_LENGTH,
   TAGS_MAX_COUNT,
   TAG_MAX_LENGTH,
+  TASK_DUE_DATE_REMOVED,
   TITLE_MAX_LENGTH,
   isClearValue,
   isNonEmptyTitle,
@@ -370,8 +371,13 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
 
     if (!task && relyOnStoredDueDate) {
       // The task existed a moment ago (read above), so the only way to miss is that its due date was removed or the
-      // task was deleted in between. Nothing was written.
-      return res.status(409).json({ message: 'Task changed while it was being updated; reload and try again' });
+      // task was deleted in between. Nothing was written. Read it again to say which: only "the due date is gone"
+      // carries the code that clients recover from (Issue #43). Every other miss keeps the plain 409 it always had.
+      const latest = await Task.findOne({ _id: req.params.id, userId: req.user.id });
+      const message = 'Task changed while it was being updated; reload and try again';
+      return res
+        .status(409)
+        .json(latest && latest.dueDate == null ? { message, code: TASK_DUE_DATE_REMOVED } : { message });
     }
 
     return res.json({ task, ...(growth ? { growth } : {}) });
