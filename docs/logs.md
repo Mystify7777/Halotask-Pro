@@ -33,15 +33,23 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 **2026-10-22 · Backend · completed · Priority: medium**
 
+##### Implementation and behavior
+
 The only production task writers are POST and PUT in task.controller.ts (no bulk, import or sync write path exists), and both were already guarded.
 
 The rule now also lives in Task.model.ts so direct Mongoose writes cannot bypass it: pre('validate') for documents (cascade-clear when the date of a loaded task is cleared, reject otherwise, also with validateModifiedOnly), guardDeadlineUpdate for findOneAndUpdate/updateOne/updateMany and bulkWrite update ops (stored-date condition added to the write for a lone dueTime, cascaded $unset when the date is removed, refusal of contradictory, upsert, pipeline and unsupported-operator shapes), and replacement checks.
 
+##### Boundaries and limitations
+
 Unprotected by design: native driver writes, shell writes, pre-existing data.
+
+##### Tests and evidence
 
 New DB-less tests (tests/taskModel.writePaths.test.ts) record the commands Mongoose sends; the real-MongoDB suite tests/taskWritePaths.realmongo.test.ts (conditional writes, atomic cascade, concurrent direct writers) was NOT executed in the sandbox because MongoDB cannot be downloaded here.
 
 Also fixed typecheck:tests, which failed on the Issue #9/#10 invariant test's import typing.
+
+##### Review hardening
 
 Review follow-up: closed the bypasses where Mongoose validation is disabled: bulkWrite insertOne with skipValidation, insertMany with lean, Model.bulkSave, and save/create/insertOne with validateBeforeSave:false (insertOne documents and insertMany entries are now checked explicitly, and the document rule also runs as a save hook; a date must be usable, not just present).
 
@@ -83,6 +91,8 @@ Review follow-up: offline 409 on a due-time edit is reconciled (one bounded rese
 
 **2026-10-18 · Backend · completed · Priority: medium**
 
+##### Scope
+
 Test-only change; no production code changed.
 
 Issue #24 (server-authoritative Growth Tree) was already implemented; these tests add coverage of its atomicity and failure handling against a real MongoDB. tests/treeAward.realmongo.test.ts gains award-level concurrency cases (8 and 25 different-task awards for one user, a legacy tree under the same burst, two users awarded the same task ids with a bystander document left byte-identical).
@@ -95,6 +105,8 @@ Concurrent bursts (PUT of different tasks on a new and on an adopted account, du
 
 Deterministic failure paths (new helper tests/helpers/driverFaults.ts rejects exactly one planned driver command and passes everything else to the real database) cover PUT with a failed derived write, award or task write, and POST with a failed derived write, derived write plus read-back, award, and award plus cleanup (the documented, accepted gap), each checking task, ledger, xp and reconciliation state and the retry.
 
+##### Execution evidence
+
 Execution status, kept separate on purpose.
 
 Earlier sandbox runs: the MongoDB binary download was blocked, so api.routes, treeAward.realmongo and treeRoutes.realmongo could not start (33 files passed, 3 failed with DownloadError; 1526 tests passed, 73 skipped); that run says nothing about the new tests.
@@ -103,7 +115,11 @@ Maintainer run on Windows against a real MongoDB (full server suite): 36 files p
 
 Not yet run in CI.
 
+##### Known gap and limitations
+
 Limits of that evidence: the one todo is a KNOWN GAP, a POST whose award fails and whose cleanup also fails leaves a completed task with no award and the retry makes a second task (characterised by a test, not fixed, tracked in its own issue), so the Growth Tree is not shown to have complete failure-path integrity; the fault-trace assertions cover only the commands the helper wraps.
+
+##### Test harness and coverage
 
 The fault helper is covered by MongoDB-free tests/driverFaults.test.ts (nothing fails unless planned, a fault hits only its named command, reset() cannot leak plans, restore() is idempotent) and records an ordered command trace so the read-back tests prove which command was failed.
 
@@ -115,15 +131,21 @@ The award-plus-cleanup case is labelled a KNOWN GAP (characterised, not endorsed
 
 The client used import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000', and Vite inlines that value at build time, so a production build without the variable succeeded and shipped a bundle that called localhost.
 
+##### Validation contract
+
 Validation now lives in one pure helper (src/config/apiBaseUrl.ts: resolveApiBaseUrl, ApiBaseUrlError).
 
 Missing or blank means the localhost default in development and an error in production; a set value must be an absolute http:// or https:// origin (no path, query, fragment or credentials) in every mode, and is normalised to its origin.
 
 Errors never echo the rejected value.
 
+##### Build integration
+
 Two callers: a Vite plugin in vite.config.ts checks the env Vite resolved during vite build (the primary guard, so a bad configuration fails the build), and services/api.ts resolves the same value at module load as a backstop.
 
 CI sets a non-secret placeholder VITE_API_BASE_URL on the verify step because the production build now requires it; the README and .env.example document the setting and that on Vercel it must be set before the build.
+
+##### Tests and evidence
 
 Tests: pure helper table tests, apiClient baseURL wiring, and the real vite.config.ts build guard via resolveConfig.
 
@@ -133,15 +155,21 @@ Tests: pure helper table tests, apiClient baseURL wiring, and the real vite.conf
 
 The Axios response interceptor used to clear auth and redirect to /login on ANY 401, so a delayed 401 for account A (logged out, then B signed in while the request was in flight) signed B out.
 
+##### Session-aware handling
+
 Each request is now stamped by the request interceptor with the auth store's in-memory sessionGeneration (0 at startup, +1 on every setAuth and clearAuth, never persisted and not a credential); on a 401 the request counts as the current session's only if its generation is still current AND the bearer token it was sent with (read back from its Authorization header) is still the credential in use, so a re-login with an identical token string is a different session, and, while this tab's store is empty, the stored token being replaced by another tab is caught too.
 
 A request sent while signed out still counts as current while nobody has signed in, so the login form's own 401 behaves as before.
 
 The redirect moved behind an exported authRedirect.toLogin seam so tests can observe it.
 
+##### Storage and queue boundaries
+
 The store/storage invariant is documented in authStore (within a tab the token and storage change together, only in setAuth/clearAuth/hydration; a non-null store token always wins over storage, and there is no cross-tab synchronization, so a tab that holds a token does not notice another tab's sign-in or sign-out).
 
 Offline queue ownership is unchanged (bound sessions are still verified before send); a queued request refused with 401 after an account switch keeps its entry and leaves the new session alone.
+
+##### Tests and evidence
 
 Tests: services/api.session401.test.ts (35: current-session 401, stale 401, concurrent requests, rapid switching, identical-token re-login, store/storage fallback states, hydration, normal responses) and two queue tests in offline/queueProcessor.credentials.test.ts, all deterministic via held adapter promises.
 
@@ -175,6 +203,8 @@ The owner confirmed it was a disposable, normal user account meant for guest log
 
 **2026-10-11 · Backend · completed · Priority: high**
 
+##### Rules and API behavior
+
 define Growth Tree reset and recovery rules (Issue #16): one authoritative server rules module (utils/treeRules.ts: deriveTreeStatus, replayAwardDays, presentTreeState) with exclusive statuses on the UTC calendar day.
 
 After one missed day (gap 2) the effective streak is 0 and the tree is wilting; after two or more (gap >= 3) it is 0 and dead; a completion yesterday is at_risk (streak kept, healthy); one completion restores healthy immediately, the streak restarting at 1 unless it was done yesterday.
@@ -191,11 +221,17 @@ The history is capped at 20,000 days and never truncated: a new day that would n
 
 A legacy tree adopts its history in one pinned write (the days implied by its stored streak plus any day left in the old marker, which is removed); activity before the first recorded day is not reconstructible, and that is documented, not claimed.
 
+##### Client behavior
+
 Client: non-authoritative copy (deriveTreeStatus, nextStreak, applyEffectiveStatus) replaces updateStreakState and fixes the devices-disagree bug (server returned the stored streak at 3+ idle days while the client reset it); GrowthTree and Insights show per-status copy that never implies XP or stage is lost.
 
 UTC-day limitation documented (IST example).
 
+##### Tests and evidence
+
 Tests: server treeRules, treeAward and treeRoutes (thresholds, UTC midnight boundary, recovery, replay equivalence, read-only, XP/stage invariants); client parity (byte-identical STATUS_CASES), GrowthTree, treeStorage.
+
+##### Recovery and edge-case hardening
 
 Review follow-up: the effective state is folded from the retained history in memory (reads still never write), so the award fallback response and GET show a recorded-but-unreconciled completion as a restored tree (regression tests force the derived write to fail on POST and PUT, then check the fallback and a later GET, and that storage is untouched).
 
@@ -203,7 +239,11 @@ Clock skew: a recorded award for today is no longer skipped when the stored last
 
 A zero-streak legacy record that is 2 or 3+ days old now follows the wilting/dead thresholds; unrecorded applies only when gap <= 1 (docs, code and both parity tables aligned, stale zero-streak rows added).
 
+##### Additional verification
+
 Tests added for the history: atomic recording, one entry per day, adoption of legacy streaks and markers (including concurrent first awards and a future date), the cap (refuse a new day, accept a held day, last slot), repair of a stale or wrong copy from the history, and property tests (the fold equals day-by-day nextStreak; random mixes of days, failed derived writes, retries and concurrency leave storage equal to the fold of the recorded days).
+
+##### Migration validation and CI
 
 Review round 4: legacy adoption is bounded (the whole set is validated before the write; if it cannot fit, history_full and the legacy record is untouched; nothing is clamped); stored history is validated strictly (non-array, over the cap, invalid dates, duplicates give conflict with nothing rewritten, via a pre-flight read); migration edge cases (zero streak, missing/invalid last-active date, a date two or more days ahead) infer no days and fabricate no streak, a date one day ahead counts as today; the randomized test now derives its expectations from the actual atomic award log with deterministic injected failures; tests/treeAward.realmongo.test.ts runs concurrent adoption, malformed history and cap behavior against a real mongod; .github/workflows/server-tests.yml runs the full server suite (including api.routes) and the client suite.
 
@@ -211,11 +251,15 @@ Review round 4: legacy adoption is bounded (the whole set is validated before th
 
 **2026-10-08 · Backend · completed · Priority: high**
 
+##### Award authority and idempotency
+
 XP and the awarded-task ledger are now created only by the server.
 
 PUT /api/tasks/:id (incomplete -> complete) and POST /api/tasks (created already completed, the offline create-then-complete path) call utils/treeAward.ts, which awards +10 XP with one atomic conditional MongoDB update on the user document ($ne ledger check + ledger-has-room + xp-range guard, $inc xp and $push taskId together) followed by a compare-and-set write of streak, date and derived fields.
 
 Awards are idempotent per task id: retries, duplicates, concurrent requests and uncomplete -> re-complete never award twice, and concurrent completions of different tasks keep all XP.
+
+##### Failure and recovery semantics
 
 Failure semantics: a failed award fails a PUT before the task is written; a failed task write after an award is retried without a second award; a failed award on POST deletes the just-created task.
 
@@ -227,11 +271,17 @@ PATCH /api/tree now rejects every reward field with 400 TREE_FIELD_NOT_WRITABLE.
 
 Task responses carry an additive growth block.
 
+##### Client contract
+
 Client: initTreeStorage adopts the server tree (no higher-XP-wins merge, no pushes), treeService.patchTree and setTreeState removed, applyServerGrowth adopts the server's answer (stale lower-XP responses ignored), offline completions are an in-memory preview replaced by the server's tree after sync (processSyncQueue onGrowth).
+
+##### Tests and evidence
 
 Tests: server treeRules, treeAward (strict atomic in-memory User double), treeAward.mongoose (exact Mongoose command), treeRoutes (HTTP); client treeStorage, useDashboardGrowth, queueProcessor.growth, rules parity.
 
 Streak/health reset semantics are unchanged and remain Issue #16.
+
+##### Persisted recovery protocol
 
 Recovery: step 1 also records the award's UTC day in a server-internal marker set (treeState.pendingDerivedDays, $addToSet, so every unreconciled day survives across several days of failures) in the same atomic update, and step 2 clears it in its compare-and-set after replaying the streak transition for each recorded day, oldest first.
 
@@ -373,11 +423,15 @@ Noticed, out of scope: Settings -> Change password sends a signed-in user to /fo
 
 **2026-10-02 · Backend · completed · Priority: high**
 
+##### Subscription validation and storage
+
 Subscribe now validates the endpoint (string <= 2048, no whitespace/control chars, valid https URL, no credentials, default port, DNS-name host only: no IP literal in any spelling, no localhost/single-label/.local/.internal), p256dh (unpadded canonical base64url, exactly 65 bytes) and auth (exactly 16 bytes) per RFC 8291, and expirationTime (null/omitted or a future integer ms); only endpoint, expirationTime and keys are stored.
 
 Dedup and the per-user bound are atomic: the old $pull-then-$push (which could duplicate under concurrent requests) is replaced by single-document conditional updates (refresh in place via the positional operator; else $ne-guarded $push with $each + $slice -10; else refresh if a concurrent request stored it), so duplicates are impossible and a user never holds more than 10 subscriptions; the newest wins and the oldest is dropped so legitimate users with stale endpoints can always register a new device.
 
 Unsubscribe requires a non-empty string endpoint <= 2048 (rejecting operator objects like { $ne } that previously reached the $pull and could delete all of a user's subscriptions); unknown endpoints remain a 200 no-op.
+
+##### Relay and delivery behavior
 
 Relay validates title (<= 100), body (<= 500) and tag (<= 200, default halotask-push, no control chars) plus a 3993-byte serialised payload cap, before anything else; limits are derived from the client's reminder payloads and RFC 8291.
 
@@ -387,11 +441,17 @@ Logs contain only the push host and status, never endpoints, keys, payloads or u
 
 The #23 relay rate limiter is unchanged.
 
+##### Tests and mutation coverage
+
 Tests: 165 server tests in tests/pushRoutes.test.ts plus 97 in tests/pushNetworkGuard.test.ts (in-memory User model that emulates only the operations the controller should issue and throws on anything else, a gate that forces interleaving of concurrent requests, fake web-push); mutation checks on the dedup guard, bound, race retry, pruning, logging, timeout and each validator were caught, and two mutants (removing the in-place-refresh fast path; the explicit IPv4-mapped unwrap, which Node's BlockList already does) are behaviourally equivalent.
+
+##### Network-level SSRF defense
 
 SSRF (review follow-up): shape checks cannot see DNS resolution, so delivery now passes web-push an https.Agent (utils/pushNetworkGuard.ts) whose DNS lookup refuses any non-public address (loopback, RFC1918, CGNAT, link-local/metadata, reserved, ULA/link-local/multicast/NAT64/6to4 IPv6, IPv4-mapped IPv6; a mixed answer fails as a whole); the validated address is the connected address, defeating DNS rebinding.
 
 Provider-agnostic on purpose: no hostname allowlist (browsers produce fcm.googleapis.com, updates.push.services.mozilla.com, web.push.apple.com, *.notify.windows.com, and an exact or suffix list would break others or be a broad invented one); all existing shape checks are unchanged.
+
+##### Verification workflow and DNS limits
 
 Added root `npm run verify` (client: test+build; server: test, typecheck, typecheck:tests, build; stops on first failure); the server test script is unchanged and still includes the Mongo-backed suite.
 
@@ -399,7 +459,11 @@ DNS time bound (follow-up): web-push's timeout is an idle socket timeout started
 
 The 10 s figure is an idle timeout, not a total deadline.
 
+##### Tests and mutation coverage
+
 Tests: 97 in tests/pushNetworkGuard.test.ts (silent and answering fake UDP DNS servers, real web-push with a never-settling resolver) and 165 in tests/pushRoutes.test.ts; mutation checks on cancel, deadline, per-attempt timeout, default constants and timer cleanup were caught.
+
+##### Trade-offs and known limits
 
 Trade-off: c-ares ignores /etc/hosts.
 
@@ -409,13 +473,19 @@ Known limits: an attacker-controlled public hostname is still accepted and recei
 
 **2026-10-02 · Backend · completed · Priority: high**
 
+##### Design and deployment scope
+
 Added a small fixed-window, process-local rate limiter (middleware/rateLimit.ts; every number in config/rateLimits.ts; no new dependency, no shared store).
 
 Topology: one long-lived Node process per deployment (Render primary, Railway backup, Vercel client; no cluster/pm2/replica config), so process-local state is sufficient but not globally authoritative and resets on restart; a shared store is the documented follow-up if the API is ever scaled out.
 
+##### Protected routes and policies
+
 Protected: POST /api/auth/login (IP 30/15min, account+IP 5/15min and hashed-account 30/60min, both refunded on success), register (IP 10/60min), forgot-password (IP 5/15min, address 3/60min), reset-password (IP 10/15min, address 5/15min refunded on success), /api/ai/parse-tasks (user 20/10min, IP 60/10min, after requireAuth) and /api/push/relay (user 60/5min, after requireAuth).
 
 Task CRUD, tree, history and push subscribe/unsubscribe are deliberately not limited.
+
+##### Enforcement and capacity behavior
 
 A request is refused if any rule is exhausted; checks run before anything is consumed, attempts are counted up front so parallel requests cannot slip under the limit, and memory is bounded without ever evicting a live bucket: expired buckets are reclaimed, and when a rule's store (20,000 keys) is full of live buckets a request with a NEW key gets the normal 429 (Retry-After = earliest expiry) while existing keys keep being enforced (a flood of unique keys is a denial of service against new keys for at most one window, never a way to reset someone's active limit).
 
@@ -431,11 +501,17 @@ Forgot-password keeps its neutral 200 for known and unknown addresses and its ad
 
 The old in-controller forgotAttempts Map was removed and superseded.
 
+##### Tests and mutation coverage
+
 Tests: 118 new server tests (77 limiter unit tests with an injected clock, including capacity and IPv6 normalisation, 41 against the real app with mocked models, fake timers and per-test TRUST_PROXY_HOPS); tests/aiRoutes.test.ts and tests/api.routes.test.ts now reset limiter counters in beforeEach (limiting is covered separately).
 
 Mutation checks on the boundary, refund, trust-proxy, route wiring and bucket keys were caught; one mutant (dropping the redundant expiry guard in the check phase) is behaviourally equivalent.
 
+##### Known limits
+
 Known limits: counters are per process and reset on restart; fixed windows allow up to 2x across a boundary; the account-wide login cap can deny an owner for up to an hour during a distributed attack; tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox, so its limiter-reset edit is unverified here.
+
+##### Out of scope
 
 Noticed, out of scope: push subscribe accepts any endpoint URL that relay then POSTs to, and a user's subscription list is unbounded.
 
@@ -469,11 +545,15 @@ Known limits: tests/api.routes.test.ts still needs MongoMemoryServer, which cann
 
 **2026-10-01 · Bugfix · completed · Priority: high**
 
+##### Problem and data model
+
 Client history lived only in one global IndexedDB key (task_history) shared by every account on the browser, getWeekHistory() never read the server so a cleared IndexedDB lost history even though snapshots had been pushed, failed pushes were swallowed and never retried, and the server built its GET window with toISOString() (UTC) while the client used local calendar days.
 
 The server also accepted any YYYY-MM-DD on PUT /api/history/today, coerced numbers with Number(x) || 0 and stored completedTasks with no shape or bounds.
 
 Model: the history of a day is the SET of completed tasks keyed by task id; count and minutes are recomputed from it, so reconciling cannot double-count.
+
+##### Source of truth and reconciliation
 
 The server is the durable source of truth; IndexedDB (now per user: task_history:<userId>) is the offline cache and outbox.
 
@@ -482,6 +562,8 @@ Every local change and the first read of a session run pull -> merge -> push: a 
 A task is removed only when this device itself saw it stop being completed. pendingSync clears only when the exact pushed revision is acknowledged, transient failures are retried (throttled), a payload 400 is permanent but a DATE_* 400 is retried, bursts of edits coalesce, snapshots are applied in request order (fixed a race where the one-time legacy purge let a later snapshot jump the lock), and a push is skipped if the account changed.
 
 No timestamps are compared, so clock skew cannot reorder snapshots.
+
+##### Calendar-day contract
 
 Calendar days: ONE convention.
 
@@ -495,11 +577,19 @@ PUT /today : PUT /:date).
 
 GET days must be a single integer 1-90 (rejected, not clamped); repeated/structured params, non-finite/negative/excessive numbers, malformed or duplicate completedTasks, oversized arrays and invalid/future dates are rejected with 400 (utils/historyValidators.ts); GET returns updatedAt (null for days with no record).
 
+##### Legacy behavior
+
 Legacy: the old global task_history key has no provable owner, so it is discarded, never read, merged, pushed or assigned to whichever user logs in next; it is deleted on first use and server-persisted history is recoverable.
+
+##### Tests and coverage
 
 Tests: 62 client history tests and 223 server history tests (Mongo-independent: mocked model with the real router and auth), including merge-by-id cases, a 1024-case union property test, UTC+14, UTC-12, India, Los Angeles (PDT and PST), DST transitions, midnight boundaries (cross-checked against Intl), legacy purge and user isolation.
 
+##### Scope boundary
+
 Growth Tree reward rules and the Growth Tree's own UTC streak date are unchanged.
+
+##### Known limits
 
 Known limits: tests/api.routes.test.ts needs MongoMemoryServer, which cannot download a binary in the sandbox; two devices that pull and push within the same short GET-PUT gap can still overwrite each other (closing it needs an atomic server-side merge, untestable here); the global tasks cache (offline/cache.ts) has the same cross-user bug class and is not addressed.
 
