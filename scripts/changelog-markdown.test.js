@@ -78,6 +78,13 @@ test('creates a missing month between existing month sections', () => {
   assert.ok(result.indexOf('#### entry 2026-08-12') < result.indexOf('#### May entry'));
 });
 
+test('creates a new newest month before the current month sections', () => {
+  const result = insertChangelogEntry(base, entry('2026-11-03'));
+  assert.ok(result.indexOf('### November 2026') < result.indexOf('### October 2026'));
+  assert.ok(result.indexOf('#### entry 2026-11-03') > result.indexOf('### November 2026'));
+  assert.ok(result.indexOf('#### entry 2026-11-03') < result.indexOf('### October 2026'));
+});
+
 test('adds an older month before the category appendix', () => {
   const result = insertChangelogEntry(base, entry('2026-04-20'));
   assert.ok(result.indexOf('### April 2026') > result.indexOf('### May 2026'));
