@@ -23,6 +23,12 @@ const base = [
   '',
   'Entries are listed newest first.',
   '',
+  '### Jump to month',
+  '',
+  '- [October 2026](#october-2026)',
+  '- [September 2026](#september-2026)',
+  '- [May 2026](#may-2026)',
+  '',
   '### October 2026',
   '',
   '#### existing newer entry',
@@ -76,6 +82,7 @@ test('creates a missing month between existing month sections', () => {
   assert.ok(august < result.indexOf('### May 2026'));
   assert.ok(result.indexOf('#### entry 2026-08-12') > august);
   assert.ok(result.indexOf('#### entry 2026-08-12') < result.indexOf('#### May entry'));
+  assert.ok(result.includes('- [August 2026](#august-2026)'));
 });
 
 test('creates a new newest month before the current month sections', () => {
@@ -83,6 +90,7 @@ test('creates a new newest month before the current month sections', () => {
   assert.ok(result.indexOf('### November 2026') < result.indexOf('### October 2026'));
   assert.ok(result.indexOf('#### entry 2026-11-03') > result.indexOf('### November 2026'));
   assert.ok(result.indexOf('#### entry 2026-11-03') < result.indexOf('### October 2026'));
+  assert.ok(result.includes('- [November 2026](#november-2026)'));
 });
 
 test('adds an older month before the category appendix', () => {
@@ -90,6 +98,7 @@ test('adds an older month before the category appendix', () => {
   assert.ok(result.indexOf('### April 2026') > result.indexOf('### May 2026'));
   assert.ok(result.indexOf('### April 2026') < result.indexOf('## Categories'));
   assert.ok(result.indexOf('#### entry 2026-04-20') < result.indexOf('## Categories'));
+  assert.ok(result.includes('- [April 2026](#april-2026)'));
 });
 
 test('rejects invalid calendar dates instead of creating malformed headings', () => {
