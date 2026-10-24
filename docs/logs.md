@@ -6,139 +6,997 @@ All changelog entries are tracked in **`.logs`** (machine-readable JSON format) 
 
 ### 📝 Adding Entries
 
-**Interactive method:**
+**Recommended method:**
 ```bash
 node scripts/add-changelog.js
 ```
 
+The generator adds the entry to `.logs` and inserts a matching, month-grouped entry in this Markdown file.
+
 **Manual method:**
-- Edit `.logs` file directly (JSON format)
-- Entry is automatically synced to release notes
+- If editing `.logs` directly, update this file as well. Direct JSON edits do not trigger a sync.
+- Keep both files aligned: `.logs` is the machine-readable record; this file is the human-readable changelog.
 
 ---
 
 ## Format
 
-[DATE] - [CATEGORY] - [TITLE]: [DESCRIPTION]
+Each Markdown entry uses:
+- A level-four heading for the title.
+- A metadata line in the form `YYYY-MM-DD · Category · status · Priority: value`.
+- The description below the metadata, split into paragraphs when that improves readability.
+
+Entries are grouped by month and sorted newest first, both by month and within each month. The generator preserves this format when adding new entries.
 
 ---
 
 ## Recent Updates
 
-[2026-10-18] - Backend - add real-MongoDB concurrency and isolation tests for the Growth Tree award (Issue #24): Test-only change; no production code changed. Issue #24 (server-authoritative Growth Tree) was already implemented; these tests add coverage of its atomicity and failure handling against a real MongoDB. tests/treeAward.realmongo.test.ts gains award-level concurrency cases (8 and 25 different-task awards for one user, a legacy tree under the same burst, two users awarded the same task ids with a bystander document left byte-identical). With no injected fault a call may only resolve awarded:true or throw derived_unpersisted (the award is recorded); anything else fails. New tests/treeRoutes.realmongo.test.ts drives the real Express app, auth middleware, Mongoose models and award code over HTTP against MongoMemoryServer. Concurrent bursts (PUT of different tasks on a new and on an adopted account, duplicate PUTs of one task, POSTs of already-completed tasks, a burst with the first four derived writes failed, two users plus a bystander with cross-account PUTs and forged PATCHes) accept only the documented outcomes: 200, or a 500 whose body is exactly the documented derived_unpersisted message with the matching logged TreeAwardError; POST bursts must be all 201; response shapes are pinned to the existing route contract. Deterministic failure paths (new helper tests/helpers/driverFaults.ts rejects exactly one planned driver command and passes everything else to the real database) cover PUT with a failed derived write, award or task write, and POST with a failed derived write, derived write plus read-back, award, and award plus cleanup (the documented, accepted gap), each checking task, ledger, xp and reconciliation state and the retry. Execution status, kept separate on purpose. Earlier sandbox runs: the MongoDB binary download was blocked, so api.routes, treeAward.realmongo and treeRoutes.realmongo could not start (33 files passed, 3 failed with DownloadError; 1526 tests passed, 73 skipped); that run says nothing about the new tests. Maintainer run on Windows against a real MongoDB (full server suite): 36 files passed, 1,605 tests passed, 1 todo, including treeAward.realmongo, treeRoutes.realmongo and api.routes. Not yet run in CI. Limits of that evidence: the one todo is a KNOWN GAP, a POST whose award fails and whose cleanup also fails leaves a completed task with no award and the retry makes a second task (characterised by a test, not fixed, tracked in its own issue), so the Growth Tree is not shown to have complete failure-path integrity; the fault-trace assertions cover only the commands the helper wraps. The fault helper is covered by MongoDB-free tests/driverFaults.test.ts (nothing fails unless planned, a fault hits only its named command, reset() cannot leak plans, restore() is idempotent) and records an ordered command trace so the read-back tests prove which command was failed. The award-plus-cleanup case is labelled a KNOWN GAP (characterised, not endorsed) with an it.todo for its remediation, to be tracked in its own issue.
+Entries are listed newest first. Each update has its own heading; date, category, status, and priority are separated from the description to make changes easier to scan.
 
-[2026-10-17] - Config - fail fast when the production API base URL is missing or invalid (Issue #36): The client used import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000', and Vite inlines that value at build time, so a production build without the variable succeeded and shipped a bundle that called localhost. Validation now lives in one pure helper (src/config/apiBaseUrl.ts: resolveApiBaseUrl, ApiBaseUrlError). Missing or blank means the localhost default in development and an error in production; a set value must be an absolute http:// or https:// origin (no path, query, fragment or credentials) in every mode, and is normalised to its origin. Errors never echo the rejected value. Two callers: a Vite plugin in vite.config.ts checks the env Vite resolved during vite build (the primary guard, so a bad configuration fails the build), and services/api.ts resolves the same value at module load as a backstop. CI sets a non-secret placeholder VITE_API_BASE_URL on the verify step because the production build now requires it; the README and .env.example document the setting and that on Vercel it must be set before the build. Tests: pure helper table tests, apiClient baseURL wiring, and the real vite.config.ts build guard via resolveConfig.
+### Jump to month
 
-[2026-10-17] - Bugfix - make the global 401 handler session-aware (Issue #34): The Axios response interceptor used to clear auth and redirect to /login on ANY 401, so a delayed 401 for account A (logged out, then B signed in while the request was in flight) signed B out. Each request is now stamped by the request interceptor with the auth store's in-memory sessionGeneration (0 at startup, +1 on every setAuth and clearAuth, never persisted and not a credential); on a 401 the request counts as the current session's only if its generation is still current AND the bearer token it was sent with (read back from its Authorization header) is still the credential in use, so a re-login with an identical token string is a different session, and, while this tab's store is empty, the stored token being replaced by another tab is caught too. A request sent while signed out still counts as current while nobody has signed in, so the login form's own 401 behaves as before. The redirect moved behind an exported authRedirect.toLogin seam so tests can observe it. The store/storage invariant is documented in authStore (within a tab the token and storage change together, only in setAuth/clearAuth/hydration; a non-null store token always wins over storage, and there is no cross-tab synchronization, so a tab that holds a token does not notice another tab's sign-in or sign-out). Offline queue ownership is unchanged (bound sessions are still verified before send); a queued request refused with 401 after an account switch keeps its entry and leaves the new session alone. Tests: services/api.session401.test.ts (35: current-session 401, stale 401, concurrent requests, rapid switching, identical-token re-login, store/storage fallback states, hydration, normal responses) and two queue tests in offline/queueProcessor.credentials.test.ts, all deterministic via held adapter promises. A second genuine 401 of the same session no longer signs out twice.
+- [October 2026](#october-2026)
+- [September 2026](#september-2026)
+- [May 2026](#may-2026)
 
-[2026-10-17] - Docs - remove the public demo credential from the README (Issue #33): The README no longer publishes a reusable demo email/password pair. Visitors now register their own account (open registration, no email verification, so no SMTP dependency); every account starts empty and is confined to its own data. The server has no seed, demo or admin mechanism, so no code or data changed. New docs/DEMO_ACCESS.md explains the visitor path, how a maintainer can hand out a guided demo account out of band without committing credentials, and how to rotate or revoke one (delete the account, or replace passwordHash and bump tokenVersion). Tests: tests/noPublishedCredentials.test.ts fails if any Markdown file or the changelog contains a credential written as a label plus a value (the detector is itself tested, including against the previous README); api.routes.test.ts gains an 'isolation between accounts' suite run against a real MongoDB (tasks, history, Growth Tree, push subscriptions, deleted-account tokens). Operational note: the previously published login remains in git history and was not rotated by this change. The owner confirmed it was a disposable, normal user account meant for guest logins, so leaving it exposed is an accepted decision; whether it still works was not verified.
+### October 2026
 
-[2026-10-11] - Backend - define Growth Tree reset and recovery rules (Issue #16): define Growth Tree reset and recovery rules (Issue #16): one authoritative server rules module (utils/treeRules.ts: deriveTreeStatus, replayAwardDays, presentTreeState) with exclusive statuses on the UTC calendar day. After one missed day (gap 2) the effective streak is 0 and the tree is wilting; after two or more (gap >= 3) it is 0 and dead; a completion yesterday is at_risk (streak kept, healthy); one completion restores healthy immediately, the streak restarting at 1 unless it was done yesterday. XP, leaves and stage never decrease. GET /api/tree, PATCH {} and award/growth responses now return the effective streakDays and health plus additive status and daysSinceActive; reads never write (the stored copy changes only on the next award or retry; a read folds the retained award-day history in memory), and issue #24's atomic award and ledger are unchanged (the inline replay loop moved into replayAwardDays; the pendingDerivedDays recovery marker is replaced by the retained history, see AC8). AC8 (recalculation gives the same result from the same completion history) is met by retained-history reconstruction: treeState.activeDays (UTC award days, one per day) is the canonical source of the streak and last-active date; the stored streakDays/lastActiveDate/health are a materialised copy that may be validated and repaired from it. The day is recorded with $addToSet in the SAME atomic update as the XP and the ledger entry; replayAwardDays over the history is the one recalculation (same days, same result, whatever the order, repetition, retry or concurrency); reads stay write-free; XP and task-award de-duplication keep their separate authority. The history is capped at 20,000 days and never truncated: a new day that would not fit is refused (reason history_full), like a full ledger. A legacy tree adopts its history in one pinned write (the days implied by its stored streak plus any day left in the old marker, which is removed); activity before the first recorded day is not reconstructible, and that is documented, not claimed. Client: non-authoritative copy (deriveTreeStatus, nextStreak, applyEffectiveStatus) replaces updateStreakState and fixes the devices-disagree bug (server returned the stored streak at 3+ idle days while the client reset it); GrowthTree and Insights show per-status copy that never implies XP or stage is lost. UTC-day limitation documented (IST example). Tests: server treeRules, treeAward and treeRoutes (thresholds, UTC midnight boundary, recovery, replay equivalence, read-only, XP/stage invariants); client parity (byte-identical STATUS_CASES), GrowthTree, treeStorage. Review follow-up: the effective state is folded from the retained history in memory (reads still never write), so the award fallback response and GET show a recorded-but-unreconciled completion as a restored tree (regression tests force the derived write to fail on POST and PUT, then check the fallback and a later GET, and that storage is untouched). Clock skew: a recorded award for today is no longer skipped when the stored last-active date is in the future (nextStreak moves that date back to the award day; the read shows the same), with a test for a future stored date plus a recorded award for today. A zero-streak legacy record that is 2 or 3+ days old now follows the wilting/dead thresholds; unrecorded applies only when gap <= 1 (docs, code and both parity tables aligned, stale zero-streak rows added). Tests added for the history: atomic recording, one entry per day, adoption of legacy streaks and markers (including concurrent first awards and a future date), the cap (refuse a new day, accept a held day, last slot), repair of a stale or wrong copy from the history, and property tests (the fold equals day-by-day nextStreak; random mixes of days, failed derived writes, retries and concurrency leave storage equal to the fold of the recorded days). Review round 4: legacy adoption is bounded (the whole set is validated before the write; if it cannot fit, history_full and the legacy record is untouched; nothing is clamped); stored history is validated strictly (non-array, over the cap, invalid dates, duplicates give conflict with nothing rewritten, via a pre-flight read); migration edge cases (zero streak, missing/invalid last-active date, a date two or more days ahead) infer no days and fabricate no streak, a date one day ahead counts as today; the randomized test now derives its expectations from the actual atomic award log with deterministic injected failures; tests/treeAward.realmongo.test.ts runs concurrent adoption, malformed history and cap behavior against a real mongod; .github/workflows/server-tests.yml runs the full server suite (including api.routes) and the client suite.
+#### enforce the dueDate/dueTime invariant on every Task model write path (Issue #44)
 
-[2026-10-08] - Backend - make Growth Tree state server-authoritative (Issue #24): XP and the awarded-task ledger are now created only by the server. PUT /api/tasks/:id (incomplete -> complete) and POST /api/tasks (created already completed, the offline create-then-complete path) call utils/treeAward.ts, which awards +10 XP with one atomic conditional MongoDB update on the user document ($ne ledger check + ledger-has-room + xp-range guard, $inc xp and $push taskId together) followed by a compare-and-set write of streak, date and derived fields. Awards are idempotent per task id: retries, duplicates, concurrent requests and uncomplete -> re-complete never award twice, and concurrent completions of different tasks keep all XP. Failure semantics: a failed award fails a PUT before the task is written; a failed task write after an award is retried without a second award; a failed award on POST deletes the just-created task. Ledger capped at 20,000 ids (refused, never truncated). Rules (XP per completion, leaves, stages, existing UTC streak/health) live in utils/treeRules.ts; stored values are normalised on read (legacy XP is never clamped; impossible values such as Infinity are repaired). PATCH /api/tree now rejects every reward field with 400 TREE_FIELD_NOT_WRITABLE. Task responses carry an additive growth block. Client: initTreeStorage adopts the server tree (no higher-XP-wins merge, no pushes), treeService.patchTree and setTreeState removed, applyServerGrowth adopts the server's answer (stale lower-XP responses ignored), offline completions are an in-memory preview replaced by the server's tree after sync (processSyncQueue onGrowth). Tests: server treeRules, treeAward (strict atomic in-memory User double), treeAward.mongoose (exact Mongoose command), treeRoutes (HTTP); client treeStorage, useDashboardGrowth, queueProcessor.growth, rules parity. Streak/health reset semantics are unchanged and remain Issue #16. Recovery: step 1 also records the award's UTC day in a server-internal marker set (treeState.pendingDerivedDays, $addToSet, so every unreconciled day survives across several days of failures) in the same atomic update, and step 2 clears it in its compare-and-set after replaying the streak transition for each recorded day, oldest first. If step 2 cannot be persisted (database error or 5 lost compare-and-sets) the award throws derived_unpersisted instead of returning an unpersisted projection: PUT fails with the task untouched and the retry reconciles the derived fields for every recorded award day without awarding again; POST keeps the task and XP and answers with the persisted tree read back; the next award finishes any leftover marker (recorded days first, then today). An already-awarded retry with no marker writes nothing, so re-completing an old task cannot keep a streak alive. Reads (GET, PATCH {}) repair the response only and never write; storage is repaired by the next award (xp pinned repair, then the derived compare-and-set); the ledger is only ever appended to.
+**2026-10-22 · Backend · completed · Priority: medium**
 
-[2026-10-06] - Backend - migrate AI task parsing from deprecated llama-3.3-70b-versatile to openai/gpt-oss-120b (Issue #32): Groq retired llama-3.3-70b-versatile (shutdown 2026-08-16), so the server-side AI task parser now uses openai/gpt-oss-120b. Only the provider request body in utils/groqClient.ts changed: model openai/gpt-oss-120b; max_tokens: 1024 replaced by max_completion_tokens: 2048 (the application-level output budget; max_tokens is deprecated; Groq's docs do not spell out how reasoning tokens count against it, so live validation should confirm 2048 is sufficient with reasoning enabled); reasoning_effort: 'low' (model default is medium; task extraction is simple, so this limits latency and reasoning-token use); include_reasoning: false (only message.content is read). reasoning_format is not sent (unsupported on gpt-oss), and there is no response_format, stream or tools. The prompt, the top-level JSON-array contract, parseModelOutput and the 20-task cap are unchanged, as are the authenticated route, rate limits, server-only GROQ_API_KEY, 20 s timeout, AiProviderError categories and generic error responses. tests/aiRoutes.test.ts now asserts the literal model ID and the exact request body (including absent max_tokens, reasoning_format, response_format, stream and tools), handling of a response that carries a reasoning field, and 502 for empty, truncated or content-less output, plus no leak of reasoning text, prompts or keys. Live validation against Groq was not possible in the development sandbox (no GROQ_API_KEY, api.groq.com blocked), so behaviour against the real model should be checked manually with a real key before release. Historical entries that name the old model are intentionally unchanged.
+##### Implementation and behavior
 
-[2026-10-05] - Backend - strengthen backend validation types and API test coverage (Issue #21): Replaced hopeful casts at the backend's trust boundaries with runtime checks and added regression coverage. (1) JWT: new utils/authToken.ts parseTokenPayload() checks the verified payload before any claim is used (plain object; non-empty string userId; string email and name; tv absent => 0 or a non-negative integer) and a failure is the same generic 401 as any bad token, before the database read; jwt.verify and jwt.sign now share one JWT_ALGORITHM (HS256) and verify pins algorithms: ['HS256']. (2) middleware/auth.middleware.ts exports AuthenticatedRequest (user: {id,email,name}, non-optional) and authenticated(handler), an adapter that narrows the request with a runtime check and answers 401 'Authorization token is required' without running the handler if req.user is missing or is not a full {id (non-empty string), email, name} (fail closed); every handler of the task, history, push, tree and ai routers is wrapped, the controllers (the AI one too) take AuthenticatedRequest so an unwrapped handler is a compile error, and use req.user.id, and the optional chaining plus three unreachable 'Unauthorized' guards in push.controller are gone. The global req.user stays optional (public routes exist). (3) New utils/requestBody.ts: isPlainObject, BODY_MUST_BE_OBJECT and readRequiredStrings (not a validation framework); the three private isPlainObject copies now import it. Register, login, forgot-password and reset-password, task create/update and tree PATCH now answer 400 for a missing, array, primitive or text body, and the four auth handlers answer 400 '... must be strings' for non-string fields (previously a 500 from .trim()/crypto or an unchecked value). Existing 400 messages are unchanged. Unchanged on purpose: case-sensitive 'Bearer ' scheme, reset-code lifetime/hashing/storage, rate limits, task field validators, pagination, demo-mode reset logging. (4) Tests: tests/testConfig.ts holds the clearly fake TEST-ONLY JWT secret (7 suites now import it instead of private copies) and testConfig.test.ts enforces that src/ never imports or contains it; new Mongo-free suites authToken, requestBody, authBoundary (header matrix, payload matrix with zero lookups, algorithm rejection, every protected route 401, structural guard check, adapter), taskRoutes (malformed/non-hex/missing ids, ownership), bodyBoundaries and authInput (forgot/reset: hash stored not plaintext, expiry, replacement, unknown email, neutral response, round trip, reuse). Mutation checks: the parser, adapter, body helper, controller guards and route wiring were mutated; every non-equivalent mutant was killed (see the PR report).
+The only production task writers are POST and PUT in task.controller.ts (no bulk, import or sync write path exists), and both were already guarded.
 
-[2026-10-04] - Backend - stabilise MongoDB connection startup and DNS fallback (Issue #20): Stabilised the MongoDB connection and its DNS fallback (config/db.ts, config/env.ts, server.ts). The fallback stays: on a mongodb+srv:// URI whose resolver refuses SRV queries (querySrv ECONNREFUSED) connectDB retries once with public resolvers (MONGO_DNS_SERVERS, default 8.8.8.8,1.1.1.1). New: (1) getMongoConfig() validates MONGO_URI (scheme), MONGO_DNS_SERVERS (literal IPs, ip:port, [ipv6]:port; previously a bad entry threw ERR_INVALID_IP_ADDRESS only after the first connection failed, hiding the real error) and the new MONGO_SERVER_SELECTION_TIMEOUT_MS (1000-120000, default 15000 instead of the driver's implicit 30000 per attempt) before any DNS/network work, at startup in server.ts and again in connectDB; error messages never contain MONGO_URI or its credentials (the timeout and DNS-server errors do quote the offending value, a number or IP-shaped string). MONGO_DNS_SERVERS: unset, empty and whitespace-only all mean defaults; only a separator with no entries (',' or ' , ') disables the fallback (before, a whitespace-only value silently disabled it). (2) connectDB is single-flight: concurrent callers share one attempt, an already-connected call is a no-op, a settled attempt clears the slot. A probe against real Mongoose 9.4.1 showed two overlapping calls where one logged 'MongoDB connected' at readyState 0, and the DNS save/restore could capture the fallback servers as the originals; neither can happen now. Success is confirmed from readyState === 1. (3) The process-wide dns.setServers() override is applied for the single fallback attempt only, restored in finally on success/failure/throw (a failed restore is logged CRITICAL and never replaces the real error) and is documented in code and docs/context.md so it is not 'cleaned up'. (4) Logging names only the path (SRV, direct, SRV via fallback DNS), the timeout and an error's name/code; never the URI, host, user or password. Unchanged: fallback trigger condition, default servers, no retry loop, Mongoose buffering defaults, error propagation to exitWithFatalError. Tests: tests/mongoConfig.test.ts and tests/mongoConnection.test.ts (70, injected driver/resolver doubles plus one test against the real node:dns state; no Atlas, DNS or network). 27 mutants (restore removed, previous captured late, no single-flight, in-flight not cleared, no/changed timeout, each fallback condition, no readyState check, URI/host leaked in logs, restore error swallowed or replacing the real error, each validation bound, whitespace-only handling) were caught. Known limits: tests/api.routes.test.ts still needs MongoMemoryServer (download blocked in the sandbox) and was not run; a real Atlas connection and a real refused-SRV resolver were not exercised (the connect path was probed against a refusing local resolver only); server.ts is not unit-testable (runs on import); the driver's sharded-topology SRV polling would use the platform resolver after the override is restored; the final fatal log still prints the driver error object. Not done on purpose: connection event handlers, a retry framework, a private dns.Resolver.
+The rule now also lives in Task.model.ts so direct Mongoose writes cannot bypass it: pre('validate') for documents (cascade-clear when the date of a loaded task is cleared, reject otherwise, also with validateModifiedOnly), guardDeadlineUpdate for findOneAndUpdate/updateOne/updateMany and bulkWrite update ops (stored-date condition added to the write for a lone dueTime, cascaded $unset when the date is removed, refusal of contradictory, upsert, pipeline and unsupported-operator shapes), and replacement checks.
 
-[2026-10-04] - Backend - add production HTTP security headers to the API (Issue #28): Added a deliberate, minimal HTTP security-header baseline to the Express API; no new dependency and no Helmet. New middleware/securityHeaders.ts sets, on every response: X-Content-Type-Options: nosniff; Referrer-Policy: no-referrer; Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; X-Frame-Options: DENY; and, only when NODE_ENV === 'production', Strict-Transport-Security: max-age=15552000 (no includeSubDomains, no preload, not gated on req.secure). app.ts also calls app.disable('x-powered-by'). The middleware is mounted FIRST, before cors(), because cors() answers preflights itself without calling next(); mounted after it, the preflight 204 would carry no security headers. CSP is intentionally inert: the API returns JSON, an empty 204 and one tiny text/html string (GET /), so it only restricts that one HTML response; it is not a script/style policy, which would protect nothing here (the pages that run script are served by the client's host). X-Frame-Options is kept only as a compatibility fallback for browsers that ignore frame-ancestors. HSTS is production-only because local development is plain HTTP, and it omits includeSubDomains/preload because the API lives on a shared platform domain and both are hard to undo. Cache-Control is deliberately NOT added: it is a behaviour change, not hardening, and ETag/304 revalidation is preserved. Frontend/Vercel security headers (vercel.json, client CSP) are a separate concern and untouched. CORS (including the fail-closed production fallback and credentials: true), rate limiting and Retry-After, the 1mb body limit, error statuses/bodies, GET / and auth are unchanged. Tests: tests/securityHeaders.test.ts (11, exact values, HSTS by NODE_ENV, nothing extra) and tests/securityHeadersRoutes.test.ts (29, the real app.ts with only models/web-push mocked: GET /, 404, CORS preflight, 401, 400, 413, 429 with Retry-After, 500 and an authenticated 200 under production, development and unset NODE_ENV; CORS headers preserved; fail-closed CORS still carries the headers; ETag/304 kept with no Cache-Control). Mutation checks: 18 mutants (moving the middleware after cors fails exactly the 3 preflight tests; unmounting, no x-powered-by disable, dropping or changing each header, loosening the CSP, HSTS always/never/req.secure-gated/with includeSubDomains/with preload/other max-age, adding Cache-Control) were all caught. Results: server 779 passed + 31 skipped, typecheck, typecheck:tests and build clean. Known limits: tests/api.routes.test.ts still needs MongoMemoryServer (download blocked in the sandbox) and was not run; the repo has no formatter/linter configured, so there was no formatting step; headers were verified against the app in-process, not on a live Render deployment, so confirm HSTS and the absence of X-Powered-By with curl -I after deploy. Noticed, out of scope: Access-Control-Allow-Credentials is sent although auth is Bearer-only.
+##### Boundaries and limitations
 
-[2026-10-03] - Backend - revoke sessions issued before a password reset (Issue #27): Auth is a stateless 7-day JWT whose middleware never read the database, so every token issued before a password reset stayed valid for up to 7 days (including an attacker's). User now has tokenVersion (default 0); JWTs carry it as tv, signed from the same read that authenticated the caller; requireAuth is async and accepts a token only while (tv ?? 0) === (account.tokenVersion ?? 0). Missing user -> 401, malformed tv -> 401 before any read, lookup failure -> 500 (fails closed), CastError -> 401; every rejection is the same 'Invalid or expired token'. reset-password is now ONE atomic conditional updateOne filtered on {email, code hash, expiry > now} that sets the password, clears the code, $inc's tokenVersion and empties pushSubscriptions; matchedCount !== 1 -> 400. The earlier exists() read is only a bcrypt cost guard and decides nothing, which closes the replay race of the old findOne -> bcrypt -> save (two simultaneous requests with one code could both return 200). Tokens with no tv and accounts with no tokenVersion both read as 0, so nothing signs anyone out on deploy and no migration is needed; a login that straddles a reset signs the old version and is born revoked. Logout stays client-side. Client: offline/queueProcessor.ts treated every 4xx except 408/429 as permanent, so a revoked token on reconnect discarded the entire offline queue (the interceptor clears the token on the first 401 and every later entry then went out unauthenticated and was discarded too); a 401 now stops the run and keeps that entry and everything not yet attempted, in order. Keeping the queue made it a cross-account risk, because requests carry whatever token is current and the queue was ONE global IndexedDB key: a preserved queue would have been sent under whichever account signed in next. The queue is now per account (sync_queue:<userId>, same convention as history in Issue #31): enqueueSyncAction binds the owner when the action is made (and rejects with nobody signed in); processSyncQueue binds the session (owner AND token) at the start, uses the owner for every read and write (including the write-back after a 401, when the interceptor has already signed everyone out) and passes { session } with every request. A pre-call ownership check alone was a time-of-check/time-of-use race: the service builds the request later and read whichever token was current then, so an account switch in that gap would have sent A's queued mutation with B's token. The request interceptor in services/api.ts now verifies the store against the bound session and applies the BOUND token in one synchronous step, or rejects with SessionChangedError before anything is sent (the processor then stops and keeps the rest for the owner); requests without a session are unchanged. If the account changes while a request is in flight, that request already left as the owner and its result is not fed into the new account's UI or task cache. The old unowned global key cannot be attributed to anyone, so it is never read or sent and is removed once with a console warning stating how many actions were discarded (pending offline changes made before this deploy are lost, same rule history used). Tests: 20 new server tests (tests/sessionInvalidation.test.ts: real app, in-memory User double with snapshot reads, atomic conditional updateOne and gates for the double-reset and login-straddles-reset interleavings; 9 production mutants checked and all caught) and 15 + 20 + 14 client tests (offline/queueProcessor.credentials.test.ts: the real task service and API client against a recording adapter, asserting the token each queued create/update/delete actually carries and that a switch between the ownership check and the request, or in flight, sends nothing as the wrong account; offline/queueProcessor.test.ts: 401 handling and cross-account isolation on the real per-account storage; offline/syncQueue.test.ts: storage isolation, owner binding, legacy purge). Reverting the session binding fails 7 tests, i.e. the suite reproduces the race; mutants of the queue isolation and credential-binding logic (each guard, each entry type, create/update/delete callbacks) were all caught except ones made behaviourally equivalent by deliberate redundancy; 4 real-MongoDB cases added to api.routes.test.ts; the history, AI, push and rate-limit route suites stub the version lookup at 0 with their existing legacy-shape tokens. Results: server 739 passed + 31 skipped, client 156 passed, server typecheck, test typecheck and build and client build clean. Known limits: tests/api.routes.test.ts needs MongoMemoryServer, whose binary cannot be downloaded in the sandbox, so its 31 tests (27 existing + 4 new) were NOT run here; a request already past requireAuth when the reset commits finishes; one indexed read per authenticated request is added by design; the task cache (offline/cache.ts) is still one global IndexedDB key (unchanged, out of scope); Express is 5.2.1 so the async requireAuth's rejections reach the error handler (verified). Noticed, out of scope: Settings -> Change password sends a signed-in user to /forgot-password, which redirects them to the dashboard; the 401 interceptor also fires on a wrong-password login.
+Unprotected by design: native driver writes, shell writes, pre-existing data.
 
-[2026-10-02] - Backend - 3009: harden Web Push subscription and relay boundaries (Issue #26): Subscribe now validates the endpoint (string <= 2048, no whitespace/control chars, valid https URL, no credentials, default port, DNS-name host only: no IP literal in any spelling, no localhost/single-label/.local/.internal), p256dh (unpadded canonical base64url, exactly 65 bytes) and auth (exactly 16 bytes) per RFC 8291, and expirationTime (null/omitted or a future integer ms); only endpoint, expirationTime and keys are stored. Dedup and the per-user bound are atomic: the old $pull-then-$push (which could duplicate under concurrent requests) is replaced by single-document conditional updates (refresh in place via the positional operator; else $ne-guarded $push with $each + $slice -10; else refresh if a concurrent request stored it), so duplicates are impossible and a user never holds more than 10 subscriptions; the newest wins and the oldest is dropped so legitimate users with stale endpoints can always register a new device. Unsubscribe requires a non-empty string endpoint <= 2048 (rejecting operator objects like { $ne } that previously reached the $pull and could delete all of a user's subscriptions); unknown endpoints remain a 200 no-op. Relay validates title (<= 100), body (<= 500) and tag (<= 200, default halotask-push, no control chars) plus a 3993-byte serialised payload cap, before anything else; limits are derived from the client's reminder payloads and RFC 8291. Delivery is independent per subscription with a 10 s idle socket timeout; DNS resolution has a separate cancellable 5 s hard deadline; response is { sent, failed, pruned } (failed is additive); 404/410 are pruned in one $pull, all other failures keep the subscription; a prune failure no longer turns a completed relay into a 500. Logs contain only the push host and status, never endpoints, keys, payloads or upstream error text. The #23 relay rate limiter is unchanged. Tests: 165 server tests in tests/pushRoutes.test.ts plus 97 in tests/pushNetworkGuard.test.ts (in-memory User model that emulates only the operations the controller should issue and throws on anything else, a gate that forces interleaving of concurrent requests, fake web-push); mutation checks on the dedup guard, bound, race retry, pruning, logging, timeout and each validator were caught, and two mutants (removing the in-place-refresh fast path; the explicit IPv4-mapped unwrap, which Node's BlockList already does) are behaviourally equivalent. SSRF (review follow-up): delivery now passes web-push an https.Agent (utils/pushNetworkGuard.ts) whose DNS lookup refuses any non-public address (loopback, RFC1918, CGNAT, link-local/metadata, reserved, private/mapped/NAT64/6to4 IPv6; a mixed answer fails as a whole); the validated address is the connected address, defeating DNS rebinding. Provider-agnostic on purpose: no hostname allowlist; all existing shape checks unchanged. Added root `npm run verify` (client: test+build; server: test, typecheck, typecheck:tests, build); the server test script is unchanged and still includes the Mongo-backed suite. DNS time bound (follow-up): web-push's timeout is an idle socket timeout started before the lookup finishes, so a never-completing DNS lookup is still settled by it, but dns.lookup (getaddrinfo) cannot be cancelled and would pin a libuv threadpool thread; the guard's default resolver is now c-ares (dns.Resolver: 2 s x 2 tries per query, hard 5 s deadline, cancel() on expiry) so a stalled name leaves no work running; A+AAAA are resolved once and only the validated addresses reach the socket. The 10 s figure is an idle timeout, not a total deadline. Tests: 97 in tests/pushNetworkGuard.test.ts (silent and answering fake UDP DNS servers, real web-push with a never-settling resolver) and 165 in tests/pushRoutes.test.ts; mutation checks on cancel, deadline, per-attempt timeout, default constants and timer cleanup were caught. Trade-off: c-ares ignores /etc/hosts. Known limits: an attacker-controlled public hostname is still accepted and receives a fixed encrypted blind POST; legacy over-limit entries are trimmed only on the next new subscription; Mongo operator semantics ($ positional update, $ne on an array path, $push with $slice) are verified only against the emulation because tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox.
+##### Tests and evidence
 
-[2026-10-02] - Backend - 3009: add rate limiting for authentication and sensitive endpoints (Issue #23): Added a small fixed-window, process-local rate limiter (middleware/rateLimit.ts; every number in config/rateLimits.ts; no new dependency, no shared store). Topology: one long-lived Node process per deployment (Render primary, Railway backup, Vercel client; no cluster/pm2/replica config), so process-local state is sufficient but not globally authoritative and resets on restart; a shared store is the documented follow-up if the API is ever scaled out. Protected: POST /api/auth/login (IP 30/15min, account+IP 5/15min and hashed-account 30/60min, both refunded on success), register (IP 10/60min), forgot-password (IP 5/15min, address 3/60min), reset-password (IP 10/15min, address 5/15min refunded on success), /api/ai/parse-tasks (user 20/10min, IP 60/10min, after requireAuth) and /api/push/relay (user 60/5min, after requireAuth). Task CRUD, tree, history and push subscribe/unsubscribe are deliberately not limited. A request is refused if any rule is exhausted; checks run before anything is consumed, attempts are counted up front so parallel requests cannot slip under the limit, and memory is bounded without ever evicting a live bucket: expired buckets are reclaimed, and when a rule's store (20,000 keys) is full of live buckets a request with a NEW key gets the normal 429 (Retry-After = earliest expiry) while existing keys keep being enforced (a flood of unique keys is a denial of service against new keys for at most one window, never a way to reset someone's active limit). E-mail keys are salted HMACs of the normalised address, IPv6 is bucketed by /64 via Node's net parsers (invalid addresses share one 'unknown' bucket). Client IP: app.set('trust proxy', TRUST_PROXY_HOPS) with default 0 (forwarded headers ignored); N hops trusts only the N nearest proxies so prepended X-Forwarded-For entries are never believed; malformed values fail startup; production warns when 0; Local development 0, Render 1, Railway unverified (no value claimed). Previously trust proxy was unset, so behind a platform proxy the old forgot-password limiter keyed everyone to the proxy's address. 429 contract: { message: 'Too many requests. Please try again later.' } plus Retry-After (whole seconds); no rule, key or count is exposed. Forgot-password keeps its neutral 200 for known and unknown addresses and its address bucket counts the submitted address regardless of existence, so the 429 point and body are identical (tested end to end). The old in-controller forgotAttempts Map was removed and superseded. Tests: 118 new server tests (77 limiter unit tests with an injected clock, including capacity and IPv6 normalisation, 41 against the real app with mocked models, fake timers and per-test TRUST_PROXY_HOPS); tests/aiRoutes.test.ts and tests/api.routes.test.ts now reset limiter counters in beforeEach (limiting is covered separately). Mutation checks on the boundary, refund, trust-proxy, route wiring and bucket keys were caught; one mutant (dropping the redundant expiry guard in the check phase) is behaviourally equivalent. Known limits: counters are per process and reset on restart; fixed windows allow up to 2x across a boundary; the account-wide login cap can deny an owner for up to an hour during a distributed attack; tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox, so its limiter-reset edit is unverified here. Noticed, out of scope: push subscribe accepts any endpoint URL that relay then POSTs to, and a user's subscription list is unbounded.
+New DB-less tests (tests/taskModel.writePaths.test.ts) record the commands Mongoose sends; the real-MongoDB suite tests/taskWritePaths.realmongo.test.ts (conditional writes, atomic cascade, concurrent direct writers) was NOT executed in the sandbox because MongoDB cannot be downloaded here.
 
-[2026-10-01] - Bugfix - 3009: move AI task creation behind the authenticated backend (Issue #22): The browser called Groq directly with a Bearer key read from import.meta.env.VITE_GROQ_API_KEY, so the secret was shipped in the client bundle. AI parsing now goes through POST /api/ai/parse-tasks behind the existing requireAuth middleware. Request: { prompt } (non-empty after trimming, max 2000 chars; any provider/model/url/temperature fields are ignored because provider, model, endpoint and max_tokens are server constants). Response: 200 { tasks: [{ title, priority, dueDate?, estimatedMinutes?, tags, description }] }; the server runs the same parsing prompt and sanitises the model output (max 20 tasks, bounded title/description/tags, real YYYY-MM-DD dates, valid minutes), and the client keeps its draft mapping so the UX is unchanged. Validation runs before any provider call. Errors are generic: 400 invalid, 429 provider rate-limited, 502 provider unavailable/auth failure/bad output (a provider 401/403 is never forwarded as 401, which would log the user out), 504 timeout (20s), 503 GROQ_API_KEY not configured; provider text, the key, prompts and generated content are never returned or logged. The key lives only in the server-only GROQ_API_KEY (config/env.ts getGroqApiKey; documented in server .env.example, .env.production and README; server.ts warns when unset). VITE_GROQ_API_KEY was removed from client code and env files, and the client production bundle was scanned and contains no provider reference. Rate limiting: no reusable limiter exists; per the issue none was built, the endpoint is bounded by auth, prompt cap, max_tokens and timeout, and per-user limiting depends on Issue #23. Tests: 41 new server tests (39 in aiRoutes.test.ts with fetch mocked, 2 in env.test.ts) and 16 new client tests (aiService, hook, and a source scan that fails if a provider reference or key variable reappears). Known limits: tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox; no per-user rate limit until Issue #23; the prompt's 'today' is the server UTC date, as the browser's was.
+Also fixed typecheck:tests, which failed on the Issue #9/#10 invariant test's import typing.
 
-[2026-10-01] - Bugfix - 3009: fix History source of truth, date semantics, and sync reliability (Issue #31): Client history lived only in one global IndexedDB key (task_history) shared by every account on the browser, getWeekHistory() never read the server so a cleared IndexedDB lost history even though snapshots had been pushed, failed pushes were swallowed and never retried, and the server built its GET window with toISOString() (UTC) while the client used local calendar days. The server also accepted any YYYY-MM-DD on PUT /api/history/today, coerced numbers with Number(x) || 0 and stored completedTasks with no shape or bounds. Model: the history of a day is the SET of completed tasks keyed by task id; count and minutes are recomputed from it, so reconciling cannot double-count. The server is the durable source of truth; IndexedDB (now per user: task_history:<userId>) is the offline cache and outbox. Every local change and the first read of a session run pull -> merge -> push: a pending local snapshot is merged into the server row as (server - tasks this device un-completed) U local by task id and is never allowed to replace the server row wholesale, so a device that was offline cannot erase tasks another device completed (server A,B,C + pending local A,B stays A,B,C and nothing is sent). A task is removed only when this device itself saw it stop being completed. pendingSync clears only when the exact pushed revision is acknowledged, transient failures are retried (throttled), a payload 400 is permanent but a DATE_* 400 is retried, bursts of edits coalesce, snapshots are applied in request order (fixed a race where the one-time legacy purge let a later snapshot jump the lock), and a push is skipped if the account changed. No timestamps are compared, so clock skew cannot reorder snapshots. Calendar days: ONE convention. A history date is the user's local calendar day = the calendar date of an instant shifted by the user's UTC offset. The client declares utcOffsetMinutes (-720..840) on every history request; the server validates 'today' from its clock plus that offset with NO clock-skew tolerance (exactly one date: yesterday and tomorrow are rejected; failures carry codes DATE_NOT_TODAY / DATE_OUT_OF_RANGE, which the client treats as retryable while other 400s stay permanent) and has no default offset and no UTC fallback (GET requires endDate and utcOffsetMinutes; calls without them are rejected). API: PUT /today accepts only today at the declared offset; PUT /:date is a bounded backfill (last 7 days, never future) required because snapshots are queued and pushed after their own day has ended (call path: reconcile -> pushEntry -> date === today ? PUT /today : PUT /:date). GET days must be a single integer 1-90 (rejected, not clamped); repeated/structured params, non-finite/negative/excessive numbers, malformed or duplicate completedTasks, oversized arrays and invalid/future dates are rejected with 400 (utils/historyValidators.ts); GET returns updatedAt (null for days with no record). Legacy: the old global task_history key has no provable owner, so it is discarded, never read, merged, pushed or assigned to whichever user logs in next; it is deleted on first use and server-persisted history is recoverable. Tests: 62 client history tests and 223 server history tests (Mongo-independent: mocked model with the real router and auth), including merge-by-id cases, a 1024-case union property test, UTC+14, UTC-12, India, Los Angeles (PDT and PST), DST transitions, midnight boundaries (cross-checked against Intl), legacy purge and user isolation. Growth Tree reward rules and the Growth Tree's own UTC streak date are unchanged. Known limits: tests/api.routes.test.ts needs MongoMemoryServer, which cannot download a binary in the sandbox; two devices that pull and push within the same short GET-PUT gap can still overwrite each other (closing it needs an atomic server-side merge, untestable here); the global tasks cache (offline/cache.ts) has the same cross-user bug class and is not addressed.
+##### Review hardening
 
-[2026-09-30] - Bugfix - 3009: isolate Growth Tree client state per authenticated user (Issue #30): Fixed an account-to-account contamination bug in the client Growth Tree persistence layer: state lived under one global IndexedDB key (growth_tree) with an owner-less module-level cache, so after logout/login on a shared browser user A's local XP and awardedTaskIds could be merged into user B's state and pushed to B's server record. treeStorage.ts now keys IndexedDB records as growth_tree:<userId> (user id from useAuthStore, via the existing offlineDb; no schema change) and the in-memory cache records its owner, so getTreeState() never returns another user's state. initTreeStorage() throws TreeIdentityError when there is no authenticated user and discards its result (no cache write, IndexedDB write or server push) if the user changes while it is awaiting local or server state; setTreeState() throws unless init has completed for the current user. Legacy unscoped data (growth_tree in IndexedDB, halotask:growth_tree in localStorage) has no provable owner, so it is never read or migrated and is deleted on init; the server copy is the recovery path for progress that was successfully synchronized. clearAuth() intentionally does not clear Growth Tree state: owner-scoped keys and cache already prevent cross-user reads, and wiping on logout or 401 would destroy the previous user's unsynced offline progress. useDashboardGrowth re-initialises when the user id changes and skips awards on identity mismatch; InsightsPage now handles an init rejection explicitly (logs and shows no tree while the rest of the page loads). Reward rules, XP values, streak/health rules, stage thresholds and merge semantics are unchanged. Added 13 regression tests (two users on shared storage, logout/login cycles, higher local XP vs lower server XP, awardedTaskIds isolation, mid-init account switch, no-user failure, legacy purge, single-user/offline/merge behaviour). Full client suite (29 tests), tsc -b and vite build pass. Known follow-up: the global tasks cache in offline/cache.ts has the same cross-user bug class and is not addressed here.
+Review follow-up: closed the bypasses where Mongoose validation is disabled: bulkWrite insertOne with skipValidation, insertMany with lean, Model.bulkSave, and save/create/insertOne with validateBeforeSave:false (insertOne documents and insertMany entries are now checked explicitly, and the document rule also runs as a save hook; a date must be usable, not just present).
 
-[2026-09-30] - Backend - 3009: harden server startup, shutdown, CORS, and request limits: startServer() now has an explicit .catch() so a startup failure (e.g. connectDB() rejecting) logs clearly and exits non-zero instead of becoming an unhandled rejection. Extracted CORS origin resolution (src/config/cors.ts) and the startup-failure/graceful-shutdown logic (src/utils/processLifecycle.ts) into standalone, dependency-injected, unit-testable functions with unchanged behavior. Fixed a real bug: the global error handler was flattening body-parser's own 413 (oversized body) and 400 (malformed JSON) errors into a generic 500; added src/utils/httpErrors.ts type guards (verified empirically) so those now return the correct status. Added unit tests for all three modules plus a supertest-based integration suite for the CORS/body-limit wiring — none require MongoDB. Documented the 1MB body limit and CORS fail-closed behavior in README.md and docs/context.md.
+Regression tests use those options and prove nothing reaches the driver. middleware:false skips every hook and remains unprotected by design (documented).
 
-[2026-09-26] - Backend - 2609: harden task API validation and query boundaries: Malformed task ids on PUT/DELETE now return 400 instead of a 500 from an unhandled CastError. Centralized title/description/tags/priority/dueDate/estimatedMinutes validation so an empty title or invalid date is rejected consistently on both create and update. Added pagination to GET /api/tasks (default and max page size 200, additive response fields), and — per review — updated the frontend's taskService.getTasks() to transparently consume all pages so a user with >200 tasks is never silently truncated, fixed estimatedMinutes accepting an empty string as 0, and hardened the pagination parser against unsafe integers and repeated query params. The client's 500-page safety ceiling throws instead of silently returning a partial list. Added unit and integration test coverage on both client and server.
+#### fix emitted module extension in task model invariant test
 
-[2026-09-26] - Backend - 2609: harden authentication and password recovery security: Made registration and reset-password validation consistent, added startup validation for RESET_TOKEN_TTL_MINUTES, and fixed demo-mode reset-code logging so it requires an explicit non-production opt-in rather than triggering on missing email transport. Added regression tests for the logging gate plus a tsconfig.test.json so tests/ is type-checked.
+**2026-10-22 · Backend · completed · Priority: low**
 
-[2026-09-26] - Bugfix - 2609: fix cold-start overlay completion and add manual dismiss: Replaced the settled-request-only completion signal with a genuine success/error outcome so the overlay never claims the server is ready after a failed request, fixed a race that let the entrance animation override a manual dismiss, and added a keyboard-accessible manual close button. Added Vitest + Testing Library coverage for the automatic and manual completion paths.
+Updated the Task model import in taskModel.invariant.test.ts to use the emitted .js extension, matching the server's ESM/NodeNext module resolution and allowing the invariant test to load the model correctly.
 
-[2026-05-26] - Bugfix - 2605: align insights cards with persisted completed history: Updated the Insights page to read Completed Today and Work Done Today from the same persisted daily history snapshot used by the dashboard, so clear-completed no longer causes a mismatch between pages.
+#### explicit error code for the offline due-time conflict (Issue #43)
 
-[2026-05-26] - Bugfix - 2605: preserve Completed Today after clearing finished tasks: Switched the dashboard productivity snapshot to use the persisted day history entry and tightened the clear-completed flow to read the latest committed task state before snapshotting, so clearing finished tasks no longer zeroes the Completed Today and Work Done Today cards.
+**2026-10-22 · Backend · completed · Priority: medium**
 
-[2026-05-26] - Bugfix - 2605: preserve completed-task history when clearing completed items: Added a skipSnapshot option to task persistence so clear-completed no longer overwrites the pre-delete weekly snapshot, keeping Completed Today history intact.
+The 409 for a due-time edit whose due date was removed now carries code TASK_DUE_DATE_REMOVED in the existing { message, code } shape; other misses keep the plain 409.
 
-[2026-05-26] - Feature - 2605: rewrite insights page with weekly summary and task drill-downs: Replaced the insights overview with a full analytics page, added clickable task stat cards that open the shared InsightModal, enabled optimistic task toggling from the modal, surfaced tag breakdowns and day-of-week patterns, and added weekly summary chips for streak, week total, work done, and best day.
+The offline queue recovers only on that exact code (object body, strict equality) plus an edit with a dueTime, instead of treating any 409 with that payload shape as the conflict.
 
-[2026-05-26] - Feature - 2605: add five-step onboarding flow and onboarding gate: Added a full-screen onboarding page with five steps, onboarding completion session flags, protected /onboarding routing, register redirect, and authenticated entry gating.
+Recovery stays bounded to one extra request per run.
 
-[2026-05-25] - Frontend - 2405: add title bar image and favicon: Added a custom title bar image and browser favicon, updated header layout and CSS, and wired favicon link for improved tab rendering.
+Tests cover the server contract, matching and non-matching codes, malformed bodies, and bounded retries.
 
-[2026-05-25] - Feature - 2405: add PWA installability and Web Push relay support: Added the PWA manifest, service worker, theme/meta tags, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.
+Real-MongoDB assertion added to taskTimes.realmongo.test.ts is not executed in the sandbox.
 
-[2026-05-24] - Feature - 2405: add AI task creation with Groq parsing and draft preview flow: Added a new AI task parser hook powered by Groq (llama-3.3-70b-versatile via OpenAI-compatible endpoint), AI-aware task form wiring, draft preview/confirmation UI, and sequential task creation that persists new tasks into the live list.
+#### add optional task start time and due time (Issues #9, #10)
 
-[2026-05-24] - Feature - 2405: add cold-start Task Tapper overlay for slow server wakes: Bumped the API timeout to 60s, added a 3s cold-start timer in dashboard sync, and mounted a full-screen Task Tapper overlay that auto-dismisses once the server responds.
+**2026-10-21 · Feature · completed · Priority: medium**
 
-[2026-05-23] - Bugfix - 2305: switch toolbar meta collapse to max-height with open overflow visibility: Replaced the toolbar meta wrapper's grid-template-rows collapse with a max-height transition and open-state overflow: visible so the reminder dropdown can escape the container while the meta block remains collapsible.
+Optional dueTime (HH:mm wall clock, requires dueDate) and startTime (ISO instant) across model, validation, API, offline queue, forms, card display, sorting, smart sections and reminders. dueDate semantics unchanged; no migration.
 
-[2026-05-23] - Frontend - 2305: focus task title input on desktop; pass autoFocus/inputRef through forms: Added `autoFocus` and `inputRef` props to `TaskFormFields` and `TaskCreateForm`; passed `autoFocus` from `TaskCreateSheet`; added `titleInputRef` in `DashboardPage` and wired the desktop Add action to focus the sidebar title input.
+Also fixes PUT dueDate:null being ignored and UTC-minus day classification.
 
-[2026-05-23] - Bugfix - 2305: fix input ref typing for titleInputRef: Corrected `RefObject` typing to allow `null` for `inputRef` props in `TaskFormFields` and `TaskCreateForm` to match `useRef(null)` signature and prevent TypeScript errors during build.
+Real-MongoDB suite tests/taskTimes.realmongo.test.ts was NOT executed in the sandbox (MongoDB binary download blocked); run it locally.
 
-[2026-05-23] - Frontend - 2305: FAB SVG and interaction improvements; toolbar CTA sizing on mobile: Replaced the FAB '+' text with a crisp SVG crosshair-plus and centered it using `display: grid; place-items: center` for reliable cross-device rendering. Added hover scale and ring glow, improved active press feedback (brightness + reset ring), and allowed toolbar primary CTA to size naturally on mobile so the '+ New task' button fits inline while remaining hidden on desktop.
+Review follow-up: offline 409 on a due-time edit is reconciled (one bounded resend with dueTime cleared, user told) instead of discarded; reminders keep one identity across the offline local-to-server id change via a client-only clientKey; start-now names a time only for an explicit dueTime; the Mongoose schema enforces dueTime-needs-dueDate for documents and self-contained updates.
 
-[2026-05-23] - Feature - 2305/v6: add server-backed 7-day history sync and responsive task-sheet/filter updates: Applied v6 across 9 files. Added collapsible advanced filter CSS (`filter-advanced`, `filter-toggle-btn`, `filter-active-dot`) and non-squishing segment tabs (`min-width: 52px; white-space: nowrap`). Changed desktop TaskCreateSheet from hidden sheet to centered modal (`left: 50%`, `transform: translateX(-50%)`, `top: 8vh`, `width: min(520px, 90vw)`) with fade+scale entry animation; hid toolbar '+ New task' CTA on mobile where FAB is primary. Updated `DashboardPage.handleAddTask` to always open the sheet, preserved Completed Today stats by snapshotting before clear-completed deletion, synced local snapshot writes to backend via new `historyService`, and added authenticated server history endpoints with new `DayHistory` model, controller, routes, and `/api/history` mount in app.
+#### add real-MongoDB concurrency and isolation tests for the Growth Tree award (Issue #24)
 
-[2026-05-23] - Feature - 2305/v7: keep Add Task visible, collapse toolbar metadata, and persist reminder session state: Restored the Add Task CTA on all viewports, removed the desktop sheet modal conversion so the task sheet stays a bottom sheet everywhere, added a controlled `filtersExpanded` state flow that collapses `toolbar-meta` with the filter block, updated reminder checkbox layout to keep checkbox and text on one line with themed accent color, and stored fired reminder keys in `sessionStorage` so notifications survive reloads within the same tab session.
+**2026-10-18 · Backend · completed · Priority: medium**
 
-[2026-05-20] - Feature - Add completed task history section and completedAt tracking: Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions. Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records. Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened. Added dashboard styling for the completed section so it matches the existing task list visuals.
+##### Scope
 
-[2026-05-21] - Feature - Add 7-day local history snapshots and Insights week chart: Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks). Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current. Enhanced `InsightsPage` to display the 7-day history chart with per-day details. Added corresponding `week-history` CSS to `halotasks-client/src/styles/app.css`.
+Test-only change; no production code changed.
 
-[2026-05-19] - Backend - Implement tree API endpoints with anti-cheat validation and client-side sync: Added treeState nested schema to User model with XP, leaves, streak tracking, health/stage enums, and awardedTaskIds array. Created tree.controller.ts with getTree() and patchTree() endpoints featuring anti-cheat XP validation (append-only check), enum validation for health/stage, and clean $set builder with Math.max guards. Created tree.routes.ts with requireAuth middleware. Enhanced app.ts with resolveOrigin() function that fails-closed in production when CLIENT_ORIGIN not set, provides localhost fallbacks in dev, added express.json({ limit: '1mb' }) to prevent memory exhaustion, and upgraded error handler with isDev branching (surface errors in dev, generic messages in production). On client: created treeService.ts with getTree() and patchTree() API methods, upgraded treeStorage.ts to local-first with server sync: localStorage migration to IndexedDB, merge strategy (higher XP wins, union awardedTaskIds), fire-and-forget server persistence, and offline-first source of truth.
+Issue #24 (server-authoritative Growth Tree) was already implemented; these tests add coverage of its atomicity and failure handling against a real MongoDB. tests/treeAward.realmongo.test.ts gains award-level concurrency cases (8 and 25 different-task awards for one user, a legacy tree under the same burst, two users awarded the same task ids with a bystander document left byte-identical).
 
-[2026-05-19] - Ops - Harden MongoDB DNS fallback and add production-grade startup/shutdown: Enhanced db.ts to save and restore DNS servers, preventing fallback DNS from leaking into email/API calls elsewhere in process. Added startup validation to server.ts that fail-fasts on missing JWT_SECRET and MONGO_URI. Registered global uncaughtException and unhandledRejection handlers before DB connect. Implemented graceful shutdown on SIGTERM/SIGINT: stops accepting new connections, waits for in-flight requests, closes MongoDB, with 10-second force-exit timeout. Enhanced logging throughout for visibility.
+With no injected fault a call may only resolve awarded:true or throw derived_unpersisted (the award is recorded); anything else fails.
 
-[2026-05-18] - Security - Harden password reset code generation and error handling: Replaced Math.random() with crypto.randomInt(100000, 1000000) for cryptographically secure 6-digit reset codes. Restructured sendResetPasswordEmail to distinguish between configured-but-failed transports (error logged, code NOT logged) versus unconfigured demo mode (code logged for testing). Added explicit Promise<void> return type to sendResetPasswordEmail. Updated requireAuth middleware to return generic 'Internal server error' to clients while logging full JWT_SECRET configuration details to console.error for server visibility.
+New tests/treeRoutes.realmongo.test.ts drives the real Express app, auth middleware, Mongoose models and award code over HTTP against MongoMemoryServer.
 
-[2026-05-18] - Feature - Add InsightModal with task completion UI and card interactivity: Created new InsightModal reusable component for viewing task subsets per card type. Mobile renders as bottom-sheet with slideUp animation, desktop as centered 480px card. Each modal displays sorted task lists (overdue by date, due-today by priority, etc.) with circular toggle buttons for completion and strikethrough completed titles. Integrated into SmartSections with openModal state tracking which card type is open. Made InsightCard components into <button> elements with hover/focus interactive states. Modal stays open after toggling to enable batch completion workflow.
+Concurrent bursts (PUT of different tasks on a new and on an adopted account, duplicate PUTs of one task, POSTs of already-completed tasks, a burst with the first four derived writes failed, two users plus a bystander with cross-account PUTs and forged PATCHes) accept only the documented outcomes: 200, or a 500 whose body is exactly the documented derived_unpersisted message with the matching logged TreeAwardError; POST bursts must be all 201; response shapes are pinned to the existing route contract.
 
-[2026-05-18] - Bugfix - Fix scroll lock on desktop sheets and add mobile + New task button: Added window.matchMedia check to TaskCreateSheet and GrowthTreeSheet so scroll lock only applies on mobile (max-width: 767px) where sheets are visible. On desktop, sheets are display:none via CSS, so the previous always-on lock would freeze page scroll with no visible sheet to close. Added optional onAddTask prop to TaskFilters with mobile-visible '+ New task' button that opens the create sheet. Button positioned right of status segment pills using new .filter-segment-row flex layout.
+Deterministic failure paths (new helper tests/helpers/driverFaults.ts rejects exactly one planned driver command and passes everything else to the real database) cover PUT with a failed derived write, award or task write, and POST with a failed derived write, derived write plus read-back, award, and award plus cleanup (the documented, accepted gap), each checking task, ledger, xp and reconciliation state and the retry.
 
-[2026-05-18] - Feature - Enhance SmartSections with work-done metrics and refactor GrowthTree styles: Added sixth productivity card (Work Done Today) to SmartSections component with estimated minutes formatting helper. Refactored GrowthTree.module.css to use CSS variables instead of hardcoded colors, improving theme consistency and maintainability. Updated taskInsights utility with getWorkDoneToday() function to track completed task workload.
+##### Execution evidence
 
-[2026-05-14] - Feature - Add insights overview page: Replaced the insights stub with a data-driven page that loads live or cached tasks, initializes growth state, shows today-at-a-glance metrics, renders task completion and priority breakdowns, and embeds the Growth Tree view.
+Execution status, kept separate on purpose.
 
-[2026-05-14] - Feature - Build out reminder notification settings UI: Replaced the reminders placeholder with a full settings surface for browser notification permission, a master reminders toggle, per-alert switches, buffer time selection, and quiet-hours scheduling, with disabled-state handling when reminders are turned off.
+Earlier sandbox runs: the MongoDB binary download was blocked, so api.routes, treeAward.realmongo and treeRoutes.realmongo could not start (33 files passed, 3 failed with DownloadError; 1526 tests passed, 73 skipped); that run says nothing about the new tests.
 
-[2026-05-14] - Accessibility - Improve adaptive theme accessibility and control contrast: Adjusted the adaptive theme control to use a proper label association, aria-describedby wiring, top-aligned toggle layout, stronger unchecked track contrast, flex-safe switch sizing, and dynamic theme-card aria labels.
+Maintainer run on Windows against a real MongoDB (full server suite): 36 files passed, 1,605 tests passed, 1 todo, including treeAward.realmongo, treeRoutes.realmongo and api.routes.
 
-[2026-05-13] - Feature - Add adaptive theme controls to Settings page: Replaced the Settings stub with a full appearance and account screen, including the adaptive toggle switch, manual theme override banner with reset action, theme cards with per-theme accent dots, and the password change link.
+Not yet run in CI.
 
-[2026-05-13] - Feature - Add protected dashboard subpages: Added protected routes for /dashboard/insights, /dashboard/reminders, and /dashboard/settings, each rendered inside the shared AppLayout so unauthenticated users are redirected consistently.
+##### Known gap and limitations
 
-[2026-05-13] - Feature - Sync orb display with live Growth Tree data: Added orb data context updates so the floating orb now reflects real XP/stage/progress from `treeState` with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.
+Limits of that evidence: the one todo is a KNOWN GAP, a POST whose award fails and whose cleanup also fails leaves a completed task with no award and the retry makes a second task (characterised by a test, not fixed, tracked in its own issue), so the Growth Tree is not shown to have complete failure-path integrity; the fault-trace assertions cover only the commands the helper wraps.
 
-[2026-05-12] - Feature - Add Growth Tree sheet and orb handler: Added `GrowthTreeSheet` mobile drawer and `OrbContext` with `useRegisterOrbTap` so pages can register orb handlers; orb tap now opens the sheet on mobile and preserves tooltip fallback on desktop to avoid locking scroll.
+##### Test harness and coverage
 
-[2026-05-12] - Bugfix - Prevent offline deletions from disappearing when queue write fails: Changed offline delete flows to enqueue first and only remove from UI state after successful queueing for single, completed-bulk, and selected-bulk deletes. Added a clear user-facing failure message when storage is unavailable.
-[2026-05-12] - Feature - Added mobile task create sheet drawer: Introduced TaskCreateSheet with slide-up mobile drawer UX, Escape/backdrop close behavior, body scroll locking, focus management, and router-state opening via FAB with optimistic close on submit.
-[2026-05-12] - Frontend - Added desktop header nav and fixed responsive spacing: Added desktop navigation links in AppLayout header using shared NAV_ITEMS and active state aria-current, and fixed desktop main padding when bottom nav is hidden.
-[2026-05-12] - Bugfix - Fixed dashboard two-column grid child structure: Wrapped dashboard toolbar and content panel in main-column so dashboard-page maps cleanly to sidebar + main content columns and prevents panel wrapping behind sidebar.
-[2026-05-12] - Docs - Cleaned and reorganized server upgrade plan: Refactored server_upgrade_plan.md into a single structured roadmap grouped by priority with normalized issue sections and clear recommendations.
-[2026-05-12] - Frontend - Aligned app.css with assistance baseline and fixed desktop overlap: Added missing empty-state and reminder-note selectors, validated authenticated dashboard layout, and fixed desktop FAB overlap with toolbar actions.
-[2026-05-11] - Frontend - Hardened growth storage and offline queue handling: Added batch-5 growth storage initialization and serialized sync queue writes to keep task progress and offline actions stable.
-[2026-05-11] - Bugfix - Prevent permanent sync errors from retrying forever: Updated the offline queue processor to detect permanent 4xx failures, discard impossible entries, and keep transient errors queued for retry.
-[2026-05-11] - Frontend - Updated dashboard toolbar and productivity snapshot: Wrapped the dashboard controls in a dedicated toolbar shell, upgraded SmartSections to iconified insight cards, and synced the dashboard layout and toolbar styles.
-[2026-05-11] - Accessibility - Completed component accessibility audit and batch implementations: Implemented ARIA attributes across all components. Batch 1: TagInput + TaskFormFields with full ARIA support. Batch 2: TaskCreateForm, TaskFilters, TaskEditForm with semantic HTML. Batch 3: GrowthTree, ReminderSettings with permission display.
-[2026-05-11] - Frontend - Build validation after component updates: All builds passed successfully. 137 modules transformed, 351.50 KB JS / 111.80 KB gzip, 49.92 KB CSS / 9.37 KB gzip.
+The fault helper is covered by MongoDB-free tests/driverFaults.test.ts (nothing fails unless planned, a fault hits only its named command, reset() cannot leak plans, restore() is idempotent) and records an ordered command trace so the read-back tests prove which command was failed.
 
----
+##### Known-gap follow-up
 
+The award-plus-cleanup case is labelled a KNOWN GAP (characterised, not endorsed) with an it.todo for its remediation, to be tracked in its own issue.
+
+#### fail fast when the production API base URL is missing or invalid (Issue #36)
+
+**2026-10-17 · Config · completed · Priority: high**
+
+The client used import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000', and Vite inlines that value at build time, so a production build without the variable succeeded and shipped a bundle that called localhost.
+
+##### Validation contract
+
+Validation now lives in one pure helper (src/config/apiBaseUrl.ts: resolveApiBaseUrl, ApiBaseUrlError).
+
+Missing or blank means the localhost default in development and an error in production; a set value must be an absolute http:// or https:// origin (no path, query, fragment or credentials) in every mode, and is normalised to its origin.
+
+Errors never echo the rejected value.
+
+##### Build integration
+
+Two callers: a Vite plugin in vite.config.ts checks the env Vite resolved during vite build (the primary guard, so a bad configuration fails the build), and services/api.ts resolves the same value at module load as a backstop.
+
+CI sets a non-secret placeholder VITE_API_BASE_URL on the verify step because the production build now requires it; the README and .env.example document the setting and that on Vercel it must be set before the build.
+
+##### Tests and evidence
+
+Tests: pure helper table tests, apiClient baseURL wiring, and the real vite.config.ts build guard via resolveConfig.
+
+#### make the global 401 handler session-aware (Issue #34)
+
+**2026-10-17 · Bugfix · completed · Priority: high**
+
+The Axios response interceptor used to clear auth and redirect to /login on ANY 401, so a delayed 401 for account A (logged out, then B signed in while the request was in flight) signed B out.
+
+##### Session-aware handling
+
+Each request is now stamped by the request interceptor with the auth store's in-memory sessionGeneration (0 at startup, +1 on every setAuth and clearAuth, never persisted and not a credential); on a 401 the request counts as the current session's only if its generation is still current AND the bearer token it was sent with (read back from its Authorization header) is still the credential in use, so a re-login with an identical token string is a different session, and, while this tab's store is empty, the stored token being replaced by another tab is caught too.
+
+A request sent while signed out still counts as current while nobody has signed in, so the login form's own 401 behaves as before.
+
+The redirect moved behind an exported authRedirect.toLogin seam so tests can observe it.
+
+##### Storage and queue boundaries
+
+The store/storage invariant is documented in authStore (within a tab the token and storage change together, only in setAuth/clearAuth/hydration; a non-null store token always wins over storage, and there is no cross-tab synchronization, so a tab that holds a token does not notice another tab's sign-in or sign-out).
+
+Offline queue ownership is unchanged (bound sessions are still verified before send); a queued request refused with 401 after an account switch keeps its entry and leaves the new session alone.
+
+##### Tests and evidence
+
+Tests: services/api.session401.test.ts (35: current-session 401, stale 401, concurrent requests, rapid switching, identical-token re-login, store/storage fallback states, hydration, normal responses) and two queue tests in offline/queueProcessor.credentials.test.ts, all deterministic via held adapter promises.
+
+A second genuine 401 of the same session no longer signs out twice.
+
+#### Stop tracking production environment files
+
+**2026-10-17 · Config · completed · Priority: low**
+
+Ignore all production .env files while preserving .env.example files; removed the client and server production files from Git tracking.
+
+#### remove the public demo credential from the README (Issue #33)
+
+**2026-10-17 · Docs · completed · Priority: high**
+
+The README no longer publishes a reusable demo email/password pair.
+
+Visitors now register their own account (open registration, no email verification, so no SMTP dependency); every account starts empty and is confined to its own data.
+
+The server has no seed, demo or admin mechanism, so no code or data changed.
+
+New docs/DEMO_ACCESS.md explains the visitor path, how a maintainer can hand out a guided demo account out of band without committing credentials, and how to rotate or revoke one (delete the account, or replace passwordHash and bump tokenVersion).
+
+Tests: tests/noPublishedCredentials.test.ts fails if any Markdown file or the changelog contains a credential written as a label plus a value (the detector is itself tested, including against the previous README); api.routes.test.ts gains an 'isolation between accounts' suite run against a real MongoDB (tasks, history, Growth Tree, push subscriptions, deleted-account tokens).
+
+Operational note: the previously published login remains in git history and was not rotated by this change.
+
+The owner confirmed it was a disposable, normal user account meant for guest logins, so leaving it exposed is an accepted decision; whether it still works was not verified.
+
+#### define Growth Tree reset and recovery rules (Issue #16)
+
+**2026-10-11 · Backend · completed · Priority: high**
+
+##### Rules and API behavior
+
+define Growth Tree reset and recovery rules (Issue #16): one authoritative server rules module (utils/treeRules.ts: deriveTreeStatus, replayAwardDays, presentTreeState) with exclusive statuses on the UTC calendar day.
+
+After one missed day (gap 2) the effective streak is 0 and the tree is wilting; after two or more (gap >= 3) it is 0 and dead; a completion yesterday is at_risk (streak kept, healthy); one completion restores healthy immediately, the streak restarting at 1 unless it was done yesterday.
+
+XP, leaves and stage never decrease.
+
+GET /api/tree, PATCH {} and award/growth responses now return the effective streakDays and health plus additive status and daysSinceActive; reads never write (the stored copy changes only on the next award or retry; a read folds the retained award-day history in memory), and issue #24's atomic award and ledger are unchanged (the inline replay loop moved into replayAwardDays; the pendingDerivedDays recovery marker is replaced by the retained history, see AC8).
+
+AC8 (recalculation gives the same result from the same completion history) is met by retained-history reconstruction: treeState.activeDays (UTC award days, one per day) is the canonical source of the streak and last-active date; the stored streakDays/lastActiveDate/health are a materialised copy that may be validated and repaired from it.
+
+The day is recorded with $addToSet in the SAME atomic update as the XP and the ledger entry; replayAwardDays over the history is the one recalculation (same days, same result, whatever the order, repetition, retry or concurrency); reads stay write-free; XP and task-award de-duplication keep their separate authority.
+
+The history is capped at 20,000 days and never truncated: a new day that would not fit is refused (reason history_full), like a full ledger.
+
+A legacy tree adopts its history in one pinned write (the days implied by its stored streak plus any day left in the old marker, which is removed); activity before the first recorded day is not reconstructible, and that is documented, not claimed.
+
+##### Client behavior
+
+Client: non-authoritative copy (deriveTreeStatus, nextStreak, applyEffectiveStatus) replaces updateStreakState and fixes the devices-disagree bug (server returned the stored streak at 3+ idle days while the client reset it); GrowthTree and Insights show per-status copy that never implies XP or stage is lost.
+
+UTC-day limitation documented (IST example).
+
+##### Tests and evidence
+
+Tests: server treeRules, treeAward and treeRoutes (thresholds, UTC midnight boundary, recovery, replay equivalence, read-only, XP/stage invariants); client parity (byte-identical STATUS_CASES), GrowthTree, treeStorage.
+
+##### Recovery and edge-case hardening
+
+Review follow-up: the effective state is folded from the retained history in memory (reads still never write), so the award fallback response and GET show a recorded-but-unreconciled completion as a restored tree (regression tests force the derived write to fail on POST and PUT, then check the fallback and a later GET, and that storage is untouched).
+
+Clock skew: a recorded award for today is no longer skipped when the stored last-active date is in the future (nextStreak moves that date back to the award day; the read shows the same), with a test for a future stored date plus a recorded award for today.
+
+A zero-streak legacy record that is 2 or 3+ days old now follows the wilting/dead thresholds; unrecorded applies only when gap <= 1 (docs, code and both parity tables aligned, stale zero-streak rows added).
+
+##### Additional verification
+
+Tests added for the history: atomic recording, one entry per day, adoption of legacy streaks and markers (including concurrent first awards and a future date), the cap (refuse a new day, accept a held day, last slot), repair of a stale or wrong copy from the history, and property tests (the fold equals day-by-day nextStreak; random mixes of days, failed derived writes, retries and concurrency leave storage equal to the fold of the recorded days).
+
+##### Migration validation and CI
+
+Review round 4: legacy adoption is bounded (the whole set is validated before the write; if it cannot fit, history_full and the legacy record is untouched; nothing is clamped); stored history is validated strictly (non-array, over the cap, invalid dates, duplicates give conflict with nothing rewritten, via a pre-flight read); migration edge cases (zero streak, missing/invalid last-active date, a date two or more days ahead) infer no days and fabricate no streak, a date one day ahead counts as today; the randomized test now derives its expectations from the actual atomic award log with deterministic injected failures; tests/treeAward.realmongo.test.ts runs concurrent adoption, malformed history and cap behavior against a real mongod; .github/workflows/server-tests.yml runs the full server suite (including api.routes) and the client suite.
+
+#### make Growth Tree state server-authoritative (Issue #24)
+
+**2026-10-08 · Backend · completed · Priority: high**
+
+##### Award authority and idempotency
+
+XP and the awarded-task ledger are now created only by the server.
+
+PUT /api/tasks/:id (incomplete -> complete) and POST /api/tasks (created already completed, the offline create-then-complete path) call utils/treeAward.ts, which awards +10 XP with one atomic conditional MongoDB update on the user document ($ne ledger check + ledger-has-room + xp-range guard, $inc xp and $push taskId together) followed by a compare-and-set write of streak, date and derived fields.
+
+Awards are idempotent per task id: retries, duplicates, concurrent requests and uncomplete -> re-complete never award twice, and concurrent completions of different tasks keep all XP.
+
+##### Failure and recovery semantics
+
+Failure semantics: a failed award fails a PUT before the task is written; a failed task write after an award is retried without a second award; a failed award on POST deletes the just-created task.
+
+Ledger capped at 20,000 ids (refused, never truncated).
+
+Rules (XP per completion, leaves, stages, existing UTC streak/health) live in utils/treeRules.ts; stored values are normalised on read (legacy XP is never clamped; impossible values such as Infinity are repaired).
+
+PATCH /api/tree now rejects every reward field with 400 TREE_FIELD_NOT_WRITABLE.
+
+Task responses carry an additive growth block.
+
+##### Client contract
+
+Client: initTreeStorage adopts the server tree (no higher-XP-wins merge, no pushes), treeService.patchTree and setTreeState removed, applyServerGrowth adopts the server's answer (stale lower-XP responses ignored), offline completions are an in-memory preview replaced by the server's tree after sync (processSyncQueue onGrowth).
+
+##### Tests and evidence
+
+Tests: server treeRules, treeAward (strict atomic in-memory User double), treeAward.mongoose (exact Mongoose command), treeRoutes (HTTP); client treeStorage, useDashboardGrowth, queueProcessor.growth, rules parity.
+
+Streak/health reset semantics are unchanged and remain Issue #16.
+
+##### Persisted recovery protocol
+
+Recovery: step 1 also records the award's UTC day in a server-internal marker set (treeState.pendingDerivedDays, $addToSet, so every unreconciled day survives across several days of failures) in the same atomic update, and step 2 clears it in its compare-and-set after replaying the streak transition for each recorded day, oldest first.
+
+If step 2 cannot be persisted (database error or 5 lost compare-and-sets) the award throws derived_unpersisted instead of returning an unpersisted projection: PUT fails with the task untouched and the retry reconciles the derived fields for every recorded award day without awarding again; POST keeps the task and XP and answers with the persisted tree read back; the next award finishes any leftover marker (recorded days first, then today).
+
+An already-awarded retry with no marker writes nothing, so re-completing an old task cannot keep a streak alive.
+
+Reads (GET, PATCH {}) repair the response only and never write; storage is repaired by the next award (xp pinned repair, then the derived compare-and-set); the ledger is only ever appended to.
+
+#### migrate AI task parsing from deprecated llama-3.3-70b-versatile to openai/gpt-oss-120b (Issue #32)
+
+**2026-10-06 · Backend · completed · Priority: high**
+
+Groq retired llama-3.3-70b-versatile (shutdown 2026-08-16), so the server-side AI task parser now uses openai/gpt-oss-120b.
+
+Only the provider request body in utils/groqClient.ts changed: model openai/gpt-oss-120b; max_tokens: 1024 replaced by max_completion_tokens: 2048 (the application-level output budget; max_tokens is deprecated; Groq's docs do not spell out how reasoning tokens count against it, so live validation should confirm 2048 is sufficient with reasoning enabled); reasoning_effort: 'low' (model default is medium; task extraction is simple, so this limits latency and reasoning-token use); include_reasoning: false (only message.content is read). reasoning_format is not sent (unsupported on gpt-oss), and there is no response_format, stream or tools.
+
+The prompt, the top-level JSON-array contract, parseModelOutput and the 20-task cap are unchanged, as are the authenticated route, rate limits, server-only GROQ_API_KEY, 20 s timeout, AiProviderError categories and generic error responses. tests/aiRoutes.test.ts now asserts the literal model ID and the exact request body (including absent max_tokens, reasoning_format, response_format, stream and tools), handling of a response that carries a reasoning field, and 502 for empty, truncated or content-less output, plus no leak of reasoning text, prompts or keys.
+
+Live validation against Groq was not possible in the development sandbox (no GROQ_API_KEY, api.groq.com blocked), so behaviour against the real model should be checked manually with a real key before release.
+
+Historical entries that name the old model are intentionally unchanged.
+
+#### strengthen backend validation types and API test coverage (Issue #21)
+
+**2026-10-05 · Backend · completed · Priority: high**
+
+Replaced hopeful casts at the backend's trust boundaries with runtime checks and added regression coverage. (1) JWT: new utils/authToken.ts parseTokenPayload() checks the verified payload before any claim is used (plain object; non-empty string userId; string email and name; tv absent => 0 or a non-negative integer) and a failure is the same generic 401 as any bad token, before the database read; jwt.verify and jwt.sign now share one JWT_ALGORITHM (HS256) and verify pins algorithms: ['HS256']. (2) middleware/auth.middleware.ts exports AuthenticatedRequest (user: {id,email,name}, non-optional) and authenticated(handler), an adapter that narrows the request with a runtime check and answers 401 'Authorization token is required' without running the handler if req.user is missing or is not a full {id (non-empty string), email, name} (fail closed); every handler of the task, history, push, tree and ai routers is wrapped, the controllers (the AI one too) take AuthenticatedRequest so an unwrapped handler is a compile error, and use req.user.id, and the optional chaining plus three unreachable 'Unauthorized' guards in push.controller are gone.
+
+The global req.user stays optional (public routes exist). (3) New utils/requestBody.ts: isPlainObject, BODY_MUST_BE_OBJECT and readRequiredStrings (not a validation framework); the three private isPlainObject copies now import it.
+
+Register, login, forgot-password and reset-password, task create/update and tree PATCH now answer 400 for a missing, array, primitive or text body, and the four auth handlers answer 400 '... must be strings' for non-string fields (previously a 500 from .trim()/crypto or an unchecked value).
+
+Existing 400 messages are unchanged.
+
+Unchanged on purpose: case-sensitive 'Bearer ' scheme, reset-code lifetime/hashing/storage, rate limits, task field validators, pagination, demo-mode reset logging. (4)
+
+Tests: tests/testConfig.ts holds the clearly fake TEST-ONLY JWT secret (7 suites now import it instead of private copies) and testConfig.test.ts enforces that src/ never imports or contains it; new Mongo-free suites authToken, requestBody, authBoundary (header matrix, payload matrix with zero lookups, algorithm rejection, every protected route 401, structural guard check, adapter), taskRoutes (malformed/non-hex/missing ids, ownership), bodyBoundaries and authInput (forgot/reset: hash stored not plaintext, expiry, replacement, unknown email, neutral response, round trip, reuse).
+
+Mutation checks: the parser, adapter, body helper, controller guards and route wiring were mutated; every non-equivalent mutant was killed (see the PR report).
+
+#### stabilise MongoDB connection startup and DNS fallback (Issue #20)
+
+**2026-10-04 · Backend · completed · Priority: high**
+
+Stabilised the MongoDB connection and its DNS fallback (config/db.ts, config/env.ts, server.ts).
+
+The fallback stays: on a mongodb+srv:// URI whose resolver refuses SRV queries (querySrv ECONNREFUSED) connectDB retries once with public resolvers (MONGO_DNS_SERVERS, default 8.8.8.8,1.1.1.1).
+
+New: (1) getMongoConfig() validates MONGO_URI (scheme), MONGO_DNS_SERVERS (literal IPs, ip:port, [ipv6]:port; previously a bad entry threw ERR_INVALID_IP_ADDRESS only after the first connection failed, hiding the real error) and the new MONGO_SERVER_SELECTION_TIMEOUT_MS (1000-120000, default 15000 instead of the driver's implicit 30000 per attempt) before any DNS/network work, at startup in server.ts and again in connectDB; error messages never contain MONGO_URI or its credentials (the timeout and DNS-server errors do quote the offending value, a number or IP-shaped string).
+
+MONGO_DNS_SERVERS: unset, empty and whitespace-only all mean defaults; only a separator with no entries (',' or ' , ') disables the fallback (before, a whitespace-only value silently disabled it). (2) connectDB is single-flight: concurrent callers share one attempt, an already-connected call is a no-op, a settled attempt clears the slot.
+
+A probe against real Mongoose 9.4.1 showed two overlapping calls where one logged 'MongoDB connected' at readyState 0, and the DNS save/restore could capture the fallback servers as the originals; neither can happen now.
+
+Success is confirmed from readyState === 1. (3) The process-wide dns.setServers() override is applied for the single fallback attempt only, restored in finally on success/failure/throw (a failed restore is logged CRITICAL and never replaces the real error) and is documented in code and docs/context.md so it is not 'cleaned up'. (4) Logging names only the path (SRV, direct, SRV via fallback DNS), the timeout and an error's name/code; never the URI, host, user or password.
+
+Unchanged: fallback trigger condition, default servers, no retry loop, Mongoose buffering defaults, error propagation to exitWithFatalError.
+
+Tests: tests/mongoConfig.test.ts and tests/mongoConnection.test.ts (70, injected driver/resolver doubles plus one test against the real node:dns state; no Atlas, DNS or network). 27 mutants (restore removed, previous captured late, no single-flight, in-flight not cleared, no/changed timeout, each fallback condition, no readyState check, URI/host leaked in logs, restore error swallowed or replacing the real error, each validation bound, whitespace-only handling) were caught.
+
+Known limits: tests/api.routes.test.ts still needs MongoMemoryServer (download blocked in the sandbox) and was not run; a real Atlas connection and a real refused-SRV resolver were not exercised (the connect path was probed against a refusing local resolver only); server.ts is not unit-testable (runs on import); the driver's sharded-topology SRV polling would use the platform resolver after the override is restored; the final fatal log still prints the driver error object.
+
+Not done on purpose: connection event handlers, a retry framework, a private dns.Resolver.
+
+#### add production HTTP security headers to the API (Issue #28)
+
+**2026-10-04 · Backend · completed · Priority: high**
+
+Added a deliberate, minimal HTTP security-header baseline to the Express API; no new dependency and no Helmet.
+
+New middleware/securityHeaders.ts sets, on every response: X-Content-Type-Options: nosniff; Referrer-Policy: no-referrer; Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; X-Frame-Options: DENY; and, only when NODE_ENV === 'production', Strict-Transport-Security: max-age=15552000 (no includeSubDomains, no preload, not gated on req.secure). app.ts also calls app.disable('x-powered-by').
+
+The middleware is mounted FIRST, before cors(), because cors() answers preflights itself without calling next(); mounted after it, the preflight 204 would carry no security headers.
+
+CSP is intentionally inert: the API returns JSON, an empty 204 and one tiny text/html string (GET /), so it only restricts that one HTML response; it is not a script/style policy, which would protect nothing here (the pages that run script are served by the client's host).
+
+X-Frame-Options is kept only as a compatibility fallback for browsers that ignore frame-ancestors.
+
+HSTS is production-only because local development is plain HTTP, and it omits includeSubDomains/preload because the API lives on a shared platform domain and both are hard to undo.
+
+Cache-Control is deliberately NOT added: it is a behaviour change, not hardening, and ETag/304 revalidation is preserved.
+
+Frontend/Vercel security headers (vercel.json, client CSP) are a separate concern and untouched.
+
+CORS (including the fail-closed production fallback and credentials: true), rate limiting and Retry-After, the 1mb body limit, error statuses/bodies, GET / and auth are unchanged.
+
+Tests: tests/securityHeaders.test.ts (11, exact values, HSTS by NODE_ENV, nothing extra) and tests/securityHeadersRoutes.test.ts (29, the real app.ts with only models/web-push mocked: GET /, 404, CORS preflight, 401, 400, 413, 429 with Retry-After, 500 and an authenticated 200 under production, development and unset NODE_ENV; CORS headers preserved; fail-closed CORS still carries the headers; ETag/304 kept with no Cache-Control).
+
+Mutation checks: 18 mutants (moving the middleware after cors fails exactly the 3 preflight tests; unmounting, no x-powered-by disable, dropping or changing each header, loosening the CSP, HSTS always/never/req.secure-gated/with includeSubDomains/with preload/other max-age, adding Cache-Control) were all caught.
+
+Results: server 779 passed + 31 skipped, typecheck, typecheck:tests and build clean.
+
+Known limits: tests/api.routes.test.ts still needs MongoMemoryServer (download blocked in the sandbox) and was not run; the repo has no formatter/linter configured, so there was no formatting step; headers were verified against the app in-process, not on a live Render deployment, so confirm HSTS and the absence of X-Powered-By with curl -I after deploy.
+
+Noticed, out of scope: Access-Control-Allow-Credentials is sent although auth is Bearer-only.
+
+#### revoke sessions issued before a password reset (Issue #27)
+
+**2026-10-03 · Backend · completed · Priority: high**
+
+Auth is a stateless 7-day JWT whose middleware never read the database, so every token issued before a password reset stayed valid for up to 7 days (including an attacker's).
+
+User now has tokenVersion (default 0); JWTs carry it as tv, signed from the same read that authenticated the caller; requireAuth is async and accepts a token only while (tv ?? 0) === (account.tokenVersion ?? 0).
+
+Missing user -> 401, malformed tv -> 401 before any read, lookup failure -> 500 (fails closed), CastError -> 401; every rejection is the same 'Invalid or expired token'. reset-password is now ONE atomic conditional updateOne filtered on {email, code hash, expiry > now} that sets the password, clears the code, $inc's tokenVersion and empties pushSubscriptions; matchedCount !== 1 -> 400.
+
+The earlier exists() read is only a bcrypt cost guard and decides nothing, which closes the replay race of the old findOne -> bcrypt -> save (two simultaneous requests with one code could both return 200).
+
+Tokens with no tv and accounts with no tokenVersion both read as 0, so nothing signs anyone out on deploy and no migration is needed; a login that straddles a reset signs the old version and is born revoked.
+
+Logout stays client-side.
+
+Client: offline/queueProcessor.ts treated every 4xx except 408/429 as permanent, so a revoked token on reconnect discarded the entire offline queue (the interceptor clears the token on the first 401 and every later entry then went out unauthenticated and was discarded too); a 401 now stops the run and keeps that entry and everything not yet attempted, in order.
+
+Keeping the queue made it a cross-account risk, because requests carry whatever token is current and the queue was ONE global IndexedDB key: a preserved queue would have been sent under whichever account signed in next.
+
+The queue is now per account (sync_queue:<userId>, same convention as history in Issue #31): enqueueSyncAction binds the owner when the action is made (and rejects with nobody signed in); processSyncQueue binds the session (owner AND token) at the start, uses the owner for every read and write (including the write-back after a 401, when the interceptor has already signed everyone out) and passes { session } with every request.
+
+A pre-call ownership check alone was a time-of-check/time-of-use race: the service builds the request later and read whichever token was current then, so an account switch in that gap would have sent A's queued mutation with B's token.
+
+The request interceptor in services/api.ts now verifies the store against the bound session and applies the BOUND token in one synchronous step, or rejects with SessionChangedError before anything is sent (the processor then stops and keeps the rest for the owner); requests without a session are unchanged.
+
+If the account changes while a request is in flight, that request already left as the owner and its result is not fed into the new account's UI or task cache.
+
+The old unowned global key cannot be attributed to anyone, so it is never read or sent and is removed once with a console warning stating how many actions were discarded (pending offline changes made before this deploy are lost, same rule history used).
+
+Tests: 20 new server tests (tests/sessionInvalidation.test.ts: real app, in-memory User double with snapshot reads, atomic conditional updateOne and gates for the double-reset and login-straddles-reset interleavings; 9 production mutants checked and all caught) and 15 + 20 + 14 client tests (offline/queueProcessor.credentials.test.ts: the real task service and API client against a recording adapter, asserting the token each queued create/update/delete actually carries and that a switch between the ownership check and the request, or in flight, sends nothing as the wrong account; offline/queueProcessor.test.ts: 401 handling and cross-account isolation on the real per-account storage; offline/syncQueue.test.ts: storage isolation, owner binding, legacy purge).
+
+Reverting the session binding fails 7 tests, i.e. the suite reproduces the race; mutants of the queue isolation and credential-binding logic (each guard, each entry type, create/update/delete callbacks) were all caught except ones made behaviourally equivalent by deliberate redundancy; 4 real-MongoDB cases added to api.routes.test.ts; the history, AI, push and rate-limit route suites stub the version lookup at 0 with their existing legacy-shape tokens.
+
+Results: server 739 passed + 31 skipped, client 156 passed, server typecheck, test typecheck and build and client build clean.
+
+Known limits: tests/api.routes.test.ts needs MongoMemoryServer, whose binary cannot be downloaded in the sandbox, so its 31 tests (27 existing + 4 new) were NOT run here; a request already past requireAuth when the reset commits finishes; one indexed read per authenticated request is added by design; the task cache (offline/cache.ts) is still one global IndexedDB key (unchanged, out of scope); Express is 5.2.1 so the async requireAuth's rejections reach the error handler (verified).
+
+Noticed, out of scope: Settings -> Change password sends a signed-in user to /forgot-password, which redirects them to the dashboard; the 401 interceptor also fires on a wrong-password login.
+
+#### 3009: harden Web Push subscription and relay boundaries (Issue #26)
+
+**2026-10-02 · Backend · completed · Priority: high**
+
+##### Subscription validation and storage
+
+Subscribe now validates the endpoint (string <= 2048, no whitespace/control chars, valid https URL, no credentials, default port, DNS-name host only: no IP literal in any spelling, no localhost/single-label/.local/.internal), p256dh (unpadded canonical base64url, exactly 65 bytes) and auth (exactly 16 bytes) per RFC 8291, and expirationTime (null/omitted or a future integer ms); only endpoint, expirationTime and keys are stored.
+
+Dedup and the per-user bound are atomic: the old $pull-then-$push (which could duplicate under concurrent requests) is replaced by single-document conditional updates (refresh in place via the positional operator; else $ne-guarded $push with $each + $slice -10; else refresh if a concurrent request stored it), so duplicates are impossible and a user never holds more than 10 subscriptions; the newest wins and the oldest is dropped so legitimate users with stale endpoints can always register a new device.
+
+Unsubscribe requires a non-empty string endpoint <= 2048 (rejecting operator objects like { $ne } that previously reached the $pull and could delete all of a user's subscriptions); unknown endpoints remain a 200 no-op.
+
+##### Relay and delivery behavior
+
+Relay validates title (<= 100), body (<= 500) and tag (<= 200, default halotask-push, no control chars) plus a 3993-byte serialised payload cap, before anything else; limits are derived from the client's reminder payloads and RFC 8291.
+
+Delivery is independent per subscription with a 10 s idle socket timeout; DNS resolution has a separate cancellable 5 s hard deadline; response is { sent, failed, pruned } (failed is additive); 404/410 are pruned in one $pull, all other failures keep the subscription; a prune failure no longer turns a completed relay into a 500.
+
+Logs contain only the push host and status, never endpoints, keys, payloads or upstream error text.
+
+The #23 relay rate limiter is unchanged.
+
+##### Tests and mutation coverage
+
+Tests: 165 server tests in tests/pushRoutes.test.ts plus 97 in tests/pushNetworkGuard.test.ts (in-memory User model that emulates only the operations the controller should issue and throws on anything else, a gate that forces interleaving of concurrent requests, fake web-push); mutation checks on the dedup guard, bound, race retry, pruning, logging, timeout and each validator were caught, and two mutants (removing the in-place-refresh fast path; the explicit IPv4-mapped unwrap, which Node's BlockList already does) are behaviourally equivalent.
+
+##### Network-level SSRF defense
+
+SSRF (review follow-up): shape checks cannot see DNS resolution, so delivery now passes web-push an https.Agent (utils/pushNetworkGuard.ts) whose DNS lookup refuses any non-public address (loopback, RFC1918, CGNAT, link-local/metadata, reserved, ULA/link-local/multicast/NAT64/6to4 IPv6, IPv4-mapped IPv6; a mixed answer fails as a whole); the validated address is the connected address, defeating DNS rebinding.
+
+Provider-agnostic on purpose: no hostname allowlist (browsers produce fcm.googleapis.com, updates.push.services.mozilla.com, web.push.apple.com, *.notify.windows.com, and an exact or suffix list would break others or be a broad invented one); all existing shape checks are unchanged.
+
+##### Verification workflow and DNS limits
+
+Added root `npm run verify` (client: test+build; server: test, typecheck, typecheck:tests, build; stops on first failure); the server test script is unchanged and still includes the Mongo-backed suite.
+
+DNS time bound (follow-up): web-push's timeout is an idle socket timeout started before the lookup finishes, so a never-completing DNS lookup is still settled by it, but dns.lookup (getaddrinfo) cannot be cancelled and would pin a libuv threadpool thread; the guard's default resolver is now c-ares (dns.Resolver: 2 s x 2 tries per query, hard 5 s deadline, cancel() on expiry) so a stalled name leaves no work running; A+AAAA are resolved once and only the validated addresses reach the socket.
+
+The 10 s figure is an idle timeout, not a total deadline.
+
+##### DNS deadline tests
+
+Tests: 97 in tests/pushNetworkGuard.test.ts (silent and answering fake UDP DNS servers, real web-push with a never-settling resolver) and 165 in tests/pushRoutes.test.ts; mutation checks on cancel, deadline, per-attempt timeout, default constants and timer cleanup were caught.
+
+##### Trade-offs and known limits
+
+Trade-off: c-ares ignores /etc/hosts.
+
+Known limits: an attacker-controlled public hostname is still accepted and receives a fixed encrypted blind POST; legacy over-limit entries are trimmed only on the next new subscription; Mongo operator semantics ($ positional update, $ne on an array path, $push with $slice) are verified only against the emulation because tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox.
+
+#### 3009: add rate limiting for authentication and sensitive endpoints (Issue #23)
+
+**2026-10-02 · Backend · completed · Priority: high**
+
+##### Design and deployment scope
+
+Added a small fixed-window, process-local rate limiter (middleware/rateLimit.ts; every number in config/rateLimits.ts; no new dependency, no shared store).
+
+Topology: one long-lived Node process per deployment (Render primary, Railway backup, Vercel client; no cluster/pm2/replica config), so process-local state is sufficient but not globally authoritative and resets on restart; a shared store is the documented follow-up if the API is ever scaled out.
+
+##### Protected routes and policies
+
+Protected: POST /api/auth/login (IP 30/15min, account+IP 5/15min and hashed-account 30/60min, both refunded on success), register (IP 10/60min), forgot-password (IP 5/15min, address 3/60min), reset-password (IP 10/15min, address 5/15min refunded on success), /api/ai/parse-tasks (user 20/10min, IP 60/10min, after requireAuth) and /api/push/relay (user 60/5min, after requireAuth).
+
+Task CRUD, tree, history and push subscribe/unsubscribe are deliberately not limited.
+
+##### Enforcement and capacity behavior
+
+A request is refused if any rule is exhausted; checks run before anything is consumed, attempts are counted up front so parallel requests cannot slip under the limit, and memory is bounded without ever evicting a live bucket: expired buckets are reclaimed, and when a rule's store (20,000 keys) is full of live buckets a request with a NEW key gets the normal 429 (Retry-After = earliest expiry) while existing keys keep being enforced (a flood of unique keys is a denial of service against new keys for at most one window, never a way to reset someone's active limit).
+
+E-mail keys are salted HMACs of the normalised address, IPv6 is bucketed by /64 via Node's net parsers (invalid addresses share one 'unknown' bucket).
+
+Client IP: app.set('trust proxy', TRUST_PROXY_HOPS) with default 0 (forwarded headers ignored); N hops trusts only the N nearest proxies so prepended X-Forwarded-For entries are never believed; malformed values fail startup; production warns when 0; Local development 0, Render 1, Railway unverified (no value claimed).
+
+Previously trust proxy was unset, so behind a platform proxy the old forgot-password limiter keyed everyone to the proxy's address. 429 contract: { message: 'Too many requests.
+
+Please try again later.' } plus Retry-After (whole seconds); no rule, key or count is exposed.
+
+Forgot-password keeps its neutral 200 for known and unknown addresses and its address bucket counts the submitted address regardless of existence, so the 429 point and body are identical (tested end to end).
+
+The old in-controller forgotAttempts Map was removed and superseded.
+
+##### Tests and mutation coverage
+
+Tests: 118 new server tests (77 limiter unit tests with an injected clock, including capacity and IPv6 normalisation, 41 against the real app with mocked models, fake timers and per-test TRUST_PROXY_HOPS); tests/aiRoutes.test.ts and tests/api.routes.test.ts now reset limiter counters in beforeEach (limiting is covered separately).
+
+Mutation checks on the boundary, refund, trust-proxy, route wiring and bucket keys were caught; one mutant (dropping the redundant expiry guard in the check phase) is behaviourally equivalent.
+
+##### Known limits
+
+Known limits: counters are per process and reset on restart; fixed windows allow up to 2x across a boundary; the account-wide login cap can deny an owner for up to an hour during a distributed attack; tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox, so its limiter-reset edit is unverified here.
+
+##### Out of scope
+
+Noticed, out of scope: push subscribe accepts any endpoint URL that relay then POSTs to, and a user's subscription list is unbounded.
+
+#### 3009: move AI task creation behind the authenticated backend (Issue #22)
+
+**2026-10-01 · Bugfix · completed · Priority: high**
+
+The browser called Groq directly with a Bearer key read from import.meta.env.VITE_GROQ_API_KEY, so the secret was shipped in the client bundle.
+
+AI parsing now goes through POST /api/ai/parse-tasks behind the existing requireAuth middleware.
+
+Request: { prompt } (non-empty after trimming, max 2000 chars; any provider/model/url/temperature fields are ignored because provider, model, endpoint and max_tokens are server constants).
+
+Response: 200 { tasks: [{ title, priority, dueDate?, estimatedMinutes?, tags, description }] }; the server runs the same parsing prompt and sanitises the model output (max 20 tasks, bounded title/description/tags, real YYYY-MM-DD dates, valid minutes), and the client keeps its draft mapping so the UX is unchanged.
+
+Validation runs before any provider call.
+
+Errors are generic: 400 invalid, 429 provider rate-limited, 502 provider unavailable/auth failure/bad output (a provider 401/403 is never forwarded as 401, which would log the user out), 504 timeout (20s), 503 GROQ_API_KEY not configured; provider text, the key, prompts and generated content are never returned or logged.
+
+The key lives only in the server-only GROQ_API_KEY (config/env.ts getGroqApiKey; documented in server .env.example, .env.production and README; server.ts warns when unset).
+
+VITE_GROQ_API_KEY was removed from client code and env files, and the client production bundle was scanned and contains no provider reference.
+
+Rate limiting: no reusable limiter exists; per the issue none was built, the endpoint is bounded by auth, prompt cap, max_tokens and timeout, and per-user limiting depends on Issue #23.
+
+Tests: 41 new server tests (39 in aiRoutes.test.ts with fetch mocked, 2 in env.test.ts) and 16 new client tests (aiService, hook, and a source scan that fails if a provider reference or key variable reappears).
+
+Known limits: tests/api.routes.test.ts still needs MongoMemoryServer, which cannot download its binary in the sandbox; no per-user rate limit until Issue #23; the prompt's 'today' is the server UTC date, as the browser's was.
+
+#### 3009: fix History source of truth, date semantics, and sync reliability (Issue #31)
+
+**2026-10-01 · Bugfix · completed · Priority: high**
+
+##### Problem and data model
+
+Client history lived only in one global IndexedDB key (task_history) shared by every account on the browser, getWeekHistory() never read the server so a cleared IndexedDB lost history even though snapshots had been pushed, failed pushes were swallowed and never retried, and the server built its GET window with toISOString() (UTC) while the client used local calendar days.
+
+The server also accepted any YYYY-MM-DD on PUT /api/history/today, coerced numbers with Number(x) || 0 and stored completedTasks with no shape or bounds.
+
+Model: the history of a day is the SET of completed tasks keyed by task id; count and minutes are recomputed from it, so reconciling cannot double-count.
+
+##### Source of truth and reconciliation
+
+The server is the durable source of truth; IndexedDB (now per user: task_history:<userId>) is the offline cache and outbox.
+
+Every local change and the first read of a session run pull -> merge -> push: a pending local snapshot is merged into the server row as (server - tasks this device un-completed) U local by task id and is never allowed to replace the server row wholesale, so a device that was offline cannot erase tasks another device completed (server A,B,C + pending local A,B stays A,B,C and nothing is sent).
+
+A task is removed only when this device itself saw it stop being completed. pendingSync clears only when the exact pushed revision is acknowledged, transient failures are retried (throttled), a payload 400 is permanent but a DATE_* 400 is retried, bursts of edits coalesce, snapshots are applied in request order (fixed a race where the one-time legacy purge let a later snapshot jump the lock), and a push is skipped if the account changed.
+
+No timestamps are compared, so clock skew cannot reorder snapshots.
+
+##### Calendar-day contract
+
+Calendar days: ONE convention.
+
+A history date is the user's local calendar day = the calendar date of an instant shifted by the user's UTC offset.
+
+The client declares utcOffsetMinutes (-720..840) on every history request; the server validates 'today' from its clock plus that offset with NO clock-skew tolerance (exactly one date: yesterday and tomorrow are rejected; failures carry codes DATE_NOT_TODAY / DATE_OUT_OF_RANGE, which the client treats as retryable while other 400s stay permanent) and has no default offset and no UTC fallback (GET requires endDate and utcOffsetMinutes; calls without them are rejected).
+
+API: PUT /today accepts only today at the declared offset; PUT /:date is a bounded backfill (last 7 days, never future) required because snapshots are queued and pushed after their own day has ended (call path: reconcile -> pushEntry -> date === today ?
+
+PUT /today : PUT /:date).
+
+GET days must be a single integer 1-90 (rejected, not clamped); repeated/structured params, non-finite/negative/excessive numbers, malformed or duplicate completedTasks, oversized arrays and invalid/future dates are rejected with 400 (utils/historyValidators.ts); GET returns updatedAt (null for days with no record).
+
+##### Legacy behavior
+
+Legacy: the old global task_history key has no provable owner, so it is discarded, never read, merged, pushed or assigned to whichever user logs in next; it is deleted on first use and server-persisted history is recoverable.
+
+##### Tests and coverage
+
+Tests: 62 client history tests and 223 server history tests (Mongo-independent: mocked model with the real router and auth), including merge-by-id cases, a 1024-case union property test, UTC+14, UTC-12, India, Los Angeles (PDT and PST), DST transitions, midnight boundaries (cross-checked against Intl), legacy purge and user isolation.
+
+##### Scope boundary
+
+Growth Tree reward rules and the Growth Tree's own UTC streak date are unchanged.
+
+##### Known limits
+
+Known limits: tests/api.routes.test.ts needs MongoMemoryServer, which cannot download a binary in the sandbox; two devices that pull and push within the same short GET-PUT gap can still overwrite each other (closing it needs an atomic server-side merge, untestable here); the global tasks cache (offline/cache.ts) has the same cross-user bug class and is not addressed.
+
+### September 2026
+
+#### 3009: isolate Growth Tree client state per authenticated user (Issue #30)
+
+**2026-09-30 · Bugfix · completed · Priority: high**
+
+Fixed an account-to-account contamination bug in the client Growth Tree persistence layer: state lived under one global IndexedDB key (growth_tree) with an owner-less module-level cache, so after logout/login on a shared browser user A's local XP and awardedTaskIds could be merged into user B's state and pushed to B's server record. treeStorage.ts now keys IndexedDB records as growth_tree:<userId> (user id from useAuthStore, via the existing offlineDb; no schema change) and the in-memory cache records its owner, so getTreeState() never returns another user's state. initTreeStorage() throws TreeIdentityError when there is no authenticated user and discards its result (no cache write, IndexedDB write or server push) if the user changes while it is awaiting local or server state; setTreeState() throws unless init has completed for the current user.
+
+Legacy unscoped data (growth_tree in IndexedDB, halotask:growth_tree in localStorage) has no provable owner, so it is never read or migrated and is deleted on init; the server copy is the recovery path for progress that was successfully synchronized. clearAuth() intentionally does not clear Growth Tree state: owner-scoped keys and cache already prevent cross-user reads, and wiping on logout or 401 would destroy the previous user's unsynced offline progress. useDashboardGrowth re-initialises when the user id changes and skips awards on identity mismatch; InsightsPage now handles an init rejection explicitly (logs and shows no tree while the rest of the page loads).
+
+Reward rules, XP values, streak/health rules, stage thresholds and merge semantics are unchanged.
+
+Added 13 regression tests (two users on shared storage, logout/login cycles, higher local XP vs lower server XP, awardedTaskIds isolation, mid-init account switch, no-user failure, legacy purge, single-user/offline/merge behaviour).
+
+Full client suite (29 tests), tsc -b and vite build pass.
+
+Known follow-up: the global tasks cache in offline/cache.ts has the same cross-user bug class and is not addressed here.
+
+#### 3009: harden server startup, shutdown, CORS, and request limits
+
+**2026-09-30 · Backend · status not recorded · Priority: not recorded**
+
+startServer() now has an explicit .catch() (previously `void startServer();` with no rejection handling), so a startup-specific failure like connectDB() rejecting gets a clear "Failed to start server" log and a non-zero exit instead of silently becoming an unhandled rejection.
+
+Extracted resolveOrigin() (CORS) into src/config/cors.ts and the startup-failure/graceful-shutdown logic into src/utils/processLifecycle.ts (exitWithFatalError(), createGracefulShutdown()) as standalone, dependency-injected functions so they're unit-testable without spawning a real process or opening a real HTTP/DB connection; behavior is unchanged (CORS still fails closed in production when CLIENT_ORIGIN is missing, dev still falls back to localhost, shutdown still closes the HTTP server before Mongoose with a 10s unref'd force-exit safety timer).
+
+Fixed a real bug found while extracting this: the global error handler in app.ts flattened every error to a generic 500, including body-parser's own express.json() errors for an oversized body (413, PayloadTooLargeError) or malformed JSON (400, SyntaxError) - both were being reported as 500 even though body-parser already knew the correct status.
+
+Added src/utils/httpErrors.ts (isPayloadTooLargeError(), isMalformedJsonBodyError()) with type guards verified empirically against the installed body-parser version, and the error handler now checks those first.
+
+Added unit tests for resolveOrigin(), exitWithFatalError()/createGracefulShutdown() (including force-exit-on-timeout, no-double-exit-on-a-second-signal, and resilience to closeServer/closeDb errors), and the httpErrors guards - none need MongoDB.
+
+Added tests/httpBoundary.test.ts, a supertest-based integration suite exercising the real CORS/body-limit/error-handler wiring end to end (also without MongoDB, by building a small app from the same middleware/resolver rather than importing src/app.ts directly, which would otherwise trigger a Mongoose "Cannot overwrite model" error when re-imported under different env vars in the same test run).
+
+Documented the 1MB request body limit and the CORS fail-closed behavior in README.md and docs/context.md.
+
+#### 2609: harden task API validation and query boundaries
+
+**2026-09-26 · Backend · completed · Priority: high**
+
+Malformed task ids on PUT/DELETE now return 400 instead of a 500 from an unhandled Mongoose CastError.
+
+Task body validation (title, description, tags, priority, dueDate, estimatedMinutes) is centralized in taskValidators.ts and applied identically on create and update, so an empty/whitespace title or an invalid due date is rejected consistently regardless of endpoint (previously update silently dropped an empty title instead of rejecting it).
+
+Added length/count limits: title 200 chars, description 2000 chars, up to 20 tags of 50 chars each, estimatedMinutes 0-100000.
+
+GET /api/tasks is now paginated (default and max page size 200) with page/limit/total/hasMore added additively to the response.
+
+Fixed a real backward-compatibility gap found in review: the frontend's taskService.getTasks() previously assumed a single page had every task, which would have silently truncated any user with >200 tasks; it now transparently loops pages until hasMore is false (capped at 500 pages as a runaway-loop guard), so the paginated backend is invisible to the rest of the app.
+
+Also fixed estimatedMinutes accepting an empty string as 0 (Number('') === 0), tightened the pagination parser to use Number.isSafeInteger and to reject repeated/array query params (?page=2&page=999) instead of silently taking the first value. findOneAndUpdate now runs schema validators.
+
+Added unit tests for the validators/pagination parser/taskService pagination-consumption and integration tests for malformed ids, invalid dates, empty/over-length titles, invalid priority, tag limits, estimatedMinutes bounds (including the empty-string case), and pagination boundaries including ownership filtering.
+
+Follow-up from review: the client's 500-page safety ceiling now throws an explicit error instead of returning a silently truncated task list, and the aggregated result reports hasMore: false so its pagination metadata is internally consistent.
+
+#### 2609: harden authentication and password recovery security
+
+**2026-09-26 · Backend · completed · Priority: high**
+
+Made registration and reset-password validation consistent (shared password-minimum, email-format, and name normalization/validation rules across register, login, forgot-password, and reset-password), and RESET_TOKEN_TTL_MINUTES is now validated at server startup so a malformed value fails fast instead of silently producing reset tokens that expire immediately or never.
+
+Confirmed reset codes already use crypto.randomInt (not Math.random) and that reset codes are never logged when a configured email transport fails.
+
+Added unit tests for the new validators/config parsing and integration tests for the register-validation and forgot/reset-password round trip.
+
+#### 2609: fix cold-start overlay completion and add manual dismiss
+
+**2026-09-26 · Bugfix · completed · Priority: high**
+
+Replaced the settled-request-only completion signal with a genuine success/error outcome so the cold-start overlay never claims the server is ready after a failed request, fixed a race where the entrance animation could stomp a manual dismiss, and added a keyboard-accessible manual close button so users are never stuck waiting on the Task Tapper screen.
+
+Added Vitest + Testing Library coverage for the automatic and manual completion paths.
+
+### May 2026
+
+#### 2605: align insights cards with persisted completed history
+
+**2026-05-26 · Bugfix · completed · Priority: medium**
+
+Update the Insights page to read Completed Today and Work Done Today from the same persisted daily history snapshot used by the dashboard, so clear-completed no longer causes a mismatch between pages.
+
+#### 2605: preserve Completed Today after clearing finished tasks
+
+**2026-05-26 · Bugfix · completed · Priority: medium**
+
+Switch the dashboard productivity snapshot to the persisted day history entry and read the latest committed task state before snapshotting during clear-completed, so clearing finished tasks no longer zeros the Completed Today and Work Done Today cards.
+
+#### 2605: preserve completed-task history when clearing completed items
+
+**2026-05-26 · Bugfix · completed · Priority: medium**
+
+Add a skipSnapshot option to task persistence so clear-completed no longer overwrites the pre-delete weekly snapshot, keeping Completed Today history intact.
+
+#### 2605: rewrite insights page with weekly summary and task drill-downs
+
+**2026-05-26 · Feature · completed · Priority: high**
+
+Replace the insights overview with a full analytics page, add clickable task stat cards that open the shared InsightModal, enable optimistic task toggling from the modal, surface tag breakdowns and day-of-week patterns, and add weekly summary chips for streak, week total, work done, and best day.
+
+#### 2605: add five-step onboarding flow and onboarding gate
+
+**2026-05-26 · Feature · completed · Priority: high**
+
+Add a full-screen onboarding page with five steps, onboarding completion session flags, protected /onboarding routing, register redirect, and authenticated entry gating.
+
+#### 2405: add title bar image and favicon
+
+**2026-05-25 · Frontend · completed · Priority: low**
+
+Added a custom title bar image and browser favicon; updated header layout and CSS; added favicon link in index.html.
+
+#### 2405: add PWA installability and Web Push relay support
+
+**2026-05-25 · Feature · completed · Priority: high**
+
+Add the PWA manifest, service worker, generated app icons, a client push subscription hook, reminder-to-push relay wiring, and authenticated server push subscribe/unsubscribe/relay endpoints with VAPID setup.
+
+#### 2405: add AI task creation with Groq parsing and draft preview flow
+
+**2026-05-24 · Feature · completed · Priority: high**
+
+Add a Groq-powered AI task parser hook (llama-3.3-70b-versatile, OpenAI-compatible endpoint), AI-aware task form wiring, draft preview/confirmation UI, and sequential live task creation that persists tasks into the current list.
+
+#### 2405: add cold-start Task Tapper overlay for slow server wakes
+
+**2026-05-24 · Feature · completed · Priority: high**
+
+Bump the API timeout to 60s, add a 3s cold-start timer in dashboard sync, and mount a full-screen Task Tapper overlay that auto-dismisses once the server responds.
+
+#### 2305: switch toolbar meta collapse to max-height with open overflow visibility
+
+**2026-05-23 · Bugfix · completed · Priority: low**
+
+Replace the toolbar meta wrapper's grid-template-rows collapse with a max-height transition and open-state overflow: visible so the reminder dropdown can escape the container while the meta block remains collapsible.
+
+#### 2305: focus task title input on desktop; pass autoFocus/inputRef through forms
+
+**2026-05-23 · Frontend · completed · Priority: medium**
+
+Add `autoFocus` and `inputRef` props to TaskFormFields and TaskCreateForm; pass `autoFocus` from TaskCreateSheet; add `titleInputRef` in DashboardPage and focus the sidebar title input on desktop Add action.
+
+#### 2305: fix input ref typing for titleInputRef
+
+**2026-05-23 · Bugfix · completed · Priority: low**
+
+Correct `RefObject` typing to allow `null` for `inputRef` props in TaskFormFields and TaskCreateForm to match `useRef(null)` signature and prevent TypeScript errors during build.
+
+#### 2305: FAB SVG and interaction improvements; toolbar CTA sizing on mobile
+
+**2026-05-23 · Frontend · completed · Priority: low**
+
+Replace FAB text with a crisp SVG crosshair-plus, center SVG reliably via grid layout, add hover ring glow and improved active press feedback; allow toolbar primary CTA to size naturally on mobile so the '+ New task' button fits inline.
+
+#### 2305/v6: add server-backed 7-day history sync and responsive task-sheet/filter updates
+
+**2026-05-23 · Feature · completed · Priority: high**
+
+Applied v6 updates across client and server: added collapsible advanced filter CSS and non-squishing segment tabs, switched desktop TaskCreateSheet from hidden to centered modal while hiding toolbar '+ New task' CTA on mobile, changed Dashboard add-task action to always open the sheet, preserved completed-today counts by snapshotting before clear-completed deletes, synced local history snapshots to server via new historyService, and added authenticated /api/history endpoints with DayHistory model, controller, routes, and app wiring.
+
+#### 2305/v7: keep Add Task visible, collapse toolbar metadata, and persist reminder session state
+
+**2026-05-23 · Feature · completed · Priority: high**
+
+Applied v7 updates across client UI and reminders: restored the Add Task CTA on all viewports, removed the desktop sheet modal conversion so the task sheet stays a bottom sheet everywhere, added a collapsible toolbar-meta section driven by controlled filtersExpanded state, updated reminder checkbox layout and accent styling, and persisted fired reminder keys in sessionStorage for the current browser tab session.
+
+#### Add 7-day local history snapshots and Insights week chart
+
+**2026-05-21 · Feature · completed · Priority: medium**
+
+Added `offline/history.ts` to maintain a rolling 7-day snapshot of completed tasks (completedCount, workDoneMinutes, completedTasks).
+
+Integrated `updateTodaySnapshot` into the dashboard task persistence flow so snapshots stay current.
+
+Enhanced `InsightsPage` to load and render the 7-day history chart with per-day details.
+
+Also added week-history CSS to halotasks-client/src/styles/app.css.
+
+#### Add completed task history section and completedAt tracking
+
+**2026-05-20 · Feature · completed · Priority: high**
+
+Created CompletedSection component to surface a collapsible completed-task history list with re-activate and delete actions.
+
+Added completedAt to the Task type and updated task completion analytics to prefer completedAt while falling back to updatedAt for older records.
+
+Updated the task backend model and update flow to stamp completedAt when a task transitions to completed and clear it when reopened.
+
+Added dashboard styling for the completed section so it matches the existing task list visuals.
+
+#### Implement tree API endpoints with anti-cheat validation and client-side sync
+
+**2026-05-19 · Backend · completed · Priority: high**
+
+Added treeState nested schema to User model with XP, leaves, streak tracking, health/stage enums, and awardedTaskIds array.
+
+Created tree.controller.ts with getTree() and patchTree() endpoints featuring anti-cheat XP validation (append-only check), enum validation for health/stage, and clean $set builder with Math.max guards.
+
+Created tree.routes.ts with requireAuth middleware.
+
+Enhanced app.ts with resolveOrigin() function that fails-closed in production when CLIENT_ORIGIN not set, provides localhost fallbacks in dev, added express.json({ limit: '1mb' }) to prevent memory exhaustion, and upgraded error handler with isDev branching (surface errors in dev, generic messages in production).
+
+On client: created treeService.ts with getTree() and patchTree() API methods, upgraded treeStorage.ts to local-first with server sync: localStorage migration to IndexedDB, merge strategy (higher XP wins, union awardedTaskIds), fire-and-forget server persistence, and offline-first source of truth.
+
+#### Harden MongoDB DNS fallback and add production-grade startup/shutdown
+
+**2026-05-19 · Ops · completed · Priority: high**
+
+Enhanced db.ts to save and restore DNS servers, preventing fallback DNS from leaking into email/API calls elsewhere in process.
+
+Added startup validation to server.ts that fail-fasts on missing JWT_SECRET and MONGO_URI.
+
+Registered global uncaughtException and unhandledRejection handlers before DB connect.
+
+Implemented graceful shutdown on SIGTERM/SIGINT: stops accepting new connections, waits for in-flight requests, closes MongoDB, with 10-second force-exit timeout.
+
+Enhanced logging throughout for visibility.
+
+#### Harden password reset code generation and error handling
+
+**2026-05-18 · Security · completed · Priority: high**
+
+Replaced Math.random() with crypto.randomInt(100000, 1000000) for cryptographically secure 6-digit reset codes.
+
+Restructured sendResetPasswordEmail to distinguish between configured-but-failed transports (error logged, code NOT logged) versus unconfigured demo mode (code logged for testing).
+
+Added explicit Promise<void> return type to sendResetPasswordEmail.
+
+Updated requireAuth middleware to return generic 'Internal server error' to clients while logging full JWT_SECRET configuration details to console.error for server visibility.
+
+#### Add InsightModal with task completion UI and card interactivity
+
+**2026-05-18 · Feature · completed · Priority: high**
+
+Created new InsightModal reusable component for viewing task subsets per card type.
+
+Mobile renders as bottom-sheet with slideUp animation, desktop as centered 480px card.
+
+Each modal displays sorted task lists (overdue by date, due-today by priority, etc.) with circular toggle buttons for completion and strikethrough completed titles.
+
+Integrated into SmartSections with openModal state tracking which card type is open.
+
+Made InsightCard components into <button> elements with hover/focus interactive states.
+
+Modal stays open after toggling to enable batch completion workflow.
+
+#### Fix scroll lock on desktop sheets and add mobile + New task button
+
+**2026-05-18 · Bugfix · completed · Priority: high**
+
+Added window.matchMedia check to TaskCreateSheet and GrowthTreeSheet so scroll lock only applies on mobile (max-width: 767px) where sheets are visible.
+
+On desktop, sheets are display:none via CSS, so the previous always-on lock would freeze page scroll with no visible sheet to close.
+
+Added optional onAddTask prop to TaskFilters with mobile-visible '+ New task' button that opens the create sheet.
+
+Button positioned right of status segment pills using new .filter-segment-row flex layout.
+
+#### Enhance SmartSections with work-done metrics and refactor GrowthTree styles
+
+**2026-05-18 · Feature · completed · Priority: high**
+
+Added sixth productivity card (Work Done Today) to SmartSections component with estimated minutes formatting helper.
+
+Refactored GrowthTree.module.css to use CSS variables instead of hardcoded colors, improving theme consistency and maintainability.
+
+Updated taskInsights utility with getWorkDoneToday() function to track completed task workload.
+
+#### Add insights overview page
+
+**2026-05-14 · Feature · completed · Priority: high**
+
+Replaced the insights stub with a data-driven page that loads live or cached tasks, initializes growth state, shows today-at-a-glance metrics, renders task completion and priority breakdowns, and embeds the Growth Tree view.
+
+#### Build out reminder notification settings UI
+
+**2026-05-14 · Feature · completed · Priority: high**
+
+Replaced the reminders placeholder with a full settings surface for browser notification permission, a master reminders toggle, per-alert switches, buffer time selection, and quiet-hours scheduling, with disabled-state handling when reminders are turned off.
+
+#### Improve adaptive theme accessibility and control contrast
+
+**2026-05-14 · Accessibility · completed · Priority: high**
+
+Adjusted the adaptive theme control to use a proper label association, aria-describedby wiring, top-aligned toggle layout, stronger unchecked track contrast, flex-safe switch sizing, and dynamic theme-card aria labels.
+
+#### Add adaptive theme controls to Settings page
+
+**2026-05-13 · Feature · completed · Priority: high**
+
+Replaced the Settings stub with a full appearance and account screen, including the adaptive toggle switch, manual theme override banner with reset action, theme cards with per-theme accent dots, and the password change link.
+
+#### Add protected dashboard subpages
+
+**2026-05-13 · Feature · completed · Priority: high**
+
+Added protected routes for /dashboard/insights, /dashboard/reminders, and /dashboard/settings, each rendered inside the shared AppLayout so unauthenticated users are redirected consistently.
+
+#### Sync orb display with live Growth Tree data
+
+**2026-05-13 · Feature · completed · Priority: high**
+
+Added orb data context updates so the floating orb reflects live XP/stage/progress from treeState with safe defaults while loading, while preserving desktop tooltip behavior and mobile sheet behavior.
+
+#### Add Growth Tree sheet and orb handler
+
+**2026-05-12 · Feature · completed · Priority: high**
+
+Added GrowthTreeSheet mobile drawer and OrbContext with useRegisterOrbTap so pages can register orb handlers.
+
+Orb tap opens the sheet on mobile and preserves tooltip fallback on desktop to avoid locking scroll.
+
+#### Prevent offline deletions from disappearing when queue write fails
+
+**2026-05-12 · Bugfix · completed · Priority: high**
+
+Changed offline delete flows to enqueue first and only remove from UI state after successful queueing for single, completed-bulk, and selected-bulk deletes.
+
+Added a clear user-facing failure message when storage is unavailable.
+
+#### Added mobile task create sheet drawer
+
+**2026-05-12 · Feature · completed · Priority: high**
+
+Introduced TaskCreateSheet with slide-up mobile drawer UX, Escape/backdrop close behavior, body scroll locking, focus management, and router-state opening via FAB with optimistic close on submit.
+
+#### Added desktop header nav and fixed responsive spacing
+
+**2026-05-12 · Frontend · completed · Priority: high**
+
+Added desktop navigation links in AppLayout header using shared NAV_ITEMS and active state aria-current, and fixed desktop main padding when bottom nav is hidden.
+
+#### Fixed dashboard two-column grid child structure
+
+**2026-05-12 · Bugfix · completed · Priority: high**
+
+Wrapped dashboard toolbar and content panel in main-column so dashboard-page maps cleanly to sidebar + main content columns and prevents panel wrapping behind sidebar.
+
+#### Cleaned and reorganized server upgrade plan
+
+**2026-05-12 · Docs · completed · Priority: high**
+
+Refactored server_upgrade_plan.md into a single structured roadmap grouped by priority with normalized issue sections and clear recommendations.
+
+#### Aligned app.css with assistance baseline and fixed desktop overlap
+
+**2026-05-12 · Frontend · completed · Priority: high**
+
+Added missing empty-state and reminder-note selectors, validated authenticated dashboard layout, and fixed desktop FAB overlap with toolbar actions.
+
+#### Hardened growth storage and offline queue handling
+
+**2026-05-11 · Frontend · completed · Priority: high**
+
+Added batch-5 growth storage initialization and serialized sync queue writes to keep task progress and offline actions stable.
+
+#### Prevent permanent sync errors from retrying forever
+
+**2026-05-11 · Bugfix · completed · Priority: high**
+
+Updated the offline queue processor to detect permanent 4xx failures, discard impossible entries, and keep transient errors queued for retry.
+
+#### Updated dashboard toolbar and productivity snapshot
+
+**2026-05-11 · Frontend · completed · Priority: high**
+
+Wrapped the dashboard controls in a dedicated toolbar shell, upgraded SmartSections to iconified insight cards, and synced the dashboard layout and toolbar styles.
+
+#### Completed component accessibility audit and batch implementations
+
+**2026-05-11 · Accessibility · completed · Priority: high**
+
+Implemented ARIA attributes across all components.
+
+Batch 1: TagInput + TaskFormFields with full ARIA support.
+
+Batch 2: TaskCreateForm, TaskFilters, TaskEditForm with semantic HTML.
+
+Batch 3: GrowthTree, ReminderSettings with permission display.
+
+Added form field labels, filter segments, and permission badge styles.
+
+#### Build validation after component updates
+
+**2026-05-11 · Frontend · completed · Priority: high**
+
+All builds passed successfully. 137 modules transformed, 351.50 KB JS / 111.80 KB gzip, 49.92 KB CSS / 9.37 KB gzip.
+
+No TypeScript errors or warnings.
 ## Categories
 
 | Category | Use Case |
