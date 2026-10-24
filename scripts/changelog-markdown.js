@@ -98,6 +98,31 @@ function insertChangelogEntry(markdown, entry) {
   ];
   lines.splice(insertionIndex, 0, ...block);
 
+  // Keep the month jump list synchronized when a new month is introduced.
+  const navigationIndex = lines.findIndex(line => line === '### Jump to month');
+  if (navigationIndex !== -1) {
+    let navigationEnd = lines.length;
+    for (let index = navigationIndex + 1; index < lines.length; index += 1) {
+      if (lines[index].startsWith('### ') || lines[index].startsWith('## ')) {
+        navigationEnd = index;
+        break;
+      }
+    }
+
+    const months = lines
+      .map(readMonthHeading)
+      .filter(Boolean)
+      .sort((left, right) => right.key - left.key)
+      .map(heading => {
+        const monthLine = lines[heading.index];
+        const match = monthLine.match(MONTH_HEADING);
+        const label = match[1] + ' ' + match[2];
+        return '- [' + label + '](#' + label.toLowerCase().replace(' ', '-') + ')';
+      });
+
+    lines.splice(navigationIndex + 1, navigationEnd - navigationIndex - 1, '', ...months, '');
+  }
+
   return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
