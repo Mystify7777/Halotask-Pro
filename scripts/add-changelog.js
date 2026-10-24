@@ -4,8 +4,8 @@
  * Changelog Entry Generator for HaloTaskPro
  * Usage: node scripts/add-changelog.js
  * 
- * This script helps you add structured entries to the .logs file
- * and optionally updates docs/logs.md
+ * This script adds structured entries to .logs and updates docs/logs.md
+ * when the human-readable changelog is present
  */
 
 const fs = require('fs');
