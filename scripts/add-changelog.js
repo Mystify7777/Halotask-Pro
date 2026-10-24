@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { insertChangelogEntry } = require('./changelog-markdown');
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -70,37 +71,32 @@ async function addChangelog() {
     status: 'completed'
   };
   
-  // Read and update .logs file
-  const logsPath = path.join(__dirname, '../.logs');
-  let logsData = JSON.parse(fs.readFileSync(logsPath, 'utf8'));
-  
-  logsData.entries.unshift(entry);
-  logsData.lastUpdated = new Date().toISOString();
-  
-  fs.writeFileSync(logsPath, JSON.stringify(logsData, null, 2));
-  
-  // Also append to docs/logs.md if it exists
+  // Prepare the human-readable Markdown update before writing either file.
   const docsPath = path.join(__dirname, '../docs');
+  let markdownUpdate = null;
   if (fs.existsSync(docsPath)) {
     const logsMarkdownPath = path.join(docsPath, 'logs.md');
     if (fs.existsSync(logsMarkdownPath)) {
-      const markdownEntry = `[${date}] - ${category} - ${title}: ${description}`;
       const markdown = fs.readFileSync(logsMarkdownPath, 'utf8');
-      const lines = markdown.split('\n');
-      
-      // Find where to insert (after the latest entry or after format section)
-      const insertIndex = lines.findIndex(l => l.match(/^\[2\d{3}-\d{2}-\d{2}\]/));
-      if (insertIndex > -1) {
-        lines.splice(insertIndex, 0, markdownEntry);
-      } else {
-        // Append before last entry pattern or at end
-        lines.push('\n' + markdownEntry);
-      }
-      
-      fs.writeFileSync(logsMarkdownPath, lines.join('\n'));
+      markdownUpdate = {
+        path: logsMarkdownPath,
+        content: insertChangelogEntry(markdown, entry)
+      };
     }
   }
-  
+
+  // Read and update the machine-readable .logs file.
+  const logsPath = path.join(__dirname, '../.logs');
+  const logsData = JSON.parse(fs.readFileSync(logsPath, 'utf8'));
+  logsData.entries.unshift(entry);
+  logsData.lastUpdated = new Date().toISOString();
+  fs.writeFileSync(logsPath, JSON.stringify(logsData, null, 2));
+
+  // Keep docs/logs.md in the same readable, month-grouped format.
+  if (markdownUpdate) {
+    fs.writeFileSync(markdownUpdate.path, markdownUpdate.content);
+  }
+
   console.log('\n✅ Changelog entry added!');
   console.log(`   Category: ${category}`);
   console.log(`   Title: ${title}`);
