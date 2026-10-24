@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type TaskModel from '../src/models/Task.model';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 // Issue #10 model invariant: a dueTime needs a dueDate. These run Mongoose's REAL validation (document validation and
@@ -8,12 +9,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 mongoose.set('bufferCommands', false);
 
-let Task: (typeof import('../src/models/Task.model'))['default'];
+let Task: typeof TaskModel;
 const userId = new mongoose.Types.ObjectId();
 const base = { userId, title: 'x' };
 
 beforeAll(async () => {
-  Task = (await import('../src/models/Task.model.js')).default;
+  // (the dynamic import is typed as CommonJS here, so its `default` needs this cast)
+  Task = ((await import('../src/models/Task.model.js')) as unknown as { default: typeof TaskModel }).default;
 });
 
 const update = (u: Record<string, unknown>) =>

@@ -19,6 +19,20 @@
     {
       "date": "2026-10-22",
       "category": "Backend",
+      "title": "enforce the dueDate/dueTime invariant on every Task model write path (Issue #44)",
+      "description": "The only production task writers are POST and PUT in task.controller.ts (no bulk, import or sync write path exists), and both were already guarded. The rule now also lives in Task.model.ts so direct Mongoose writes cannot bypass it: pre('validate') for documents (cascade-clear when the date of a loaded task is cleared, reject otherwise, also with validateModifiedOnly), guardDeadlineUpdate for findOneAndUpdate/updateOne/updateMany and bulkWrite update ops (stored-date condition added to the write for a lone dueTime, cascaded $unset when the date is removed, refusal of contradictory, upsert, pipeline and unsupported-operator shapes), and replacement checks. Unprotected by design: native driver writes, shell writes, pre-existing data. New DB-less tests (tests/taskModel.writePaths.test.ts) record the commands Mongoose sends; the real-MongoDB suite tests/taskWritePaths.realmongo.test.ts (conditional writes, atomic cascade, concurrent direct writers) was NOT executed in the sandbox because MongoDB cannot be downloaded here. Also fixed typecheck:tests, which failed on the Issue #9/#10 invariant test's import typing. Review follow-up: closed the bypasses where Mongoose validation is disabled: bulkWrite insertOne with skipValidation, insertMany with lean, Model.bulkSave, and save/create/insertOne with validateBeforeSave:false (insertOne documents and insertMany entries are now checked explicitly, and the document rule also runs as a save hook; a date must be usable, not just present). Regression tests use those options and prove nothing reaches the driver. middleware:false skips every hook and remains unprotected by design (documented).",
+      "files": [
+        "halotasks-server/src/models/Task.model.ts",
+        "halotasks-server/tests/taskModel.writePaths.test.ts",
+        "halotasks-server/tests/taskWritePaths.realmongo.test.ts",
+        "halotasks-server/tests/taskModel.invariant.test.ts"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-10-22",
+      "category": "Backend",
       "title": "fix emitted module extension in task model invariant test",
       "description": "Updated the Task model import in taskModel.invariant.test.ts to use the emitted .js extension, matching the server's ESM/NodeNext module resolution and allowing the invariant test to load the model correctly.",
       "files": [
