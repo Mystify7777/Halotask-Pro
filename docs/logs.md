@@ -6,20 +6,27 @@ All changelog entries are tracked in **`.logs`** (machine-readable JSON format) 
 
 ### 📝 Adding Entries
 
-**Interactive method:**
+**Recommended method:**
 ```bash
 node scripts/add-changelog.js
 ```
 
+The generator adds the entry to `.logs` and inserts a matching, month-grouped entry in this Markdown file.
+
 **Manual method:**
-- Edit `.logs` file directly (JSON format)
-- Entry is automatically synced to release notes
+- If editing `.logs` directly, update this file as well. Direct JSON edits do not trigger a sync.
+- Keep both files aligned: `.logs` is the machine-readable record; this file is the human-readable changelog.
 
 ---
 
 ## Format
 
-[DATE] - [CATEGORY] - [TITLE]: [DESCRIPTION]
+Each Markdown entry uses:
+- A level-four heading for the title.
+- A metadata line in the form `YYYY-MM-DD · Category · status · Priority: value`.
+- The description below the metadata, split into paragraphs when that improves readability.
+
+Entries are grouped by month and sorted newest first, both by month and within each month. The generator preserves this format when adding new entries.
 
 ---
 
