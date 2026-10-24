@@ -42,6 +42,14 @@ const base = [
   '',
   'September description.',
   '',
+  '### May 2026',
+  '',
+  '#### May entry',
+  '',
+  '**2026-05-20 · Backend · completed · Priority: medium**',
+  '',
+  'May description.',
+  '',
   '## Categories',
   '',
   'Backend'
@@ -68,10 +76,10 @@ test('creates a missing month between existing month sections', () => {
 });
 
 test('adds an older month before the category appendix', () => {
-  const result = insertChangelogEntry(base, entry('2026-05-20'));
-  assert.ok(result.indexOf('### May 2026') > result.indexOf('### September 2026'));
-  assert.ok(result.indexOf('### May 2026') < result.indexOf('## Categories'));
-  assert.ok(result.indexOf('#### entry 2026-05-20') < result.indexOf('## Categories'));
+  const result = insertChangelogEntry(base, entry('2026-04-20'));
+  assert.ok(result.indexOf('### April 2026') > result.indexOf('### May 2026'));
+  assert.ok(result.indexOf('### April 2026') < result.indexOf('## Categories'));
+  assert.ok(result.indexOf('#### entry 2026-04-20') < result.indexOf('## Categories'));
 });
 
 test('rejects invalid calendar dates instead of creating malformed headings', () => {
