@@ -123,6 +123,8 @@ Limits of that evidence: the one todo is a KNOWN GAP, a POST whose award fails a
 
 The fault helper is covered by MongoDB-free tests/driverFaults.test.ts (nothing fails unless planned, a fault hits only its named command, reset() cannot leak plans, restore() is idempotent) and records an ordered command trace so the read-back tests prove which command was failed.
 
+##### Known-gap follow-up
+
 The award-plus-cleanup case is labelled a KNOWN GAP (characterised, not endorsed) with an it.todo for its remediation, to be tracked in its own issue.
 
 #### fail fast when the production API base URL is missing or invalid (Issue #36)
@@ -459,7 +461,7 @@ DNS time bound (follow-up): web-push's timeout is an idle socket timeout started
 
 The 10 s figure is an idle timeout, not a total deadline.
 
-##### Tests and mutation coverage
+##### DNS deadline tests
 
 Tests: 97 in tests/pushNetworkGuard.test.ts (silent and answering fake UDP DNS servers, real web-push with a never-settling resolver) and 165 in tests/pushRoutes.test.ts; mutation checks on cancel, deadline, per-attempt timeout, default constants and timer cleanup were caught.
 
