@@ -27,6 +27,12 @@ node scripts/add-changelog.js
 
 Entries are listed newest first. Each update has its own heading; date, category, status, and priority are separated from the description to make changes easier to scan.
 
+### Jump to month
+
+- [October 2026](#october-2026)
+- [September 2026](#september-2026)
+- [May 2026](#may-2026)
+
 ### October 2026
 
 #### enforce the dueDate/dueTime invariant on every Task model write path (Issue #44)
