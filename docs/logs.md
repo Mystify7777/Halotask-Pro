@@ -42,6 +42,32 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### October 2026
 
+#### add a persisted, user-configurable IANA time zone and read task times through it (Issue #41)
+
+**2026-10-25 · Feature · completed · Priority: high**
+
+A user can now save an IANA time zone in Settings. It is stored on the account, returned with the user on login, register and `GET /api/user/preferences`, and used by the client to read a task's wall-clock time. The effective zone is the saved preference, else the device's zone (a fallback only, never saved or sent), else UTC.
+
+##### Implementation and behavior
+
+Server: optional `User.timeZone` (no default, no migration, model-validated), `GET`/`PUT /api/user/preferences` (authenticated, scoped to the token's account, a single `$set`/`$unset` of that field, plus the `updatedAt` the schema's timestamps always bump, `null` clears it), and `user.timeZone` in the auth responses. It is not a JWT claim. Validation accepts an IANA identifier the runtime's Intl knows and rejects fixed offsets (Intl itself accepts `+05:30`), unknown names, non-strings and over-long values with `400 { message }`.
+
+Client: `utils/timeZone.ts` converts a wall clock in a zone to an instant using only Intl (no offsets, no table, no dependency). `utils/deadline.ts` takes the zone for the exact deadline, today/tomorrow/overdue classification, due and start labels, and the start-time form conversions. The Settings page has a labelled, grouped selector with loading, saving, unsaved and error states; only a server-confirmed value is applied, and a failed save keeps the previous value. Reminders, the start-now text, the default due date for a new task and the copy-tasks text read the same zone. A due day is formatted from the stored day, so it can no longer show the previous day west of UTC.
+
+Time model: `startTime` is an instant and never moves. `dueDate` is a calendar day and is never rewritten. `dueTime` is a wall clock, so the deadline instant it names moves with the zone. A date-only task stays distinct: never an exact deadline, judged by day. A timed task's reminder identity now includes the zone, so a zone change re-arms its reminder.
+
+Daylight saving: a nonexistent time (spring forward) resolves one hour later on the same date; an ambiguous one (fall back) resolves to its first occurrence; impossible dates and times are refused, not rolled over.
+
+##### Boundaries and limitations
+
+Issue #42 is untouched: date-only reminders still fire at UTC midnight of the due day in every zone. History and Growth Tree days, "completed today" and reminder quiet hours still use the device's clock. The server stores the zone but never interprets it. ICU accepts case variants and legacy aliases, so those validate. Preference changes need a connection and are not queued.
+
+##### Tests and evidence
+
+Added 88 server tests (validator, route, isolation, legacy accounts, auth responses, model validation) and 232 client tests (zone core, a UTC / Asia/Kolkata / America/Los_Angeles / DST / +14:00 / -11:00 matrix run under several machine zones, zone-change semantics, reminders, auth-store hydration, Settings component and page, and the locale-independent label helpers). Client: 38 files, 816 tests passed under en-US, en-IN, en-GB and de-DE, build clean. Server: 1799 passed, 124 skipped; 6 files could not run because the MongoDB binary cannot be downloaded in the sandbox, including the new real-MongoDB suite tests/userPreferences.realmongo.test.ts (stored shape, `$unset`, legacy documents), which has therefore NOT been executed. Typechecks and builds are clean. Injected regressions (machine-zone deadline, wrong DST resolution, a failed save that still applies, a missing store update, an extra written field, a missing auth field) each made the matching tests fail.
+
+Locale follow-up: the label assertions first assumed en-US presentation ("5:30 PM", "Oct 20") and failed under en-IN ("5:30 pm", "20 Oct"). The app formats with the runtime's default locale everywhere, so production was left alone and the tests now read the 24h clock reading, the day and the month as values (`test/localeText.ts`), keeping every instant, day and DST assertion exact. An older notification test that failed in 24h locales (en-GB, de-DE) was fixed the same way.
+
 #### enforce the dueDate/dueTime invariant on every Task model write path (Issue #44)
 
 **2026-10-22 · Backend · completed · Priority: medium**

@@ -9,7 +9,8 @@ import { taskService } from '../services/taskService';
 import { Priority, Task, TaskCreatePayload, TaskUpdatePayload } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
 import { formatDateForInput } from '../utils/dateHelpers';
-import { isoToStartInput, isValidDueTime, startInputToIso } from '../utils/deadline';
+import { dueDayKey, formatDayKey, isoToStartInput, isValidDueTime, startInputToIso } from '../utils/deadline';
+import { dateKeyInZone } from '../utils/timeZone';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
 import { setCachedTasks } from '../offline/cache';
 import { updateTodaySnapshot } from '../offline/history';
@@ -21,11 +22,8 @@ type AddTagResult = {
   message: string | null;
 };
 
-/** Returns today's date as YYYY-MM-DD in local time (not UTC). */
-const getTodayDateString = (): string => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+/** Today's date as YYYY-MM-DD in the user's effective time zone (Issue #41): neither UTC nor the device's zone. */
+const getTodayDateString = (): string => dateKeyInZone(Date.now());
 
 type SyncBridge = {
   setSyncStatus: React.Dispatch<React.SetStateAction<SyncStatus>>;
@@ -628,7 +626,8 @@ export function useDashboardTasks({
       .map((t) => {
         const priorityLabel = t.priority;
         const title = t.title;
-        const due = t.dueDate ? `due: ${new Date(t.dueDate).toLocaleDateString()}` : null;
+        const dueDay = dueDayKey(t.dueDate);
+        const due = dueDay ? `due: ${formatDayKey(dueDay)}` : null;
         const minutes = t.estimatedMinutes ? `~${t.estimatedMinutes}m` : null;
         const tags = (t.tags ?? []).map((tag) => `#${tag}`).join(' ');
 

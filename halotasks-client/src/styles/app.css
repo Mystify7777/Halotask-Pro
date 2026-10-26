@@ -1193,6 +1193,17 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .setting-value { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .setting-status { font-size: var(--text-xs); color: var(--color-text-tertiary); text-align: center; }
 
+/* Time zone preference (Issue #41): select + Save side by side, stacked on narrow screens so the select keeps its width. */
+.timezone-controls { display: flex; gap: var(--space-2); align-items: stretch; }
+.timezone-select { flex: 1; min-width: 0; min-height: 44px; }
+.timezone-controls .btn-sm { min-height: 44px; flex-shrink: 0; width: auto; }
+@media (max-width: 479px) { .timezone-controls .btn-sm { width: 100%; } }
+.timezone-status { display: grid; gap: var(--space-1); }
+.timezone-status .setting-status { text-align: left; }
+@media (max-width: 479px) {
+  .timezone-controls { flex-direction: column; }
+}
+
 .setting-override-banner {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   background: var(--color-warning-bg); border: 1px solid var(--color-warning-border);

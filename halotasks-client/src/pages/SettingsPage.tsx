@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../App';
 import { useAuthStore } from '../store/authStore';
 import type { CSSProperties } from 'react';
+import TimeZoneSetting from '../components/settings/TimeZoneSetting';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -98,6 +99,8 @@ export default function SettingsPage() {
               : `Using ${currentThemeConfig?.label} theme (adaptive off)`}
         </p>
       </section>
+
+      <TimeZoneSetting />
 
       <section className="settings-section panel">
         <h2>Account</h2>

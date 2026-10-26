@@ -17,6 +17,35 @@
   ],
   "entries": [
     {
+      "date": "2026-10-25",
+      "category": "Feature",
+      "title": "add a persisted, user-configurable IANA time zone and read task times through it (Issue #41)",
+      "description": "Persisted IANA time zone preference (Issue #41). Server: optional User.timeZone (no default, no migration, model-validated), authenticated GET/PUT /api/user/preferences (single $set/$unset of that field plus the schema's updatedAt bump, null clears), user.timeZone in login/register responses, not in the JWT; fixed offsets and unknown names are 400. Client: utils/timeZone.ts (Intl only) with a deterministic DST policy (a nonexistent time resolves one hour later, an ambiguous one to its first occurrence), zone-aware deadline, today/overdue classification, labels, start-time form conversion, reminders and start-now text, and a Settings selector with loading/saving/unsaved/error states. startTime stays the same instant, dueDate is never rewritten, dueTime keeps its wall clock so the deadline instant moves with the zone; date-only tasks stay distinct. The device zone is a fallback only and is never saved. A timed task's reminder identity now includes the zone. Issue #42 untouched: date-only reminders still fire at UTC midnight; History/Growth Tree days, completed-today and quiet hours still use the device clock. Added 88 server and 232 client tests; client 816 passed (38 files, run under en-US, en-IN, en-GB and de-DE), server 1799 passed / 124 skipped with 6 files blocked by the MongoDB binary download, including the new tests/userPreferences.realmongo.test.ts, which has NOT been executed. Follow-up: the deadline/reminder label assertions were locale-dependent (they assumed en-US and failed under en-IN); they now read the clock, day and month as values through test/localeText.ts, and one existing notification test that failed in 24h locales was fixed the same way. No production code changed.",
+      "files": [
+        "halotasks-server/src/utils/timeZone.ts",
+        "halotasks-server/src/models/User.model.ts",
+        "halotasks-server/src/controllers/user.controller.ts",
+        "halotasks-server/src/routes/user.routes.ts",
+        "halotasks-server/src/controllers/auth.controller.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-client/src/utils/timeZone.ts",
+        "halotasks-client/src/utils/deadline.ts",
+        "halotasks-client/src/store/authStore.ts",
+        "halotasks-client/src/types/auth.ts",
+        "halotasks-client/src/services/userService.ts",
+        "halotasks-client/src/components/settings/TimeZoneSetting.tsx",
+        "halotasks-client/src/pages/SettingsPage.tsx",
+        "halotasks-client/src/reminders/deadlineLogic.ts",
+        "halotasks-client/src/reminders/notification.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/styles/app.css",
+        "docs/context.md",
+        "halotasks-client/src/test/localeText.ts"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-10-22",
       "category": "Backend",
       "title": "enforce the dueDate/dueTime invariant on every Task model write path (Issue #44)",
@@ -1067,5 +1096,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-10-18T01:41:50.047Z"
+  "lastUpdated": "2026-10-25T14:38:47.817Z"
 }

@@ -5,6 +5,7 @@ import authRoutes from './routes/auth.routes';
 import pushRoutes from './routes/push.routes';
 import taskRoutes from './routes/task.routes';
 import treeRoutes from './routes/tree.routes';
+import userRoutes from './routes/user.routes';
 import historyRoutes from './routes/history.routes';
 import { resolveOrigin } from './config/cors';
 import { getTrustProxyHops } from './config/env';
@@ -41,6 +42,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/tree',  treeRoutes);
 app.use('/api/history', historyRoutes);
+app.use('/api/user', userRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

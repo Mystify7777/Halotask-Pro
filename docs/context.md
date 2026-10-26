@@ -94,6 +94,13 @@ Appearance section:
 - Clicking another theme sets that theme as the override
 - Status text at the bottom always explains the active mode
 
+Time zone section (Issue #41, `components/settings/TimeZoneSetting.tsx`):
+- A labelled `<select>` ("Time zone for task times") whose options come from the runtime's own zone data (`Intl.supportedValuesOf`), grouped by region, plus a first option "Use this device (<zone>)" that saves no choice. A saved or device zone the runtime does not list (for example `UTC`, or an alias) is still offered so the control can always show it
+- Shows the effective zone and where it comes from ("your saved preference" or "this device, not saved"); an unsaved selection is marked "Unsaved change: not applied until you save." and changes nothing until saved
+- Loads the server's value on mount (so a change made on another device is picked up), with a loading state; if the server cannot be reached it says so and keeps the last known value
+- Save is a normal button; saving disables the control, shows "Saving…", and only a server-confirmed value is applied. A failed save shows an alert, keeps the previous saved value and keeps the user's selection so they can retry. A save that finishes after the user signed out is ignored
+- Preference changes need a connection: they are not queued for the offline sync
+
 Account section:
 - Displays user name and email from the auth store
 - Includes a Change password button that navigates to `/forgot-password`
@@ -258,9 +265,10 @@ Important auth behaviors:
 
 Auth store data:
 - `token`
-- `user`
+- `user` (`id`, `name`, `email`, and `timeZone` when the account has a saved time zone; see "Time Zone Preference")
 - `setAuth()`
 - `clearAuth()`
+- `setUserTimeZone()` (records a server-confirmed zone in the store, localStorage and the offline cache; it is not a new session, so `sessionGeneration` does not change)
 
 ## Task and Growth Data
 
@@ -323,7 +331,7 @@ Both fields are optional and independent of the legacy `dueDate`.
 | Field | Format | Meaning |
 | --- | --- | --- |
 | `dueDate` | `YYYY-MM-DD` (unchanged) | Stored as UTC midnight; the UTC date part is the calendar day the user picked. |
-| `dueTime` | `"HH:mm"` (24h) | Wall-clock time on `dueDate`. Needs a `dueDate`. The deadline instant is derived in the viewer's local zone and never persisted. |
+| `dueTime` | `"HH:mm"` (24h) | Wall-clock time on `dueDate`. Needs a `dueDate`. The deadline instant is derived in the user's effective time zone (Issue #41, see below) and never persisted. |
 | `startTime` | ISO 8601 with `Z` or `±hh:mm` | An absolute instant. It has no date anchor, so a start time alone is valid. |
 
 - Parsing is strict: Feb 30, `24:00`, zone-less datetimes and non-strings are 400.
@@ -337,7 +345,50 @@ Both fields are optional and independent of the legacy `dueDate`.
 - Offline 409 (Issue #43): when an update sets `dueTime` against the stored date and the date was removed first, the server answers `409 { message, code: "TASK_DUE_DATE_REMOVED" }`, in the same `{ message, code }` shape other endpoints use. The code is specific to that conflict: a task deleted in between, or a date that is back by the time the conflict is re-read, gets the plain `409 { message }`. The queue recovers only from a 409 whose body is an object with `code` strictly equal to that string and an edit that carries a `dueTime`; message text and payload shape are never used to decide. Recovery sends the edit once more with `dueTime: null`, adopts the server task and tells the user the due time was not kept: one extra request per run, never a loop; if that request fails transiently the original entry is kept. Every other 409 (no body, wrong or malformed code, create/delete) takes the normal path and is discarded as a permanent 4xx.
 - Reminder identity: a task created offline keeps a client-only `clientKey` (its first `local-…` id) after sync, and the scheduler key and notification tag use `clientKey ?? _id`. This keeps an already-fired reminder from re-arming when the id changes. It holds within the persisted cache and the browser session; it does not cover another device, a cleared cache or a new session.
 - "Start now" names a clock time only for a task with a `dueTime`; date-only tasks get the generic message.
-- Known limits: reminders are client-side only (the only server email is for authentication, so there is no task email scheduling to feed); date-only reminders still use UTC midnight.
+- Known limits: reminders are client-side only (the only server email is for authentication, so there is no task email scheduling to feed); date-only reminders still use UTC midnight (Issue #42).
+
+## Time Zone Preference (Issue #41)
+
+A user can save an IANA time zone. It decides how a task's wall-clock time becomes an instant, and which calendar day "today" is for deadlines. The server only stores it; every interpretation happens on the client in one place (`utils/timeZone.ts`, used by `utils/deadline.ts`).
+
+**Storage and API (server)**
+- `User.timeZone`: optional string, no default, no migration. Absent means "no saved choice". The model validates it, so a direct Mongoose write cannot store a bad value either. It is not in the JWT (a claim would go stale on the first change; the token carries only `userId`, `email`, `name`, `tv`).
+- `GET /api/user/preferences` -> `200 { timeZone: string | null }`; `PUT /api/user/preferences` with `{ timeZone: string | null }` -> `200 { timeZone }` as stored. Authenticated (`requireAuth`); the account is the one in the verified token, never a body or query field. No existing route fit (the auth routes are credential flows and there was no profile route), so this is the only new route. `PUT` is a single `$set` (or `$unset` for `null`) of `timeZone`, so no other field of the request or the account is written; the only other change is the `updatedAt` that the schema's `timestamps` bumps on every User update.
+- Validation (`utils/timeZone.ts`): a string of at most 64 characters that looks like an IANA identifier (starts with a letter, so `+05:30`, `-08:00` and `UTC+05:30` never match) and that the runtime's `Intl` accepts. Intl alone is not enough: Node accepts fixed offsets. Anything else, including a missing field, `""`, a non-string, an unknown zone or an offset, is `400 { message }`. The field is required in a `PUT` so a request cannot silently do nothing.
+- Login and register return `user.timeZone` (the saved value or `null`). An older server's response without the field is read as "no choice".
+
+**Effective zone and fallback (client)**
+- effective zone = the saved preference, else the device's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`), else `UTC`.
+- The device zone is a fallback only. It is never sent to the server, never written to the store or `localStorage`, and never overwrites a saved value: sign-in, refresh and a new device all take the server's value (or "none"). A stored value the runtime does not recognise is treated as "none" rather than trusted.
+- Hydration order: the auth store restores the stored user at startup and mirrors its `timeZone` into `utils/timeZone.ts` before the first render, so the first paint already uses the saved zone. Signing out or in as another account resets it; one account's zone never carries over to the next.
+
+**Time model: what a zone change does**
+
+| Value | What it is | When the zone changes |
+| --- | --- | --- |
+| `startTime` | An absolute instant (ISO with an explicit zone). | The instant never changes. Only its display and the `datetime-local` form value change: the same moment is shown as a different clock reading, possibly on a different date. |
+| `dueDate` | A calendar day: the UTC date part of the stored value. | Never rewritten and never re-read through a zone. The same day in every zone. |
+| `dueTime` | A wall-clock `HH:mm` on `dueDate`. | The text is unchanged. The zone turns the pair into an instant, so the deadline instant moves with the zone: 17:30 on 2026-10-20 is 12:00Z in `Asia/Kolkata` and 00:30Z on the 21st in `America/Los_Angeles`. A task that was due in an hour may be overdue, or days away, after the change. This is the chosen meaning ("my 17:30 is my 17:30 wherever I say I live"); changing the zone is not a travel-time conversion. |
+| date-only (no `dueTime`) | A due day with no clock. | Not an exact deadline in any zone and never turned into a midnight instant. It is judged by day: overdue once the effective zone's today is after the due day, "today" on it. |
+
+- "Today", "tomorrow", overdue and the Due Today / Overdue / Upcoming sections compare against the current calendar day in the effective zone (`getDueState`, `isPastDeadline`, `formatDueLabel`), not the device's. A timed task is overdue from its exact instant.
+- Create and edit forms: the start-time input is read and written in the effective zone (`startInputToIso`, `isoToStartInput`), and the default due date for a new task is today in that zone. An untouched start time round-trips unchanged through an edit.
+- Reminders use the same functions (`getExactDeadline`), so "due soon", "overdue", the smart-start window and the "start now" text agree with the card. The "start now" clock time is formatted in the effective zone. The reminder schedule identity (scheduler key and notification tag) of a task with a `dueTime` now includes the zone, so changing it re-arms that task's reminder; start-only and date-only tasks carry no zone and are not re-armed.
+- Sorting is by due day then clock reading and does not depend on the zone.
+- Display text for a due day (`Due Oct 20`, copy-to-clipboard) is formatted from the stored day, so it can no longer show the previous day west of UTC.
+
+**Daylight saving policy (deterministic, never the machine's)**
+- A wall-clock time that does not exist (the hour skipped when clocks spring forward) resolves to the instant it has under the offset in force just before the change, i.e. one hour later, on the same date: 02:30 on 2026-03-08 in `America/Los_Angeles` is 03:30 PDT (10:30Z). It is never rejected and never moved to another day. The same rule applies to half-hour shifts (`Australia/Lord_Howe`).
+- A wall-clock time that occurs twice (the hour repeated when clocks fall back) resolves to its first occurrence: 01:30 on 2026-11-01 in `America/Los_Angeles` is 01:30 PDT (08:30Z), not 01:30 PST. The stored clock text is not changed in either case; a start time that fell in the gap is stored as the resolved instant and reads back as the later clock time.
+- Impossible dates and times (month 13, February 30, `24:00`) are refused, never rolled over.
+- Implementation: only `Intl` (the runtime's time zone data); no fixed offsets, no zone table of our own, no new dependency.
+
+**Remaining limits and decisions for Issue #42**
+- Date-only reminders are deliberately unchanged: the reminder moment of a date-only task is still its stored due date read as an instant (UTC midnight of the due day), in every zone. Issue #42 must decide what moment a date-only task reminds at in the effective zone (it must not invent a due time or silently use local midnight); `getDeadlineMs` and `parseDueDate` in `reminders/deadlineLogic.ts` are the place. Until then a user west of UTC is reminded of a date-only task the previous evening, and one east of it after the day has begun.
+- Not moved to the preferred zone, still the device's: the History and Growth Tree calendar days (the client declares the device's `utcOffsetMinutes` on every History request, per the History contract, and the Tree uses UTC days), "completed today" in `utils/taskInsights.ts`, and reminder quiet hours (`reminders/settings.ts`). A user whose preference differs from their device can therefore see a deadline day and a History day that differ.
+- The server never interprets a zone: it stores `startTime` as an instant and `dueDate`/`dueTime` as sent, and has no deadline logic. There is no server-side overdue calculation to keep in step.
+- Validation accepts anything the runtime's ICU knows, including legacy aliases (`Asia/Calcutta` and `Asia/Kolkata` are both fine; some runtimes list only one) and, because ICU matches case-insensitively, case variants such as `asia/kolkata`. The Settings control only sends names from its own list. A server with newer zone data than a client's browser can store a zone that browser does not know; that client then treats it as "no choice" and uses the device zone.
+- The saved preference needs a connection to change; it is not part of the offline queue.
 
 ## History: Source of Truth, Calendar Days, and API (Issue #31)
 

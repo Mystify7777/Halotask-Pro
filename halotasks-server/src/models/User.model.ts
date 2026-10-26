@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose';
+import { isValidTimeZone } from '../utils/timeZone';
 
 const pushSubscriptionSchema = new Schema(
   {
@@ -51,6 +52,18 @@ const userSchema = new Schema(
     tokenVersion: {
       type: Number,
       default: 0,
+    },
+    // The user's chosen IANA time zone (Issue #41), used by the client to read a task's wall-clock due time and its
+    // start time. Optional with NO default: an absent field means "no saved choice" and the client falls back to the
+    // device's zone, so existing accounts need no migration and nothing ever writes a fallback here. Only the
+    // preferences route sets or unsets it. Never part of the JWT.
+    timeZone: {
+      type: String,
+      required: false,
+      validate: {
+        validator: (value: unknown) => value === undefined || value === null || isValidTimeZone(value),
+        message: 'timeZone must be a valid IANA time zone identifier',
+      },
     },
     resetPasswordTokenHash: {
       type: String,

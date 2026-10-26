@@ -1,8 +1,10 @@
 import { Task } from '../types/task';
 import { getExactDeadline, getStartInstant } from '../utils/deadline';
+import { getEffectiveTimeZone } from '../utils/timeZone';
 
 // Legacy deadline of a date-only task: the stored due date read as an instant (UTC midnight of the due day). Kept
-// exactly as it was so tasks without a due time behave as before (Issue #10).
+// exactly as it was so tasks without a due time behave as before (Issue #10). It is deliberately NOT read in the
+// user's time zone: giving a date-only task a zone-aware reminder moment is Issue #42, a separate decision.
 const parseDueDate = (dueDate?: string) => {
   if (!dueDate) {
     return null;
@@ -26,10 +28,12 @@ export const getDeadlineMs = (task: Task): number | null => getExactDeadline(tas
  * What identifies a task's schedule for reminder de-duplication (the in-session key and the notification tag). A task
  * that has no due time and no start time yields exactly what it always did (its due date, or 'no-due-date'), so
  * nothing already de-duplicated is re-sent. Changing a time is a new schedule and re-arms the reminder; a retry, a
- * sync, or an edit of any other field leaves it unchanged and sends nothing twice.
+ * sync, or an edit of any other field leaves it unchanged and sends nothing twice. A due time is a wall-clock reading, so
+ * the zone it is read in is part of the schedule (Issue #41): changing the time zone moves the deadline instant and so
+ * re-arms the reminder. A start time is an instant and a date-only task has no clock, so neither carries the zone.
  */
 export const reminderSchedulePart = (task: Task): string =>
-  `${task.dueDate ?? 'no-due-date'}${task.dueTime ? `:t${task.dueTime}` : ''}${task.startTime ? `:s${task.startTime}` : ''}`;
+  `${task.dueDate ?? 'no-due-date'}${task.dueTime ? `:t${task.dueTime}@${getEffectiveTimeZone()}` : ''}${task.startTime ? `:s${task.startTime}` : ''}`;
 
 export type SmartStartWindow = {
   task: Task;

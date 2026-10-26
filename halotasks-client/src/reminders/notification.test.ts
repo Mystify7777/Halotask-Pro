@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { clockOf } from '../test/localeText';
 import { inTimeZone, makeTask } from '../test/taskFactory';
 import { getReminderPayload } from './notification';
 
@@ -42,7 +43,9 @@ describe('reminder notification payload', () => {
   it('"start now" names the exact deadline time for a task with a due time', () => {
     inTimeZone('Asia/Kolkata', () => {
       const task = makeTask({ title: 'Submit', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '17:30' });
-      expect(getReminderPayload(task, 'start-now').body).toMatch(/^Start Submit now to stay on track for (05:30|5:30)/);
+      const body = getReminderPayload(task, 'start-now').body;
+      expect(body).toMatch(/^Start Submit now to stay on track for /);
+      expect(clockOf(body)).toBe('17:30'); // 12h or 24h, any day-period case: the locale only changes the presentation
     });
   });
 

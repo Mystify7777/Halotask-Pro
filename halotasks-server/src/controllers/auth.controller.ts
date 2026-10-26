@@ -60,10 +60,13 @@ const createAuthToken = (userId: string, email: string, name: string, tokenVersi
   return jwt.sign({ userId, email, name, tv: tokenVersion }, jwtSecret, { expiresIn: '7d', algorithm: JWT_ALGORITHM });
 };
 
-const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string }) => ({
+// `timeZone` is the saved IANA preference (Issue #41), or null when the account has none (including every account
+// that predates it). It is returned so the client can restore it after login and register; it is never in the JWT.
+const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string; timeZone?: string | null }) => ({
   id: user._id.toString(),
   name: user.name,
   email: user.email,
+  timeZone: user.timeZone ?? null,
 });
 
 const generateResetCode = (): string => {

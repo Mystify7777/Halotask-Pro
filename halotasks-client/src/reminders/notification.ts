@@ -1,5 +1,6 @@
 import { Task } from '../types/task';
 import { getExactDeadline } from '../utils/deadline';
+import { getEffectiveTimeZone } from '../utils/timeZone';
 import { reminderSchedulePart } from './deadlineLogic';
 import { reminderIdentity } from './identity';
 
@@ -11,21 +12,14 @@ export type ReminderNotificationPayload = {
   tag: string;
 };
 
-const formatTime = (value?: string) => {
-  if (!value) {
-    return '';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-
-  return parsed.toLocaleTimeString([], {
+// A deadline's clock time in the user's effective time zone (Issue #41), never the device's: the same zone the
+// deadline itself was read in.
+const formatTime = (instant: number, timeZone: string = getEffectiveTimeZone()) =>
+  new Date(instant).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone,
   });
-};
 
 const buildTitle = (type: ReminderNotificationType) => {
   if (type === 'due-soon') {
@@ -62,7 +56,7 @@ const buildBody = (task: Task, type: ReminderNotificationType) => {
     // Name a deadline time only when the user supplied one. A date-only task's stored dueDate is UTC midnight, which
     // is not a time anyone chose, so it gets the generic message.
     const exact = getExactDeadline(task);
-    const dueAt = exact !== null ? formatTime(new Date(exact).toISOString()) : '';
+    const dueAt = exact !== null ? formatTime(exact) : '';
     return dueAt
       ? `Start ${task.title} now to stay on track for ${dueAt}.`
       : `Start ${task.title} now to stay on track.`;
