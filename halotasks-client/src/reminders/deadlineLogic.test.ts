@@ -12,22 +12,20 @@ const MIN = 60_000;
 const utc = (iso: string) => Date.parse(iso);
 const ids = (tasks: { _id: string }[]) => tasks.map((t) => t._id);
 
-describe('tasks without a due time or start time: the established reminder behaviour is unchanged (regression)', () => {
-  // A date-only task's deadline is its stored due date read as an instant, i.e. UTC midnight of the due day.
-  // That is how it has always worked and it is deliberately preserved (and not extended to the new fields).
+describe('a date-only task has no deadline instant (Issue #42): it is reminded by calendar day, never at UTC midnight', () => {
   const dateOnly = makeTask({ _id: 'date-only', dueDate: '2026-10-20T00:00:00.000Z' });
 
-  it('uses the stored due date as an instant', () => {
-    expect(getDeadlineMs(dateOnly)).toBe(utc('2026-10-20T00:00:00.000Z'));
+  it('has no deadline instant, and a task without a due date has none either', () => {
+    expect(getDeadlineMs(dateOnly)).toBeNull();
     expect(getDeadlineMs(makeTask())).toBeNull();
     expect(getDeadlineMs(makeTask({ dueDate: 'garbage' }))).toBeNull();
   });
 
-  it('is "due soon" in the hour before that instant and overdue from it', () => {
-    expect(ids(getTasksDueInNextHour([dateOnly], utc('2026-10-19T23:00:01.000Z')))).toEqual(['date-only']);
-    expect(ids(getTasksDueInNextHour([dateOnly], utc('2026-10-19T22:59:59.000Z')))).toEqual([]);
-    expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-19T23:59:59.000Z')))).toEqual([]);
-    expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-20T00:00:00.000Z')))).toEqual(['date-only']);
+  it('is neither "due soon in the next hour" nor "overdue now" at any instant: those need an exact deadline', () => {
+    for (const at of ['2026-10-19T23:00:01.000Z', '2026-10-20T00:00:00.000Z', '2026-10-20T12:00:00.000Z', '2026-10-21T12:00:00.000Z']) {
+      expect(getTasksDueInNextHour([dateOnly], utc(at))).toEqual([]);
+      expect(getTasksOverdueNow([dateOnly], utc(at))).toEqual([]);
+    }
   });
 
   it('never reminds for a completed task or one with no due date', () => {
@@ -36,25 +34,26 @@ describe('tasks without a due time or start time: the established reminder behav
     expect(getTasksDueInNextHour([makeTask({ dueDate: '2026-10-20T01:00:00.000Z', completed: true }), makeTask()], now)).toEqual([]);
   });
 
-  it('smart start still needs an estimate and a future deadline, and starts at deadline minus the estimate', () => {
-    const due = '2026-10-20T12:00:00.000Z';
-    const task = makeTask({ _id: 'est', dueDate: due, estimatedMinutes: 90 });
+  it('smart start needs an EXACT deadline: a date-only task with an estimate gets no computed start window', () => {
     const now = utc('2026-10-20T08:00:00.000Z');
+    expect(getSmartStartWindows([makeTask({ dueDate: '2026-10-20T00:00:00.000Z', estimatedMinutes: 90 })], now, 60)).toEqual([]);
+    expect(getSmartStartWindows([makeTask({ dueDate: '2026-10-20T12:00:00.000Z', estimatedMinutes: 90 })], now, 60)).toEqual([]);
+  });
 
-    expect(getSmartStartWindows([task], now, 60)).toEqual([
-      {
-        task,
-        dueTime: utc(due),
-        latestStartTime: utc(due) - 90 * MIN,
-        notifyAtTime: utc(due) - 90 * MIN - 60 * MIN,
-        windowEndTime: utc(due),
-      },
-    ]);
-    expect(getSmartStartWindows([makeTask({ dueDate: due, estimatedMinutes: 0 })], now)).toEqual([]);
-    expect(getSmartStartWindows([makeTask({ dueDate: due })], now)).toEqual([]);
-    expect(getSmartStartWindows([makeTask({ estimatedMinutes: 30 })], now)).toEqual([]);
-    expect(getSmartStartWindows([makeTask({ dueDate: due, estimatedMinutes: 30 })], utc('2026-10-20T12:00:00.000Z'))).toEqual([]);
-    expect(getSmartStartWindows([makeTask({ dueDate: due, estimatedMinutes: 30, completed: true })], now)).toEqual([]);
+  it('smart start still needs an estimate and a future exact deadline, and starts at deadline minus the estimate', () => {
+    inTimeZone('UTC', () => {
+      const task = makeTask({ _id: 'est', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '12:00', estimatedMinutes: 90 });
+      const due = utc('2026-10-20T12:00:00.000Z');
+      const now = utc('2026-10-20T08:00:00.000Z');
+
+      expect(getSmartStartWindows([task], now, 60)).toEqual([
+        { task, dueTime: due, latestStartTime: due - 90 * MIN, notifyAtTime: due - 90 * MIN - 60 * MIN, windowEndTime: due },
+      ]);
+      expect(getSmartStartWindows([{ ...task, estimatedMinutes: 0 }], now)).toEqual([]);
+      expect(getSmartStartWindows([{ ...task, dueDate: undefined, dueTime: undefined }], now)).toEqual([]);
+      expect(getSmartStartWindows([task], due)).toEqual([]);
+      expect(getSmartStartWindows([{ ...task, completed: true }], now)).toEqual([]);
+    });
   });
 });
 
@@ -75,11 +74,11 @@ describe('a due time: deadline reminders use the exact moment', () => {
     });
   });
 
-  it('is NOT treated as overdue at the UTC midnight that a date-only task would use', () => {
+  it('is not overdue at UTC midnight of its day, and neither is a date-only task of that day (Issue #42)', () => {
     inTimeZone('Asia/Kolkata', () => {
       const midnightUtc = utc('2026-10-20T00:00:00.000Z');
       expect(ids(getTasksOverdueNow([timed], midnightUtc))).toEqual([]);
-      expect(ids(getTasksOverdueNow([makeTask({ _id: 'date-only', dueDate: '2026-10-20T00:00:00.000Z' })], midnightUtc))).toEqual(['date-only']);
+      expect(ids(getTasksOverdueNow([makeTask({ _id: 'date-only', dueDate: '2026-10-20T00:00:00.000Z' })], midnightUtc))).toEqual([]);
     });
   });
 
@@ -118,7 +117,7 @@ describe('an explicit start time: used for start-based reminders, in place of th
     });
   });
 
-  it('a date-only deadline does not end the window early (its legacy UTC-midnight instant has usually passed)', () => {
+  it('a date-only task has no deadline to end the window early: it ends one buffer after the start', () => {
     const task = makeTask({ startTime: start, dueDate: '2026-10-20T00:00:00.000Z', estimatedMinutes: 60 });
     const windows = getSmartStartWindows([task], utc('2026-10-20T08:30:00.000Z'), 60);
     expect(windows).toHaveLength(1);
@@ -133,10 +132,12 @@ describe('an explicit start time: used for start-based reminders, in place of th
     expect(getSmartStartWindows([makeTask({ startTime: 'soon' })], utc('2026-10-20T08:00:00.000Z'))).toEqual([]);
   });
 
-  it('an unreadable start time falls back to the computed start when the task has an estimate and a deadline', () => {
-    const due = '2026-10-20T12:00:00.000Z';
-    const [window] = getSmartStartWindows([makeTask({ startTime: 'soon', dueDate: due, estimatedMinutes: 30 })], utc('2026-10-20T08:00:00.000Z'));
-    expect(window.latestStartTime).toBe(utc(due) - 30 * MIN);
+  it('an unreadable start time falls back to the computed start when the task has an estimate and an exact deadline', () => {
+    inTimeZone('UTC', () => {
+      const task = makeTask({ startTime: 'soon', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '12:00', estimatedMinutes: 30 });
+      const [window] = getSmartStartWindows([task], utc('2026-10-20T08:00:00.000Z'));
+      expect(window.latestStartTime).toBe(utc('2026-10-20T12:00:00.000Z') - 30 * MIN);
+    });
   });
 });
 

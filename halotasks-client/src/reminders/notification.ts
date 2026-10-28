@@ -39,7 +39,10 @@ const buildTitle = (type: ReminderNotificationType) => {
 
 const buildBody = (task: Task, type: ReminderNotificationType) => {
   if (type === 'due-soon') {
-    return `${task.title} is due within the next hour.`;
+    // A date-only task has no exact deadline to be "within the next hour" of: it is reminded on its due day (Issue #42).
+    return getExactDeadline(task) === null
+      ? `${task.title} is due today.`
+      : `${task.title} is due within the next hour.`;
   }
 
   if (type === 'work-session-soon') {
@@ -53,8 +56,8 @@ const buildBody = (task: Task, type: ReminderNotificationType) => {
   }
 
   if (type === 'start-now') {
-    // Name a deadline time only when the user supplied one. A date-only task's stored dueDate is UTC midnight, which
-    // is not a time anyone chose, so it gets the generic message.
+    // Name a deadline time only when the user supplied one. A date-only task has no deadline time, so it gets the
+    // generic message.
     const exact = getExactDeadline(task);
     const dueAt = exact !== null ? formatTime(exact) : '';
     return dueAt
@@ -73,13 +76,18 @@ export const getReminderPayload = (task: Task, type: ReminderNotificationType): 
   };
 };
 
-export const sendReminderNotification = (task: Task, type: ReminderNotificationType) => {
+/**
+ * Shows the reminder. true when the browser was asked to show it; false when it could not be (no Notification API, or
+ * permission not granted) so the caller can tell "delivered" from "silently dropped". A throwing Notification
+ * constructor (some mobile browsers require a service worker) still throws.
+ */
+export const sendReminderNotification = (task: Task, type: ReminderNotificationType): boolean => {
   if (typeof window === 'undefined' || !('Notification' in window)) {
-    return;
+    return false;
   }
 
   if (Notification.permission !== 'granted') {
-    return;
+    return false;
   }
 
   const payload = getReminderPayload(task, type);
@@ -88,4 +96,5 @@ export const sendReminderNotification = (task: Task, type: ReminderNotificationT
     body: payload.body,
     tag: payload.tag,
   });
+  return true;
 };

@@ -7,6 +7,7 @@ import {
 } from '../reminders/permissions';
 import { createReminderScheduler } from '../reminders/scheduler';
 import { getReminderSettings, ReminderSettings as ReminderSettingsType, saveReminderSettings } from '../reminders/settings';
+import { useAuthStore } from '../store/authStore';
 import { relayToServer, subscribePush } from './usePushSubscription';
 import type { Task } from '../types/task';
 
@@ -38,6 +39,13 @@ export function useDashboardReminders({
     reminderSchedulerRef.current?.runNow();
   }, [reminderSettings]);
 
+  // A changed time zone moves the calendar day date-only reminders are judged in: re-evaluate now rather than at the
+  // next poll. Task data is untouched; the scheduler's day receipts keep it from re-sending what already went out.
+  const timeZone = useAuthStore((state) => state.user?.timeZone);
+  useEffect(() => {
+    reminderSchedulerRef.current?.runNow();
+  }, [timeZone]);
+
   useEffect(() => {
     if (!remindersSupported) {
       return;
@@ -48,8 +56,9 @@ export function useDashboardReminders({
         getTasks,
         getSettings: () => reminderSettingsRef.current,
         onReminder: ({ task, type }) => {
-          sendReminderNotification(task, type);
+          const shown = sendReminderNotification(task, type);
           void relayToServer(getReminderPayload(task, type));
+          return shown; // a date-only day reminder that was not shown is retried (reminders/scheduler.ts)
         },
         intervalMs: 60_000,
       });

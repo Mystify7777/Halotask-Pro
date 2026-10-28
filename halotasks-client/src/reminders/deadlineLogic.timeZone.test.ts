@@ -5,8 +5,8 @@ import { setPreferredTimeZone } from '../utils/timeZone';
 import { getDeadlineMs, getSmartStartWindows, getTasksDueInNextHour, getTasksOverdueNow, reminderSchedulePart } from './deadlineLogic';
 import { getReminderPayload } from './notification';
 
-// Issue #41 — reminders read an exact deadline in the same zone as the deadline utilities, and a date-only task keeps
-// its legacy behaviour in every zone (Issue #42 owns changing that).
+// Issue #41 — reminders read an exact deadline in the same zone as the deadline utilities. Issue #42 — a date-only task
+// has no deadline instant in any zone (its calendar-day behaviour is covered in dateOnlyReminders.test.ts).
 
 afterEach(() => setPreferredTimeZone(null));
 
@@ -82,16 +82,17 @@ describe('a start time is an instant: no zone moves it', () => {
   });
 });
 
-describe('date-only tasks: the legacy UTC-midnight reminder is unchanged in every zone (Issue #42 is separate)', () => {
+describe('date-only tasks: no deadline instant in any zone (Issue #42)', () => {
   const dateOnly = makeTask({ _id: 'date-only', dueDate: DUE });
 
-  it.each(TIME_ZONES)('%s: the reminder deadline is still UTC midnight of the due day', (zone) => {
+  it.each(TIME_ZONES)('%s: no reminder deadline, so nothing is overdue at UTC midnight or at any other instant', (zone) => {
     for (const machine of ['UTC', 'Asia/Kolkata', 'America/Los_Angeles']) {
       inTimeZone(machine, () => {
         setPreferredTimeZone(zone);
-        expect(getDeadlineMs(dateOnly)).toBe(utc('2026-10-20T00:00:00.000Z'));
-        expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-19T23:59:59.000Z')))).toEqual([]);
-        expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-20T00:00:00.000Z')))).toEqual(['date-only']);
+        expect(getDeadlineMs(dateOnly)).toBeNull();
+        expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-20T00:00:00.000Z')))).toEqual([]);
+        expect(ids(getTasksOverdueNow([dateOnly], utc('2026-10-21T12:00:00.000Z')))).toEqual([]);
+        expect(ids(getTasksDueInNextHour([dateOnly], utc('2026-10-19T23:30:00.000Z')))).toEqual([]);
       });
     }
   });

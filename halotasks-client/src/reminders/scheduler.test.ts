@@ -27,6 +27,7 @@ const setup = (initial: Task[]) => {
 
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
   vi.useFakeTimers();
   at(0);
 });
@@ -34,6 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 describe('explicit start time', () => {
@@ -138,21 +140,29 @@ describe('idempotence: nothing is sent twice for the same schedule', () => {
     expect(sent.filter((s) => s.type === 'due-soon')).toHaveLength(2);
   });
 
-  it('a task without either time keeps the identity it always had (its key is type:id:dueDate)', () => {
-    const due = iso(20); // due in 20 minutes: due-soon
-    const task = makeTask({ _id: 'legacy', dueDate: due });
+  it('a task with an exact deadline and no start time keeps the identity it always had (its key is type:id:dueDate)', () => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const later = new Date(NOW.getTime() + 20 * 60_000);
+    const task = makeTask({ _id: 'legacy', dueDate: '2026-10-20T00:00:00.000Z', dueTime: `${pad(later.getHours())}:${pad(later.getMinutes())}` });
     const { scheduler } = setup([task]);
 
     scheduler.runNow();
 
     const keys = JSON.parse(sessionStorage.getItem('halotask_notified') ?? '[]') as string[];
-    expect(keys).toContain(`due-soon:legacy:${due}`);
+    expect(keys.some((key) => key.startsWith('due-soon:legacy:2026-10-20T00:00:00.000Z'))).toBe(true);
   });
 });
 
 describe('legacy tasks and settings', () => {
-  it('still gets the computed smart-start reminders from an estimate and a deadline', () => {
-    const task = makeTask({ _id: 'legacy', dueDate: iso(100), estimatedMinutes: 60 }); // latest start = in 40 min
+  it('still gets the computed smart-start reminders from an estimate and an exact deadline', () => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const deadline = new Date(NOW.getTime() + 100 * 60_000);
+    const task = makeTask({
+      _id: 'legacy',
+      dueDate: '2026-10-20T00:00:00.000Z',
+      dueTime: `${pad(deadline.getHours())}:${pad(deadline.getMinutes())}`,
+      estimatedMinutes: 60,
+    }); // latest start = in 40 min
     const { scheduler, sent } = setup([task]);
 
     at(15); // 25 min before the latest start: inside the 30-minute heads-up

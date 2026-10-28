@@ -42,6 +42,20 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### October 2026
 
+#### make date-only reminders follow the calendar day in the effective time zone (Issue #42)
+
+**2026-10-27 · Bugfix · completed · Priority: high**
+
+Date-only reminder calendar-day semantics (Issue #42). A task with a due date and no due time had its reminder read as UTC midnight of the due day in every zone: a Kolkata user was told 'overdue' at 05:30 on the due day while the card said 'Due today', and a Los Angeles user was told 'due soon' the evening before.
+
+Now a date-only task has no deadline instant and is reminded by calendar day in the effective zone (saved preference, else device, else UTC): 'due today' on its due day, 'overdue' on the day after, never before or later. It goes out on the first poll of that day outside quiet hours, reuses the due-soon and overdue toggles, and adds no setting or scheduler. Receipts are keyed by task identity and due day (not zone) and kept in localStorage for 3 days, so polls, edits, syncs, zone changes and restarts never repeat a reminder, and a window that passed while offline or closed is skipped, not replayed. A zone change re-runs the scheduler immediately and never rewrites dueDate. Exact-time tasks (dueTime) are unchanged.
+
+Behaviour change: a date-only task with an estimate and no start time no longer gets a computed work-session/start-now reminder, because there is no deadline to count back from.
+
+Review follow-up: (1) A zone change can no longer produce both reminders for one due day. Receipts now record when they were sent; 'overdue' is withheld when the due-today reminder went out at an instant the current zone already reads as after the due day, and 'due today' is withheld once 'overdue' was sent. When the day simply passes, both are still sent. (2) Cross-tab de-duplication: the receipt check, write, delivery and withdrawal run as one synchronous section under a Web Lock (navigator.locks); without Web Locks the guarantee is documented as best-effort (the notification tag still collapses a simultaneous pair). (3) Delivery failure: sendReminderNotification now reports whether it showed the reminder; a throw or a false result withdraws the receipt so the next poll in the same day retries, at most 3 attempts, never outside the reminder's own day, and one task's failure no longer stops the rest of the poll. Exact-time reminders are unchanged.
+
+Tests: reminders/dateOnlyReminders.test.ts (57 cases: day boundaries across UTC, Kolkata, Los Angeles, New York, Kiritimati, Pago Pago, spring-forward, fall-back, Lord Howe, Havana; zone preference; both zone-change directions; scheduler de-duplication, restart, offline, quiet hours; delivery failure and retry limits; two-tab behaviour with and without Web Locks), notification.test.ts (delivery result), a hook test, and legacy-behaviour tests rewritten to the new contract. Each new behaviour was checked by removing it and confirming a test fails. Client: 40 files, 879 tests passed; typecheck and production build clean. Not run in a real multi-tab browser; server untouched.
+
 #### add a persisted, user-configurable IANA time zone and read task times through it (Issue #41)
 
 **2026-10-25 · Feature · completed · Priority: high**

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clockOf } from '../test/localeText';
 import { inTimeZone, makeTask } from '../test/taskFactory';
-import { getReminderPayload } from './notification';
+import { getReminderPayload, sendReminderNotification } from './notification';
 
 // The server's push relay validator caps the tag (halotasks-server/src/utils/pushValidators.ts: PUSH_TAG_MAX_LENGTH).
 const PUSH_TAG_MAX_LENGTH = 200;
@@ -72,5 +72,56 @@ describe('reminder notification payload', () => {
     expect(getReminderPayload(makeTask({ title: 'Plan trip', estimatedMinutes: 90 }), 'work-session-soon').body).toBe(
       'You planned 2h for Plan trip. Consider starting soon.',
     );
+  });
+});
+
+describe('sendReminderNotification reports whether the reminder was shown', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'Notification');
+  afterEach(() => {
+    if (original) Object.defineProperty(globalThis, 'Notification', original);
+    else Reflect.deleteProperty(globalThis, 'Notification');
+  });
+
+  const stubNotification = (permission: string, onCreate: (title: string, options: unknown) => void = () => {}) => {
+    class Fake {
+      static permission = permission;
+      constructor(title: string, options: unknown) {
+        onCreate(title, options);
+      }
+    }
+    Object.defineProperty(globalThis, 'Notification', { value: Fake, configurable: true, writable: true });
+  };
+
+  it('is true, with the same title, body and tag as before, when it asked the browser to show it', () => {
+    const created = vi.fn();
+    stubNotification('granted', created);
+    const task = makeTask({ _id: OBJECT_ID, title: 'Write report', dueDate: '2026-10-20T00:00:00.000Z' });
+
+    expect(sendReminderNotification(task, 'overdue')).toBe(true);
+    expect(created).toHaveBeenCalledWith('Task overdue', {
+      body: 'Write report is now overdue.',
+      tag: `halotask-overdue-${OBJECT_ID}-2026-10-20T00:00:00.000Z`,
+    });
+  });
+
+  it('is false, and shows nothing, when permission is not granted', () => {
+    const created = vi.fn();
+    for (const permission of ['default', 'denied']) {
+      stubNotification(permission, created);
+      expect(sendReminderNotification(makeTask({ dueDate: '2026-10-20T00:00:00.000Z' }), 'overdue')).toBe(false);
+    }
+    expect(created).not.toHaveBeenCalled();
+  });
+
+  it('is false when the browser has no Notification API', () => {
+    Reflect.deleteProperty(globalThis, 'Notification');
+    expect(sendReminderNotification(makeTask(), 'due-soon')).toBe(false);
+  });
+
+  it('lets a failing Notification constructor throw, so the caller can tell it was not delivered', () => {
+    stubNotification('granted', () => {
+      throw new TypeError('Illegal constructor');
+    });
+    expect(() => sendReminderNotification(makeTask(), 'due-soon')).toThrow('Illegal constructor');
   });
 });

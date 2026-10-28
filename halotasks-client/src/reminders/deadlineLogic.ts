@@ -1,28 +1,52 @@
 import { Task } from '../types/task';
-import { getExactDeadline, getStartInstant } from '../utils/deadline';
-import { getEffectiveTimeZone } from '../utils/timeZone';
-
-// Legacy deadline of a date-only task: the stored due date read as an instant (UTC midnight of the due day). Kept
-// exactly as it was so tasks without a due time behave as before (Issue #10). It is deliberately NOT read in the
-// user's time zone: giving a date-only task a zone-aware reminder moment is Issue #42, a separate decision.
-const parseDueDate = (dueDate?: string) => {
-  if (!dueDate) {
-    return null;
-  }
-
-  const parsed = new Date(dueDate);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.getTime();
-};
+import { dueDayKey, getExactDeadline, getStartInstant } from '../utils/deadline';
+import { dateKeyInZone, dateKeyOffsetInZone, getEffectiveTimeZone } from '../utils/timeZone';
 
 /**
- * The moment reminders treat as a task's deadline: the exact local time when the task has a due time, otherwise the
- * established date-only behaviour. null when the task has no due date.
+ * The moment reminders treat as a task's deadline: the exact local time when the task has a due time. A date-only task
+ * has NO deadline instant (Issue #42): it is due "sometime that day", so it is never read as UTC midnight, never given
+ * a local midnight or an end-of-day instant, and is reminded by calendar day instead (`getDateOnlyReminderPhase`).
+ * null when the task has no due date or no due time.
  */
-export const getDeadlineMs = (task: Task): number | null => getExactDeadline(task) ?? parseDueDate(task.dueDate);
+export const getDeadlineMs = (task: Task): number | null => getExactDeadline(task);
+
+/**
+ * Where a date-only task is in its calendar-day reminder window, judged in the effective time zone (Issue #42):
+ *  - 'due-today': today (in the zone) is the due day.
+ *  - 'overdue':   today is the day AFTER the due day, i.e. the due day has just ended. It matches `getDueState`.
+ *  - null:        any other day, a completed task, a task with an exact deadline, or no usable due date.
+ * The window is deliberately two days wide, so a reminder is never replayed for a day that is long gone (the card
+ * itself stays overdue; only the notification is limited to the first day).
+ */
+export type DateOnlyReminderPhase = 'due-today' | 'overdue';
+
+export const getDateOnlyReminderPhase = (
+  task: Task,
+  nowTime: number = Date.now(),
+  timeZone: string = getEffectiveTimeZone(),
+): DateOnlyReminderPhase | null => {
+  if (task.completed || getExactDeadline(task, timeZone) !== null) {
+    return null;
+  }
+
+  const day = dueDayKey(task.dueDate);
+  if (day === null) {
+    return null;
+  }
+
+  if (day === dateKeyInZone(nowTime, timeZone)) {
+    return 'due-today';
+  }
+
+  return day === dateKeyOffsetInZone(-1, nowTime, timeZone) ? 'overdue' : null;
+};
+
+export const getDateOnlyTasksInPhase = (
+  tasks: Task[],
+  phase: DateOnlyReminderPhase,
+  nowTime: number = Date.now(),
+  timeZone: string = getEffectiveTimeZone(),
+) => tasks.filter((task) => getDateOnlyReminderPhase(task, nowTime, timeZone) === phase);
 
 /**
  * What identifies a task's schedule for reminder de-duplication (the in-session key and the notification tag). A task
@@ -99,8 +123,7 @@ export const getSmartStartWindows = (tasks: Task[], nowTime = Date.now(), buffer
     const explicitStart = getStartInstant(task.startTime);
 
     if (explicitStart !== null) {
-      // Only an exact deadline can end the window. A date-only task's legacy deadline (UTC midnight of its day) is
-      // usually already past on the day it is due, and would wrongly suppress every start reminder.
+      // Only an exact deadline can end the window: a date-only task has none.
       const exactDeadline = getExactDeadline(task);
       const windowEndTime = exactDeadline ?? explicitStart + bufferMs;
       if (windowEndTime > nowTime) {
