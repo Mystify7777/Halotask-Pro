@@ -11,7 +11,7 @@ import {
   getTasksOverdueNow,
 } from './deadlineLogic';
 import { getReminderPayload } from './notification';
-import { createReminderScheduler } from './scheduler';
+import { createReminderScheduler, resetDayReminderFallback } from './scheduler';
 import { defaultReminderSettings, type ReminderSettings } from './settings';
 
 // Issue #42 — a date-only task is a calendar day, not an instant. It is reminded "due today" on its due day and
@@ -883,5 +883,605 @@ describe('two tabs of one browser (review finding 2)', () => {
     expect(a.sent).toEqual([{ id: 'd', type: 'due-soon' }]); // synchronous
     b.scheduler.runNow(); // another tab, later: reads a's receipt from localStorage
     expect(b.sent).toEqual([]);
+  });
+});
+
+// ── Persistent retry budget ──────────────────────────────────────────────────────────────────────────────────────
+// The three-attempt cap must hold across page reloads, recreated schedulers and tabs. A "reload" below is what the
+// browser does: localStorage survives, sessionStorage is gone, and a brand-new scheduler starts from nothing.
+
+const ATTEMPTS_KEY = 'halotask_day_reminder_attempts';
+const DUE_KEY = `day:due-soon:d:${DAY}`;
+const OVERDUE_KEY = `day:overdue:d:${DAY}`;
+const storedAttempts = () => JSON.parse(localStorage.getItem(ATTEMPTS_KEY) ?? '{}') as Record<string, { day: string; n: number }>;
+const storedReceipts = () => JSON.parse(localStorage.getItem(RECEIPTS_KEY) ?? '{}') as Record<string, Record<string, unknown>>;
+const reload = (tasks: Task[], deliver?: (event: { task: Task; type: string }) => unknown) => {
+  sessionStorage.clear();
+  return makeTab(tasks, deliver);
+};
+
+describe('the delivery retry budget is durable (persistent attempts)', () => {
+  withFakeClock();
+
+  beforeEach(() => {
+    setPreferredTimeZone('UTC');
+    at(`${DAY}T09:00:00.000Z`);
+  });
+
+  it('a failed attempt is counted across scheduler recreation', () => {
+    const deliver = vi.fn(() => false);
+
+    makeTab([dateOnly()], deliver).scheduler.runNow();
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 1 });
+
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 2 });
+    expect(deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it('two failures, a recreation, and another failure reach the cap; nothing is attempted after it', () => {
+    const deliver = vi.fn(() => false);
+    const first = makeTab([dateOnly()], deliver);
+    first.scheduler.runNow();
+    first.scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(2);
+
+    const second = reload([dateOnly()], deliver);
+    second.scheduler.runNow(); // the third failure
+    expect(deliver).toHaveBeenCalledTimes(3);
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+    expect(Object.keys(storedReceipts())).toEqual([DUE_KEY]); // the receipt is kept: the reminder is spent
+
+    second.scheduler.runNow();
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('repeated recreation cannot bypass the cap', () => {
+    const deliver = vi.fn(() => false);
+
+    for (let i = 0; i < 12; i += 1) {
+      const tab = reload([dateOnly()], deliver);
+      tab.scheduler.runNow();
+      tab.scheduler.runNow();
+    }
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('a successful delivery retires the retry state, and the reminder is not sent again', () => {
+    let calls = 0;
+    const deliver = vi.fn(() => (calls += 1) >= 3); // fails twice, then gets through
+    const sentIds: string[] = [];
+    const tasks = [dateOnly()];
+
+    const first = makeTab(tasks, deliver);
+    first.scheduler.runNow();
+    reload(tasks, deliver).scheduler.runNow();
+    expect(storedAttempts()[DUE_KEY].n).toBe(2);
+
+    const third = reload(tasks, deliver);
+    third.scheduler.runNow();
+    sentIds.push(...third.sent.map((s) => s.id));
+
+    expect(sentIds).toEqual(['d']);
+    expect(storedAttempts()[DUE_KEY]).toBeUndefined(); // retired
+    expect(Object.keys(storedReceipts())).toEqual([DUE_KEY]);
+
+    reload(tasks, deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('due-today and overdue have independent budgets', () => {
+    const deliver = vi.fn(() => false);
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3); // due-today spent its three on the due day
+
+    at('2026-10-21T09:00:00.000Z'); // the day after: the overdue reminder has a budget of its own
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(6);
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+    expect(storedAttempts()[OVERDUE_KEY].n).toBe(3);
+  });
+
+  it('retry state is per task: one task\'s spent budget does not limit another', () => {
+    const deliver = vi.fn(({ task }: { task: Task }) => task._id !== 'b');
+    const tasks = [dateOnly({ _id: 'a' }), dateOnly({ _id: 'b' })];
+
+    for (let i = 0; i < 5; i += 1) reload(tasks, deliver).scheduler.runNow();
+
+    expect(deliver.mock.calls.filter(([e]) => e.task._id === 'b')).toHaveLength(3);
+    expect(deliver.mock.calls.filter(([e]) => e.task._id === 'a')).toHaveLength(1); // delivered once, never again
+  });
+
+  it('prunes retry state on the receipts\' retention (3 days) and ignores malformed entries', () => {
+    localStorage.setItem(
+      ATTEMPTS_KEY,
+      JSON.stringify({
+        'day:due-soon:gone:2026-10-16': { day: '2026-10-16', n: 3 }, // 4 days old: pruned
+        'day:overdue:kept:2026-10-17': { day: '2026-10-17', n: 2 }, // exactly 3 days old: kept
+        'day:due-soon:bad-count:2026-10-20': { day: DAY, n: 0 },
+        'day:due-soon:bad-type:2026-10-20': { day: DAY, n: '3' },
+        'day:due-soon:no-day:2026-10-20': { n: 2 },
+        'day:due-soon:null:2026-10-20': null,
+      }),
+    );
+
+    reload([dateOnly()], () => false).scheduler.runNow(); // a claim runs the pruning
+
+    expect(Object.keys(storedAttempts()).sort()).toEqual([DUE_KEY, 'day:overdue:kept:2026-10-17'].sort());
+  });
+
+  it('a reminder whose window has passed is never replayed, and its leftover state is not mistaken for a budget', () => {
+    const deliver = vi.fn(() => false);
+    makeTab([dateOnly()], deliver).scheduler.runNow();
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(2); // two failures, receipt withdrawn, one attempt left
+
+    at('2026-10-22T09:00:00.000Z'); // two days after the due day: neither window is open
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(storedAttempts()[DUE_KEY].n).toBe(2); // untouched until it ages out
+  });
+
+  it('a spent budget blocks the reminder even when its receipt is gone; an unspent one allows exactly the attempts left', () => {
+    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ [DUE_KEY]: { day: DAY, n: 3 } }));
+    const spent = vi.fn(() => false);
+    reload([dateOnly()], spent).scheduler.runNow();
+    expect(spent).not.toHaveBeenCalled();
+
+    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ [DUE_KEY]: { day: DAY, n: 2 } }));
+    const oneLeft = vi.fn(() => false);
+    for (let i = 0; i < 4; i += 1) reload([dateOnly()], oneLeft).scheduler.runNow();
+    expect(oneLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it('the receipts keep exactly their old shape: retry bookkeeping never leaks into halotask_day_reminders', () => {
+    const deliver = vi.fn(() => false);
+    makeTab([dateOnly()], deliver).scheduler.runNow();
+    expect(storedReceipts()).toEqual({}); // withdrawn for a retry: no entry, and no attempt fields
+
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    const receipt = storedReceipts()[DUE_KEY];
+    expect(Object.keys(receipt).sort()).toEqual(['at', 'day']);
+  });
+
+  it('existing receipts in either stored shape are honoured, and a corrupt attempts record reads as "no failures"', () => {
+    localStorage.setItem(RECEIPTS_KEY, JSON.stringify({ [DUE_KEY]: DAY })); // the earlier format: a bare due day
+    const deliver = vi.fn(() => true);
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled(); // already sent: still de-duplicated
+    expect(localStorage.getItem(ATTEMPTS_KEY)).toBeNull(); // and no retry state was invented
+
+    localStorage.clear();
+    localStorage.setItem(ATTEMPTS_KEY, '{not json');
+    const failing = vi.fn(() => false);
+    expect(() => reload([dateOnly()], failing).scheduler.runNow()).not.toThrow();
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 1 }); // rewritten as valid state
+
+    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify([1, 2, 3]));
+    expect(() => reload([dateOnly()], failing).scheduler.runNow()).not.toThrow();
+  });
+
+  it('exact-time reminders are not budgeted: they keep their once-per-session behaviour and leave no retry state', () => {
+    const timed = makeTask({ _id: 'timed', dueDate: STORED, dueTime: '17:30' });
+    at(`${DAY}T16:45:00.000Z`);
+    const deliver = vi.fn(() => false);
+
+    const first = makeTab([timed], deliver);
+    first.scheduler.runNow();
+    first.scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(1); // once per session, as before, whatever it returned
+
+    reload([timed], deliver).scheduler.runNow(); // a new session re-sends, as before
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(ATTEMPTS_KEY)).toBeNull();
+  });
+
+  it('a spent due-today reminder still blocks an "overdue" that only a zone change would cause', () => {
+    setPreferredTimeZone('America/Los_Angeles');
+    at('2026-10-20T19:00:00.000Z'); // 12:00 on the due day in Los Angeles
+    const deliver = vi.fn(() => false);
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+
+    setPreferredTimeZone('Asia/Kolkata'); // 00:30 on the 21st: overdue there
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('the retry budget is shared by tabs and kept inside the critical section', () => {
+  withFakeClock();
+
+  const installLocks = () => {
+    let tail: Promise<unknown> = Promise.resolve();
+    const state = { holding: false };
+    const request = (_name: string, callback: () => unknown) => {
+      const run = tail.then(async () => {
+        state.holding = true;
+        try {
+          return await callback();
+        } finally {
+          state.holding = false;
+        }
+      });
+      tail = run.catch(() => undefined);
+      return run;
+    };
+    Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+    return state;
+  };
+
+  beforeEach(() => {
+    setPreferredTimeZone('UTC');
+    at(`${DAY}T09:00:00.000Z`);
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
+    vi.restoreAllMocks();
+    resetDayReminderFallback(); // the in-memory fallback is module state: a test that used it must not leak it
+  });
+
+  it('with Web Locks, every tab draws on one budget: three attempts in total, not three per tab', async () => {
+    installLocks();
+    const deliver = vi.fn(() => false);
+    const tabs = [makeTab([dateOnly()], deliver), makeTab([dateOnly()], deliver), makeTab([dateOnly()], deliver)];
+
+    for (let round = 0; round < 4; round += 1) {
+      tabs.forEach((tab) => tab.scheduler.runNow());
+      await flush();
+    }
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+  });
+
+  it('the attempt count and the receipt are both written while the lock is held', async () => {
+    const lock = installLocks();
+    const original = Storage.prototype.setItem;
+    const writes: { key: string; holding: boolean }[] = [];
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage) writes.push({ key, holding: lock.holding });
+      return original.call(this, key, value);
+    });
+    const { scheduler } = makeTab([dateOnly()], () => false);
+
+    scheduler.runNow();
+    await flush();
+
+    const ours = writes.filter((w) => w.key === ATTEMPTS_KEY || w.key === RECEIPTS_KEY);
+    expect(ours.some((w) => w.key === ATTEMPTS_KEY)).toBe(true);
+    expect(ours.some((w) => w.key === RECEIPTS_KEY)).toBe(true);
+    expect(ours.every((w) => w.holding)).toBe(true);
+  });
+
+  it('a failure is counted before its receipt is withdrawn, so an interruption between the two cannot grant extra attempts', async () => {
+    const original = Storage.prototype.setItem;
+    const order: string[] = [];
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && (key === ATTEMPTS_KEY || key === RECEIPTS_KEY)) {
+        const receipts = key === RECEIPTS_KEY ? (JSON.parse(value) as Record<string, unknown>) : null;
+        order.push(key === ATTEMPTS_KEY ? 'attempts' : receipts && DUE_KEY in receipts ? 'receipt-claimed' : 'receipt-withdrawn');
+      }
+      return original.call(this, key, value);
+    });
+
+    makeTab([dateOnly()], () => false).scheduler.runNow();
+
+    expect(order).toEqual(['receipt-claimed', 'attempts', 'receipt-withdrawn']);
+  });
+
+  it('without Web Locks, tabs that run one after another still share the budget (best-effort: simultaneous polls are not guarded)', () => {
+    expect('locks' in navigator).toBe(false);
+    const deliver = vi.fn(() => false);
+    const a = makeTab([dateOnly()], deliver);
+    const b = makeTab([dateOnly()], deliver);
+
+    for (let round = 0; round < 4; round += 1) {
+      a.scheduler.runNow();
+      b.scheduler.runNow();
+    }
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('when localStorage cannot be used the tab still enforces the cap from its own memory', () => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage) throw new Error('storage unavailable');
+      return getItem.call(this, key);
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage) throw new Error('storage unavailable');
+      return setItem.call(this, key, value);
+    });
+    const deliver = vi.fn(() => false);
+    const { scheduler } = makeTab([dateOnly()], deliver);
+
+    for (let i = 0; i < 6; i += 1) scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('when localStorage refuses writes, the in-memory fallback is shared by every scheduler of the page', () => {
+  withFakeClock();
+
+  beforeEach(() => {
+    setPreferredTimeZone('UTC');
+    at(`${DAY}T09:00:00.000Z`);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDayReminderFallback();
+  });
+
+  /** localStorage that throws on every write, and on every read too unless `readsWork`. */
+  const breakLocalStorage = (readsWork = false) => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    if (!readsWork) {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (this === localStorage) throw new Error('storage unavailable');
+        return getItem.call(this, key);
+      });
+    }
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage) throw new Error('storage unavailable');
+      return setItem.call(this, key, value);
+    });
+  };
+  /** A recreated scheduler in the SAME page: nothing is cleared, nothing is reloaded. */
+  const recreate = (deliver: (event: { task: Task; type: string }) => unknown) => makeTab([dateOnly()], deliver);
+
+  it('two failures, then the scheduler is recreated without a reload: only one further attempt is allowed, however many instances follow', () => {
+    breakLocalStorage();
+    const deliver = vi.fn(() => false);
+
+    const first = recreate(deliver);
+    first.scheduler.runNow();
+    first.scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(2);
+
+    const second = recreate(deliver);
+    second.scheduler.runNow(); // the one attempt that is left
+    second.scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+
+    for (let i = 0; i < 6; i += 1) {
+      const next = recreate(deliver);
+      next.scheduler.runNow();
+      next.scheduler.runNow();
+    }
+    first.scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('a reminder that was delivered is not sent again by a recreated scheduler', () => {
+    breakLocalStorage();
+    const deliver = vi.fn(() => true);
+
+    for (let i = 0; i < 4; i += 1) recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed attempt hands its reminder to the next scheduler to retry, and a delivered one stays delivered', () => {
+    breakLocalStorage();
+    let calls = 0;
+    const deliver = vi.fn(() => (calls += 1) >= 2);
+
+    const a = recreate(deliver);
+    a.scheduler.runNow(); // fails
+    const b = recreate(deliver);
+    b.scheduler.runNow(); // retries and gets through
+    const c = recreate(deliver);
+    c.scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(a.sent).toEqual([]);
+    expect(b.sent).toEqual([{ id: 'd', type: 'due-soon' }]);
+    expect(c.sent).toEqual([]);
+  });
+
+  it('reads that work cannot undo what writes could not store: a stale stored count never lowers the in-memory one', () => {
+    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ [DUE_KEY]: { day: DAY, n: 1 } }));
+    breakLocalStorage(true);
+    const deliver = vi.fn(() => false);
+
+    for (let i = 0; i < 5; i += 1) recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(2); // 1 stored + these 2 = the cap of 3
+    expect(storedAttempts()[DUE_KEY].n).toBe(1); // storage still holds the stale count; the context remembers the real one
+  });
+
+  it('when storage works again the state moves back into it, and the budget carries over a reload from there', () => {
+    breakLocalStorage();
+    const deliver = vi.fn(() => false);
+    recreate(deliver).scheduler.runNow(); // counted in memory only
+
+    vi.restoreAllMocks(); // storage is back
+    expect(localStorage.getItem(ATTEMPTS_KEY)).toBeNull(); // nothing was written while it was down
+    recreate(deliver).scheduler.runNow(); // reads the in-memory count, stores the new one
+    expect(storedAttempts()[DUE_KEY].n).toBe(2);
+
+    resetDayReminderFallback(); // a page reload: only storage is left
+    sessionStorage.clear();
+    recreate(deliver).scheduler.runNow();
+    recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('the fallback does not survive a page reload (the documented limit): the budget starts over', () => {
+    breakLocalStorage();
+    const deliver = vi.fn(() => false);
+    for (let i = 0; i < 4; i += 1) recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+
+    resetDayReminderFallback(); // what a reload does to module state
+    sessionStorage.clear();
+    recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(4);
+  });
+
+  /** Receipt writes succeed until the first `okWrites` have happened, then fail; reads and attempt writes always work. */
+  const failReceiptWritesAfter = (okWrites: number) => {
+    const setItem = Storage.prototype.setItem;
+    let receiptWrites = 0;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && key === RECEIPTS_KEY && (receiptWrites += 1) > okWrites) throw new Error('quota exceeded');
+      return setItem.call(this, key, value);
+    });
+  };
+
+  it('a withdrawal that could not be stored is not undone by the stale stored receipt: retries continue within the budget, and the cap holds', () => {
+    failReceiptWritesAfter(1); // the claim is stored; the withdrawal and everything after it is not
+    const deliver = vi.fn(() => false);
+
+    recreate(deliver).scheduler.runNow(); // claim stored, delivery fails, withdrawal refused
+    expect(Object.keys(storedReceipts())).toEqual([DUE_KEY]); // the stale receipt is still in storage
+
+    for (let i = 0; i < 6; i += 1) recreate(deliver).scheduler.runNow(); // reads work: they see the stale receipt
+
+    expect(deliver).toHaveBeenCalledTimes(3); // all three attempts happened; never a fourth
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+  });
+
+  it('only the receipt that was withdrawn is hidden: a newer receipt written by another tab still de-duplicates', () => {
+    failReceiptWritesAfter(1);
+    const deliver = vi.fn(() => false);
+    recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(1);
+
+    // Another tab, with working storage, delivered the reminder after our withdrawal failed.
+    vi.restoreAllMocks(); // (this test's own write must go through)
+    localStorage.setItem(RECEIPTS_KEY, JSON.stringify({ [DUE_KEY]: { day: DAY, at: Date.now() + 60_000 } }));
+    recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it('when storage is writable again after a failed withdrawal, a retry that is delivered is stored and not sent again', () => {
+    failReceiptWritesAfter(1);
+    let calls = 0;
+    const deliver = vi.fn(() => (calls += 1) >= 2); // the first attempt fails, the second gets through
+
+    recreate(deliver).scheduler.runNow(); // fails; withdrawal not stored
+    vi.restoreAllMocks(); // storage is writable again
+    const retry = recreate(deliver);
+    retry.scheduler.runNow(); // retried and delivered, receipt stored
+
+    expect(retry.sent).toEqual([{ id: 'd', type: 'due-soon' }]);
+    expect(storedReceipts()[DUE_KEY]).toBeDefined();
+
+    // Same page, no reload: the retry's receipt (even at the very same instant as the withdrawn one) must count.
+    for (let i = 0; i < 3; i += 1) recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(2);
+
+    resetDayReminderFallback(); // a reload
+    sessionStorage.clear();
+    for (let i = 0; i < 3; i += 1) recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(2); // deduplicated from storage alone
+  });
+
+  /**
+   * Storage whose receipt WRITES fail after the first `okWrites`, and whose receipt READS are down from the first failed
+   * write until `recoverReads()`; with `writesBack()` writes work again. Attempt records are always readable/writable.
+   */
+  const flakyReceiptStorage = (okWrites: number) => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    const state = { writes: 0, readsDown: false, restored: false };
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === RECEIPTS_KEY && state.readsDown) throw new Error('read failed');
+      return getItem.call(this, key);
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && key === RECEIPTS_KEY && !state.restored && state.writes >= okWrites) {
+        state.readsDown = true; // the same outage takes reads down with the writes
+        throw new Error('write failed');
+      }
+      if (this === localStorage && key === RECEIPTS_KEY) state.writes += 1;
+      return setItem.call(this, key, value);
+    });
+    return {
+      recoverReads: () => {
+        state.readsDown = false;
+      },
+      writesBack: () => {
+        state.readsDown = false;
+        state.restored = true;
+      },
+    };
+  };
+
+  it('a withdrawal refused while reads are also down is still remembered when reads recover: retries use the remaining budget and never exceed it', () => {
+    const storage = flakyReceiptStorage(1); // the claim is stored, then writes AND reads go down
+    const deliver = vi.fn(() => false);
+
+    recreate(deliver).scheduler.runNow(); // attempt 1: claim stored, delivery fails, withdrawal refused, reads down
+    at(`${DAY}T09:01:00.000Z`); // a later poll: attempt 2 carries a different receipt time than attempt 1
+    recreate(deliver).scheduler.runNow(); // attempt 2, still with reads down
+    expect(deliver).toHaveBeenCalledTimes(2);
+
+    storage.recoverReads(); // reads are back and show the stale receipt of attempt 1 (an earlier time); writes still fail
+    expect(Object.keys(storedReceipts())).toEqual([DUE_KEY]);
+    for (let i = 0; i < 6; i += 1) recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(3); // the one attempt that was left, and never a fourth
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+  });
+
+  it('a newer receipt from another tab still de-duplicates after a withdrawal was refused during a read outage', () => {
+    const storage = flakyReceiptStorage(1);
+    const deliver = vi.fn(() => false);
+    recreate(deliver).scheduler.runNow(); // refused withdrawal, reads down
+    storage.writesBack(); // and the other tab delivers it:
+    localStorage.setItem(RECEIPTS_KEY, JSON.stringify({ [DUE_KEY]: { day: DAY, at: Date.now() + 60_000 } }));
+
+    recreate(deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it('when writes come back after that outage, a delivered retry is stored and de-duplicated, in the page and after a reload', () => {
+    const storage = flakyReceiptStorage(1);
+    let calls = 0;
+    const deliver = vi.fn(() => (calls += 1) >= 3); // two failures, then it gets through
+
+    recreate(deliver).scheduler.runNow(); // attempt 1 fails; reads and writes down
+    recreate(deliver).scheduler.runNow(); // attempt 2 fails
+    storage.recoverReads();
+    storage.writesBack(); // storage fully works again
+    const retry = recreate(deliver);
+    retry.scheduler.runNow(); // attempt 3 delivers
+
+    expect(retry.sent).toEqual([{ id: 'd', type: 'due-soon' }]);
+    expect(storedReceipts()[DUE_KEY]).toBeDefined();
+    expect(storedAttempts()[DUE_KEY]).toBeUndefined(); // retired by the success
+
+    for (let i = 0; i < 3; i += 1) recreate(deliver).scheduler.runNow();
+    resetDayReminderFallback(); // a reload
+    sessionStorage.clear();
+    for (let i = 0; i < 3; i += 1) recreate(deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('with working storage the fallback stays out of it: storage is the only truth, and nothing is resurrected from memory', () => {
+    const deliver = vi.fn(() => false);
+    recreate(deliver).scheduler.runNow();
+    expect(storedAttempts()[DUE_KEY].n).toBe(1);
+
+    localStorage.clear(); // site data cleared while the page stays open
+    recreate(deliver).scheduler.runNow();
+
+    expect(storedAttempts()[DUE_KEY].n).toBe(1); // a fresh count, not 2
   });
 });

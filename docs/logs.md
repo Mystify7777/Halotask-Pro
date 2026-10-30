@@ -42,6 +42,16 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### October 2026
 
+#### persist the date-only reminder retry budget across reloads and tabs (Issue #42 follow-up)
+
+**2026-10-29 · Bugfix · completed · Priority: high**
+
+The three-attempt delivery limit for date-only calendar-day reminders was counted in a per-scheduler in-memory map, so recreating the scheduler (a page reload) or opening another tab reset it and allowed more than three attempts inside one reminder window.
+
+The failed-attempt count is now persisted in localStorage (halotask_day_reminder_attempts), keyed like the receipts (type, task identity, due day), so due-today and overdue have independent budgets. It is updated inside the same critical section as the receipt decision (under the Web Lock when available), is counted before the receipt is withdrawn so an interruption can only err toward suppression, is retired on success, and is pruned on the receipts' 3-day retention. A spent budget blocks the reminder even if its receipt is missing. The receipts key keeps its exact earlier format and legacy receipts still read; a build that predates the counter ignores the new key. Without Web Locks the previous best-effort fallback applies. When localStorage refuses writes, receipts and counts are kept in a module-scoped in-memory fallback shared by every scheduler of the page (so recreating a scheduler without a reload cannot repeat a reminder or reset the budget; the higher of stored and in-memory counts wins); it is used only while writes fail, and does not survive a reload or reach other tabs. A receipt withdrawal that storage refuses is remembered explicitly (the exact receipts withdrawn, taken from the scheduler's own copy so a read outage cannot erase them, one per withdrawal until a write succeeds), so a stale stored receipt cannot suppress the retries still within budget; a newer receipt from another tab still de-duplicates. Exact-time reminders, quiet hours, wording, timezone resolution and due-date data are unchanged.
+
+Tests: 25 new cases in reminders/dateOnlyReminders.test.ts, including failures across recreated schedulers with localStorage kept and sessionStorage cleared as a reload does, and the shared in-memory fallback with storage disabled. Each property of the persistent cap was checked by removing it and confirming a test fails.
+
 #### make date-only reminders follow the calendar day in the effective time zone (Issue #42)
 
 **2026-10-27 · Bugfix · completed · Priority: high**

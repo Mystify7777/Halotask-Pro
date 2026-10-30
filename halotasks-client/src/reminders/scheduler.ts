@@ -48,6 +48,14 @@ const DAY_LOCK_NAME = 'halotask-day-reminders';
  * and from re-relaying to the server each time.
  */
 const MAX_DAY_ATTEMPTS = 3;
+/**
+ * Failed delivery attempts per calendar-day reminder, kept in localStorage so the cap survives a page reload, a
+ * recreated scheduler and every other tab. It is a separate key from the receipts on purpose: the receipts keep
+ * exactly the format they have always had, so another build reading them can never mistake a retry record for a sent
+ * reminder. Entries use the receipts' keys (`day:<type>:<identity>:<due day>`), so due-today and overdue have separate
+ * budgets, and are pruned with the same retention.
+ */
+const DAY_ATTEMPTS_KEY = 'halotask_day_reminder_attempts';
 
 type DayReceipt = { day: string; at?: number };
 type DayReceipts = Record<string, DayReceipt>;
@@ -83,12 +91,147 @@ const loadDayReceipts = (): DayReceipts => {
   }
 };
 
-const saveDayReceipts = (receipts: DayReceipts): void => {
+/** true when the receipts were stored; false when localStorage refused them (see the fallback below). */
+const saveDayReceipts = (receipts: DayReceipts): boolean => {
   try {
     localStorage.setItem(DAY_RECEIPTS_KEY, JSON.stringify(receipts));
+    return true;
   } catch {
-    // ignore storage failures: the in-memory copy still prevents repeats while this tab stays open
+    return false;
   }
+};
+
+type DayAttempt = { day: string; n: number };
+type DayAttempts = Record<string, DayAttempt>;
+
+const loadDayAttempts = (): DayAttempts => {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DAY_ATTEMPTS_KEY) ?? '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const attempts: DayAttempts = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const { day, n } = (value ?? {}) as Partial<DayAttempt>;
+      // Anything that is not a due day with a positive whole count is ignored, i.e. read as "no failures yet".
+      if (typeof day === 'string' && typeof n === 'number' && Number.isInteger(n) && n > 0) {
+        attempts[key] = { day, n };
+      }
+    }
+    return attempts;
+  } catch {
+    return {};
+  }
+};
+
+/** true when the attempts were stored; false when localStorage refused them (see the fallback below). */
+const saveDayAttempts = (attempts: DayAttempts): boolean => {
+  try {
+    localStorage.setItem(DAY_ATTEMPTS_KEY, JSON.stringify(attempts));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// When localStorage will not take a write (disabled, full, a restricted browsing mode) the state is kept here instead,
+// for the lifetime of this JavaScript context. It is module-scoped on purpose: every scheduler created in this page
+// shares it, so recreating a scheduler (an effect re-running, a remount) neither repeats a reminder that was sent nor
+// resets the attempt budget. It is filled only while writes fail and emptied by the next write that succeeds, so with
+// working storage it is always empty and storage alone is the truth. It does not survive a page reload and is not
+// shared with other tabs: without usable storage nothing can be.
+let fallbackReceipts: DayReceipts = {};
+let fallbackAttempts: DayAttempts = {};
+// Receipts this context withdrew (a failed delivery) or pruned whose removal localStorage refused, so the stale stored
+// copy is still there. Remembered with the exact receipts that were withdrawn (a reminder can be withdrawn more than
+// once, each time with a different `at`, so this is a list per reminder), so only THOSE copies are hidden: a newer
+// receipt for the same reminder (another tab delivered it) is a different `at` and still counts.
+let fallbackWithdrawn: Record<string, DayReceipt[]> = {};
+
+/** Forgets the in-memory fallback, as a page reload would. Only tests need this. */
+export const resetDayReminderFallback = (): void => {
+  fallbackReceipts = {};
+  fallbackAttempts = {};
+  fallbackWithdrawn = {};
+};
+
+/**
+ * Stores `receipts`. `withdrawn` are the receipts this call removed (the caller holds the exact copies). If storage
+ * refuses the write, they are remembered so the stale stored copies cannot come back. They are taken from the caller,
+ * never rediscovered by reading storage: a read can fail while a write fails, and the knowledge must survive that. The
+ * record accumulates until a write succeeds.
+ */
+const sameReceipt = (a: DayReceipt, b: DayReceipt): boolean => a.day === b.day && a.at === b.at;
+
+const persistReceipts = (receipts: DayReceipts, withdrawn: DayReceipts = {}): void => {
+  if (saveDayReceipts(receipts)) {
+    fallbackReceipts = {};
+    fallbackWithdrawn = {};
+    return;
+  }
+
+  // Also keep what a successful read shows storage holding that `receipts` no longer has (pruned receipts).
+  const gone: Record<string, DayReceipt[]> = {};
+  for (const [key, list] of Object.entries(fallbackWithdrawn)) {
+    gone[key] = [...list];
+  }
+  const remember = (key: string, receipt: DayReceipt) => {
+    gone[key] ??= [];
+    if (!gone[key].some((known) => sameReceipt(known, receipt))) {
+      gone[key].push(receipt);
+    }
+  };
+  for (const [key, receipt] of Object.entries(withdrawn)) {
+    remember(key, receipt);
+  }
+  for (const [key, stored] of Object.entries(loadDayReceipts())) {
+    if (!(key in receipts)) {
+      remember(key, stored);
+    }
+  }
+  fallbackReceipts = receipts;
+  fallbackWithdrawn = gone;
+};
+
+const persistAttempts = (attempts: DayAttempts): void => {
+  fallbackAttempts = saveDayAttempts(attempts) ? {} : attempts;
+};
+
+const currentReceipts = (): DayReceipts => {
+  const stored = loadDayReceipts();
+  for (const [key, gone] of Object.entries(fallbackWithdrawn)) {
+    // Hide the stored copy only while it is still one that was withdrawn.
+    if (stored[key] && gone.some((known) => sameReceipt(known, stored[key]))) {
+      delete stored[key];
+    }
+  }
+  return { ...fallbackReceipts, ...stored };
+};
+
+/**
+ * Stored attempts merged with the fallback, keeping the HIGHER count per reminder. A stale stored count (a write that
+ * failed after it) must never lower what this context has already counted, or the cap could be outrun.
+ */
+const currentAttempts = (): DayAttempts => {
+  const merged = loadDayAttempts();
+  for (const [key, attempt] of Object.entries(fallbackAttempts)) {
+    if ((merged[key]?.n ?? 0) < attempt.n) {
+      merged[key] = attempt;
+    }
+  }
+  return merged;
+};
+
+/** Drops entries whose due day is before `oldest`; true when something was dropped. */
+const pruneBefore = (entries: Record<string, { day: string }>, oldest: string): boolean => {
+  let pruned = false;
+  for (const [key, entry] of Object.entries(entries)) {
+    if (entry.day < oldest) {
+      delete entries[key];
+      pruned = true;
+    }
+  }
+  return pruned;
 };
 
 const loadFiredKeys = (): Set<string> => {
@@ -116,9 +259,6 @@ export const createReminderScheduler = ({
 }: ReminderSchedulerOptions) => {
   let timer: number | null = null;
   const notifiedInSession = loadFiredKeys();
-  // This tab's own copy of the receipts: what keeps it from repeating itself when localStorage is unavailable.
-  let memoryReceipts: DayReceipts = loadDayReceipts();
-  const dayAttempts = new Map<string, number>();
 
   const makeKey = (task: Task, type: ReminderType) => {
     return `${type}:${reminderIdentity(task)}:${reminderSchedulePart(task)}`;
@@ -145,7 +285,12 @@ export const createReminderScheduler = ({
   //    due. When the day simply passes (the due-today reminder was sent on or before the due day as the current zone
   //    reads it), "due today" then "overdue" on the next day is the normal sequence and both are sent.
   //
-  // The whole sequence (read receipts, decide, write the receipt, deliver, withdraw it if delivery failed) is one
+  // Delivery failures are budgeted per reminder (MAX_DAY_ATTEMPTS) and the count is persisted (DAY_ATTEMPTS_KEY), so
+  // the budget holds across reloads, recreated schedulers and tabs. A failed attempt records itself first and then
+  // withdraws the receipt, so an interruption between the two writes leaves the reminder suppressed, never retried
+  // beyond its budget. Success retires the count.
+  //
+  // The whole sequence (read receipts and attempts, decide, write the receipt, deliver, record the outcome) is one
   // synchronous critical section, run under a Web Lock when the browser has one, so two tabs cannot interleave it.
   const deliverDayReminder = (task: Task, type: 'due-soon' | 'overdue', nowTime: number) => {
     const day = dueDayKey(task.dueDate);
@@ -157,10 +302,14 @@ export const createReminderScheduler = ({
     const keyFor = (kind: ReminderType) => `day:${kind}:${reminderIdentity(task)}:${day}`;
     const key = keyFor(type);
 
-    // Another tab's receipts are read fresh every time; this tab's own copy covers an unavailable localStorage.
-    const receipts: DayReceipts = { ...memoryReceipts, ...loadDayReceipts() };
+    // Other tabs' state is read fresh every time; the module's fallback covers a localStorage that refuses writes.
+    const receipts = currentReceipts();
+    const attempts = currentAttempts();
     if (receipts[key]) {
       return;
+    }
+    if ((attempts[key]?.n ?? 0) >= MAX_DAY_ATTEMPTS) {
+      return; // the budget is spent (and the receipt may be gone): never try again for this reminder
     }
     if (type === 'due-soon' && receipts[keyFor('overdue')]) {
       return;
@@ -173,15 +322,13 @@ export const createReminderScheduler = ({
     }
 
     const oldest = dateKeyOffsetInZone(-DAY_RECEIPT_RETENTION_DAYS, nowTime, zone);
-    for (const [staleKey, receipt] of Object.entries(receipts)) {
-      if (receipt.day < oldest) {
-        delete receipts[staleKey];
-      }
+    pruneBefore(receipts, oldest);
+    if (pruneBefore(attempts, oldest)) {
+      persistAttempts(attempts);
     }
 
     receipts[key] = { day, at: nowTime };
-    memoryReceipts = receipts;
-    saveDayReceipts(receipts);
+    persistReceipts(receipts);
 
     let delivered = true;
     try {
@@ -191,19 +338,22 @@ export const createReminderScheduler = ({
     }
 
     if (delivered) {
-      dayAttempts.delete(key);
+      if (attempts[key]) {
+        delete attempts[key]; // retire the retry state: the reminder went out
+        persistAttempts(attempts);
+      }
       return;
     }
 
-    const attempts = (dayAttempts.get(key) ?? 0) + 1;
-    if (attempts >= MAX_DAY_ATTEMPTS) {
-      dayAttempts.delete(key); // give up for this day: the receipt stays, so it is never replayed later
-      return;
+    const failed = (attempts[key]?.n ?? 0) + 1;
+    attempts[key] = { day, n: failed };
+    persistAttempts(attempts); // count it BEFORE withdrawing the receipt (see above)
+    if (failed >= MAX_DAY_ATTEMPTS) {
+      return; // give up for this day: the receipt stays, so it is never replayed later
     }
-    dayAttempts.set(key, attempts);
+    const withdrawn = receipts[key]; // the exact receipt being withdrawn
     delete receipts[key]; // withdrawn: the next poll in the same day may try again
-    memoryReceipts = receipts;
-    saveDayReceipts(receipts);
+    persistReceipts(receipts, { [key]: withdrawn });
   };
 
   const dispatchDayReminder = (task: Task, type: 'due-soon' | 'overdue', nowTime: number) => {
