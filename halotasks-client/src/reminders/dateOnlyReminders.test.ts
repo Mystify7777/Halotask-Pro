@@ -1485,3 +1485,205 @@ describe('when localStorage refuses writes, the in-memory fallback is shared by 
     expect(storedAttempts()[DUE_KEY].n).toBe(1); // a fresh count, not 2
   });
 });
+
+// ── Unreadable attempts record ───────────────────────────────────────────────────────────────────────────────────
+// A failed READ of the attempts record is not proof that no attempts happened. When reads of it fail but writes work,
+// counting from zero would write over a higher stored count and reset the budget; the reminder is held instead.
+
+describe('an unreadable attempts record never resets or exceeds the retry budget', () => {
+  withFakeClock();
+
+  const PROBE_KEY = 'halotask_day_reminder_probe';
+
+  beforeEach(() => {
+    setPreferredTimeZone('UTC');
+    at(`${DAY}T09:00:00.000Z`);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDayReminderFallback();
+  });
+
+  const seedAttempts = (attempts: Record<string, { day: string; n: number }>) => localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
+
+  /** Reads of the attempts key throw while `down.reads` is true; writes always work. */
+  const attemptsReadsDown = () => {
+    const getItem = Storage.prototype.getItem;
+    const down = {
+      reads: true,
+      /** What is really stored, read around the outage. */
+      peek: () => JSON.parse(getItem.call(localStorage, ATTEMPTS_KEY) ?? '{}') as Record<string, { day: string; n: number }>,
+    };
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === ATTEMPTS_KEY && down.reads) throw new Error('read failed');
+      return getItem.call(this, key);
+    });
+    return down;
+  };
+
+  it('a stored count of 2 survives a read outage: nothing is attempted, nothing is overwritten, and after recovery exactly one attempt is left', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 2 } });
+    const down = attemptsReadsDown();
+    const deliver = vi.fn(() => false);
+
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).not.toHaveBeenCalled(); // the budget could not be established: held, not granted
+    expect(down.peek()).toEqual({ [DUE_KEY]: { day: DAY, n: 2 } }); // untouched, not reset to 1
+    expect(storedReceipts()).toEqual({}); // and no receipt was claimed
+
+    down.reads = false; // reads recover
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1); // the one attempt that was left
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+  });
+
+  it('a genuinely missing attempts record still permits the initial attempt, and an empty record is not an outage', () => {
+    expect(localStorage.getItem(ATTEMPTS_KEY)).toBeNull();
+    const deliver = vi.fn(() => false);
+
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(storedAttempts()[DUE_KEY].n).toBe(1);
+
+    localStorage.setItem(ATTEMPTS_KEY, '{}'); // present but empty
+    const other = vi.fn(() => false);
+    reload([dateOnly({ _id: 'other' })], other).scheduler.runNow();
+    expect(other).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unreadable record does not overwrite the budgets of unrelated tasks, and each keeps its own count after recovery', () => {
+    const budgets = {
+      [`day:due-soon:a:${DAY}`]: { day: DAY, n: 2 },
+      [`day:due-soon:b:${DAY}`]: { day: DAY, n: 1 },
+      [`day:overdue:c:2026-10-19`]: { day: '2026-10-19', n: 2 },
+    };
+    seedAttempts(budgets);
+    const down = attemptsReadsDown();
+    const deliver = vi.fn((_event: { task: Task; type: string }) => false);
+    const tasks = [dateOnly({ _id: 'a' }), dateOnly({ _id: 'b' }), dateOnly({ _id: 'new' })];
+
+    for (let i = 0; i < 3; i += 1) reload(tasks, deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled(); // not even the task with no record at all: nothing can be established
+    expect(down.peek()).toEqual(budgets);
+
+    down.reads = false;
+    for (let i = 0; i < 6; i += 1) reload(tasks, deliver).scheduler.runNow();
+
+    const perTask = (id: string) => deliver.mock.calls.filter(([event]) => event.task._id === id).length;
+    expect(perTask('a')).toBe(1); // 2 stored + 1
+    expect(perTask('b')).toBe(2); // 1 stored + 2
+    expect(perTask('new')).toBe(3);
+    expect(storedAttempts()[`day:overdue:c:2026-10-19`]).toEqual({ day: '2026-10-19', n: 2 }); // untouched
+  });
+
+  it('recovery creates no duplicate notification: a reminder delivered after the outage is sent once, and stays sent', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 2 } });
+    const down = attemptsReadsDown();
+    const deliver = vi.fn(() => true);
+
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled();
+
+    down.reads = false;
+    for (let i = 0; i < 4; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(storedAttempts()[DUE_KEY]).toBeUndefined(); // retired by the success
+    expect(Object.keys(storedReceipts())).toEqual([DUE_KEY]);
+  });
+
+  it('an outage that lasts a single poll holds that poll and loses nothing', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 2 } });
+    const getItem = Storage.prototype.getItem;
+    let failNextRead = true;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === ATTEMPTS_KEY && failNextRead) {
+        failNextRead = false;
+        throw new Error('transient');
+      }
+      return getItem.call(this, key);
+    });
+    const deliver = vi.fn(() => false);
+
+    const tab = reload([dateOnly()], deliver);
+    tab.scheduler.runNow(); // the read fails: held
+    expect(deliver).not.toHaveBeenCalled();
+    tab.scheduler.runNow(); // the read works: the third attempt
+    tab.scheduler.runNow(); // and the cap holds
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
+  });
+
+  it('due-today and overdue stay separate under an outage: a spent due-today budget does not hold or spend the overdue one', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 3 } });
+    at('2026-10-21T09:00:00.000Z'); // the day after: the overdue reminder
+    const down = attemptsReadsDown();
+    const deliver = vi.fn(() => false);
+
+    reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled(); // held while unreadable
+
+    down.reads = false;
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(3); // overdue has its own fresh budget of three
+    expect(storedAttempts()[DUE_KEY].n).toBe(3); // due-today's spent budget is untouched
+    expect(storedAttempts()[OVERDUE_KEY].n).toBe(3);
+  });
+
+  it('the probe leaves nothing behind, and a held poll writes nothing of the reminder\'s own', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 1 } });
+    attemptsReadsDown();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+
+    reload([dateOnly()], vi.fn(() => false)).scheduler.runNow();
+
+    const written = setItem.mock.calls.filter(([key]) => key !== undefined).map(([key]) => key);
+    expect(written.every((key) => key === PROBE_KEY)).toBe(true);
+    expect(localStorage.getItem(PROBE_KEY)).toBeNull();
+  });
+
+  it('when storage is down for reads AND writes, nothing stored can be overwritten, so the in-memory cap still applies', () => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage) throw new Error('storage unavailable');
+      return getItem.call(this, key);
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage) throw new Error('storage unavailable');
+      return setItem.call(this, key, value);
+    });
+    const deliver = vi.fn(() => false);
+
+    for (let i = 0; i < 6; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('a corrupt attempts record is readable data that cannot be used: it reads as "no failures yet" and is rewritten', () => {
+    localStorage.setItem(ATTEMPTS_KEY, '{not json');
+    const deliver = vi.fn(() => false);
+
+    reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 1 });
+  });
+
+  it('a record that parses but is not an attempts object (array, null, number, string) is readable too: the initial attempt is permitted and the record rewritten', () => {
+    for (const stored of ['[1,2,3]', 'null', '42', '"text"']) {
+      localStorage.clear();
+      localStorage.setItem(ATTEMPTS_KEY, stored);
+      const deliver = vi.fn(() => false);
+
+      reload([dateOnly()], deliver).scheduler.runNow();
+
+      expect(deliver, stored).toHaveBeenCalledTimes(1);
+      expect(storedAttempts()[DUE_KEY], stored).toEqual({ day: DAY, n: 1 });
+    }
+  });
+});

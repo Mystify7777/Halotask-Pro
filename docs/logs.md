@@ -42,6 +42,16 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### October 2026
 
+#### do not reset the date-only reminder retry budget when its record cannot be read (Issue #42 follow-up)
+
+**2026-10-30 · Bugfix · completed · Priority: high**
+
+loadDayAttempts() turned a storage read error into an empty attempt map. If reading halotask_day_reminder_attempts failed while writing still worked, the next failed delivery could overwrite a stored count of 2 with 1 and allow more than three attempts in one reminder window.
+
+A failed read is now distinct from a missing, corrupt or non-object record (those still read as no failures yet). When the read fails and localStorage still accepts writes (probed with a throwaway write and remove of halotask_day_reminder_probe), the reminder is held: nothing is claimed, delivered or written, so no stored count is overwritten and unrelated budgets are untouched; the next poll decides again and the stored count applies once the record is readable. Suppression is preferred over unverified retries; the limitation is that a record that stays unreadable while writes work holds that reminder until its day passes. If writes fail as well, the module-scoped in-memory fallback applies as before. Receipt tombstones, Web Lock behaviour, separate due-today and overdue budgets and exact-time reminders are unchanged.
+
+Tests: 10 new cases in reminders/dateOnlyReminders.test.ts (persisted 2 with reads failing and writes working, no reset or overrun after recovery, missing key still permits the first attempt, other tasks' budgets preserved, no duplicate notification on recovery, non-object records, storage fully down). Each property was checked by mutating the scheduler and confirming a test fails.
+
 #### persist the date-only reminder retry budget across reloads and tabs (Issue #42 follow-up)
 
 **2026-10-29 · Bugfix · completed · Priority: high**

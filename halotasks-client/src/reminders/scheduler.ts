@@ -56,6 +56,8 @@ const MAX_DAY_ATTEMPTS = 3;
  * budgets, and are pruned with the same retention.
  */
 const DAY_ATTEMPTS_KEY = 'halotask_day_reminder_attempts';
+/** Written and removed only to learn whether localStorage accepts writes while the attempts record is unreadable. */
+const DAY_PROBE_KEY = 'halotask_day_reminder_probe';
 
 type DayReceipt = { day: string; at?: number };
 type DayReceipts = Record<string, DayReceipt>;
@@ -104,9 +106,20 @@ const saveDayReceipts = (receipts: DayReceipts): boolean => {
 type DayAttempt = { day: string; n: number };
 type DayAttempts = Record<string, DayAttempt>;
 
-const loadDayAttempts = (): DayAttempts => {
+/**
+ * The stored attempts, or null when storage could not be READ at all. null is not "no failures": a failed read proves
+ * nothing about what is stored. A missing key, an unparseable record or a malformed entry is readable (the data is
+ * simply not usable) and still reads as "no failures yet".
+ */
+const loadDayAttempts = (): DayAttempts | null => {
+  let raw: string | null;
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(DAY_ATTEMPTS_KEY) ?? '{}');
+    raw = localStorage.getItem(DAY_ATTEMPTS_KEY);
+  } catch {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw ?? '{}');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {};
     }
@@ -212,14 +225,33 @@ const currentReceipts = (): DayReceipts => {
  * Stored attempts merged with the fallback, keeping the HIGHER count per reminder. A stale stored count (a write that
  * failed after it) must never lower what this context has already counted, or the cap could be outrun.
  */
-const currentAttempts = (): DayAttempts => {
-  const merged = loadDayAttempts();
+const currentAttempts = (): { attempts: DayAttempts; readable: boolean } => {
+  const stored = loadDayAttempts();
+  const merged: DayAttempts = stored ?? {};
   for (const [key, attempt] of Object.entries(fallbackAttempts)) {
     if ((merged[key]?.n ?? 0) < attempt.n) {
       merged[key] = attempt;
     }
   }
-  return merged;
+  return { attempts: merged, readable: stored !== null };
+};
+
+/**
+ * Whether localStorage accepts writes right now, probed on a key of its own so that no reminder state is touched. It is
+ * only asked when the attempts record could not be read (see deliverDayReminder).
+ */
+const storageAcceptsWrites = (): boolean => {
+  try {
+    localStorage.setItem(DAY_PROBE_KEY, '1');
+  } catch {
+    return false;
+  }
+  try {
+    localStorage.removeItem(DAY_PROBE_KEY);
+  } catch {
+    // a leftover probe key is harmless
+  }
+  return true;
 };
 
 /** Drops entries whose due day is before `oldest`; true when something was dropped. */
@@ -304,12 +336,19 @@ export const createReminderScheduler = ({
 
     // Other tabs' state is read fresh every time; the module's fallback covers a localStorage that refuses writes.
     const receipts = currentReceipts();
-    const attempts = currentAttempts();
+    const { attempts, readable } = currentAttempts();
     if (receipts[key]) {
       return;
     }
     if ((attempts[key]?.n ?? 0) >= MAX_DAY_ATTEMPTS) {
       return; // the budget is spent (and the receipt may be gone): never try again for this reminder
+    }
+    if (!readable && storageAcceptsWrites()) {
+      // Storage takes writes but would not give the attempts record back, so the budget that is left cannot be
+      // established, and counting from zero would write over a higher stored count. Do nothing (no claim, no delivery,
+      // no write): the next poll decides again, and once the record is readable the stored count applies. When storage
+      // refuses writes as well, nothing persisted can be overwritten and the in-memory fallback is the only truth.
+      return;
     }
     if (type === 'due-soon' && receipts[keyFor('overdue')]) {
       return;
