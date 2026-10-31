@@ -56,8 +56,6 @@ const MAX_DAY_ATTEMPTS = 3;
  * budgets, and are pruned with the same retention.
  */
 const DAY_ATTEMPTS_KEY = 'halotask_day_reminder_attempts';
-/** Written and removed only to learn whether localStorage accepts writes while the attempts record is unreadable. */
-const DAY_PROBE_KEY = 'halotask_day_reminder_probe';
 
 type DayReceipt = { day: string; at?: number };
 type DayReceipts = Record<string, DayReceipt>;
@@ -236,24 +234,6 @@ const currentAttempts = (): { attempts: DayAttempts; readable: boolean } => {
   return { attempts: merged, readable: stored !== null };
 };
 
-/**
- * Whether localStorage accepts writes right now, probed on a key of its own so that no reminder state is touched. It is
- * only asked when the attempts record could not be read (see deliverDayReminder).
- */
-const storageAcceptsWrites = (): boolean => {
-  try {
-    localStorage.setItem(DAY_PROBE_KEY, '1');
-  } catch {
-    return false;
-  }
-  try {
-    localStorage.removeItem(DAY_PROBE_KEY);
-  } catch {
-    // a leftover probe key is harmless
-  }
-  return true;
-};
-
 /** Drops entries whose due day is before `oldest`; true when something was dropped. */
 const pruneBefore = (entries: Record<string, { day: string }>, oldest: string): boolean => {
   let pruned = false;
@@ -337,18 +317,19 @@ export const createReminderScheduler = ({
     // Other tabs' state is read fresh every time; the module's fallback covers a localStorage that refuses writes.
     const receipts = currentReceipts();
     const { attempts, readable } = currentAttempts();
+    if (!readable) {
+      // The attempts record could not be READ, so the budget that is left cannot be established: counting from zero
+      // could overwrite a higher stored count, and the in-memory fallback only knows this page's own attempts, so it
+      // cannot stand in for it, whether or not storage accepts writes. Do nothing (no claim, no delivery, no write):
+      // the reminder is suppressed, the next poll decides again, and once the record is readable the stored count
+      // applies.
+      return;
+    }
     if (receipts[key]) {
       return;
     }
     if ((attempts[key]?.n ?? 0) >= MAX_DAY_ATTEMPTS) {
       return; // the budget is spent (and the receipt may be gone): never try again for this reminder
-    }
-    if (!readable && storageAcceptsWrites()) {
-      // Storage takes writes but would not give the attempts record back, so the budget that is left cannot be
-      // established, and counting from zero would write over a higher stored count. Do nothing (no claim, no delivery,
-      // no write): the next poll decides again, and once the record is readable the stored count applies. When storage
-      // refuses writes as well, nothing persisted can be overwritten and the in-memory fallback is the only truth.
-      return;
     }
     if (type === 'due-soon' && receipts[keyFor('overdue')]) {
       return;

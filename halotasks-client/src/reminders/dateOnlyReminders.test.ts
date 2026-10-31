@@ -1190,13 +1190,8 @@ describe('the retry budget is shared by tabs and kept inside the critical sectio
     expect(deliver).toHaveBeenCalledTimes(3);
   });
 
-  it('when localStorage cannot be used the tab still enforces the cap from its own memory', () => {
-    const getItem = Storage.prototype.getItem;
+  it('when localStorage refuses writes the tab still enforces the cap from its own memory', () => {
     const setItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-      if (this === localStorage) throw new Error('storage unavailable');
-      return getItem.call(this, key);
-    });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
       if (this === localStorage) throw new Error('storage unavailable');
       return setItem.call(this, key, value);
@@ -1223,7 +1218,8 @@ describe('when localStorage refuses writes, the in-memory fallback is shared by 
   });
 
   /** localStorage that throws on every write, and on every read too unless `readsWork`. */
-  const breakLocalStorage = (readsWork = false) => {
+  /** localStorage refuses writes. Reads keep working unless `readsWork` is false (then the attempts record is unreadable too). */
+  const breakLocalStorage = (readsWork = true) => {
     const getItem = Storage.prototype.getItem;
     const setItem = Storage.prototype.setItem;
     if (!readsWork) {
@@ -1487,13 +1483,12 @@ describe('when localStorage refuses writes, the in-memory fallback is shared by 
 });
 
 // ── Unreadable attempts record ───────────────────────────────────────────────────────────────────────────────────
-// A failed READ of the attempts record is not proof that no attempts happened. When reads of it fail but writes work,
-// counting from zero would write over a higher stored count and reset the budget; the reminder is held instead.
+// A failed READ of the attempts record is not proof that no attempts happened. Counting from zero would write over a
+// higher stored count and reset the budget, and the in-memory fallback only knows this page's own attempts, so whenever
+// the record cannot be read (whether or not writes work) the reminder is held until it can be.
 
 describe('an unreadable attempts record never resets or exceeds the retry budget', () => {
   withFakeClock();
-
-  const PROBE_KEY = 'halotask_day_reminder_probe';
 
   beforeEach(() => {
     setPreferredTimeZone('UTC');
@@ -1634,34 +1629,83 @@ describe('an unreadable attempts record never resets or exceeds the retry budget
     expect(storedAttempts()[OVERDUE_KEY].n).toBe(3);
   });
 
-  it('the probe leaves nothing behind, and a held poll writes nothing of the reminder\'s own', () => {
+  it('a held poll writes nothing at all, so nothing stored can be overwritten', () => {
     seedAttempts({ [DUE_KEY]: { day: DAY, n: 1 } });
-    attemptsReadsDown();
+    const down = attemptsReadsDown();
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
 
     reload([dateOnly()], vi.fn(() => false)).scheduler.runNow();
 
-    const written = setItem.mock.calls.filter(([key]) => key !== undefined).map(([key]) => key);
-    expect(written.every((key) => key === PROBE_KEY)).toBe(true);
-    expect(localStorage.getItem(PROBE_KEY)).toBeNull();
+    const localWrites = setItem.mock.calls.filter((_call, index) => setItem.mock.contexts[index] === localStorage);
+    expect(localWrites).toEqual([]); // (sessionStorage is a different Storage and may be written)
+    expect(down.peek()[DUE_KEY]).toEqual({ day: DAY, n: 1 });
   });
 
-  it('when storage is down for reads AND writes, nothing stored can be overwritten, so the in-memory cap still applies', () => {
+  /** Every localStorage read and write throws while `down.on` is true; `peek` reads what is really stored. */
+  const storageDown = () => {
     const getItem = Storage.prototype.getItem;
     const setItem = Storage.prototype.setItem;
+    const down = {
+      on: true,
+      peek: () => JSON.parse(getItem.call(localStorage, ATTEMPTS_KEY) ?? '{}') as Record<string, { day: string; n: number }>,
+    };
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-      if (this === localStorage) throw new Error('storage unavailable');
+      if (this === localStorage && down.on) throw new Error('storage unavailable');
       return getItem.call(this, key);
     });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-      if (this === localStorage) throw new Error('storage unavailable');
+      if (this === localStorage && down.on) throw new Error('storage unavailable');
       return setItem.call(this, key, value);
     });
+    return down;
+  };
+
+  it('with reads AND writes failing, a stored count of 2 is not replaced by an in-memory budget: nothing is delivered, and after recovery exactly one attempt is left', () => {
+    seedAttempts({ [DUE_KEY]: { day: DAY, n: 2 } });
+    const down = storageDown();
     const deliver = vi.fn(() => false);
 
     for (let i = 0; i < 6; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled(); // an in-memory budget of three would have allowed three more
+    expect(down.peek()).toEqual({ [DUE_KEY]: { day: DAY, n: 2 } });
+
+    down.on = false; // reads and writes work again
+    for (let i = 0; i < 6; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+
+    expect(deliver).toHaveBeenCalledTimes(1); // 2 stored + 1 = 3, never more
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 3 });
+  });
+
+  it('with reads AND writes failing from the start, nothing is delivered either, and a missing record permits the first attempt once storage is back', () => {
+    const down = storageDown();
+    const deliver = vi.fn(() => false);
+
+    for (let i = 0; i < 4; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).not.toHaveBeenCalled();
+
+    down.on = false; // the attempts key is genuinely absent
+    for (let i = 0; i < 6; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
 
     expect(deliver).toHaveBeenCalledTimes(3);
+    expect(storedAttempts()[DUE_KEY]).toEqual({ day: DAY, n: 3 });
+  });
+
+  it('an outage in the middle of a reminder\'s attempts leaves the in-memory count lower than the stored one, and the stored count still wins afterwards', () => {
+    const down = storageDown();
+    down.on = false;
+    const deliver = vi.fn(() => false);
+    const tab = reload([dateOnly()], deliver);
+    tab.scheduler.runNow(); // one failed attempt is stored
+    expect(storedAttempts()[DUE_KEY].n).toBe(1);
+
+    down.on = true;
+    for (let i = 0; i < 3; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(1); // held for the whole outage
+
+    down.on = false;
+    for (let i = 0; i < 5; i += 1) reload([dateOnly()], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(3);
+    expect(storedAttempts()[DUE_KEY].n).toBe(3);
   });
 
   it('a corrupt attempts record is readable data that cannot be used: it reads as "no failures yet" and is rewritten', () => {
