@@ -115,6 +115,23 @@ describe('real MongoDB: clearing the date clears the time, atomically', () => {
     expect(doc.dueTime).toBeUndefined();
   });
 
+  it('save() of a loaded task given a time: stored when the date is still there, refused when another writer removed it after the load', async () => {
+    const kept = await seed('kept', { dueDate: DATE });
+    const keptDoc = (await Task.findById(kept))!;
+    keptDoc.set('dueTime', '09:00');
+    await keptDoc.save();
+    expect((await raw(kept)).dueTime).toBe('09:00');
+
+    const lost = await seed('lost', { dueDate: DATE });
+    const lostDoc = (await Task.findById(lost))!; // loaded while it still has its date ...
+    await Task.updateOne({ _id: lost }, { $unset: { dueDate: 1 } }); // ... another writer removes it ...
+    lostDoc.set('dueTime', '09:00');
+    await expect(lostDoc.save()).rejects.toSatisfy((e: Error) => ['DocumentNotFoundError', 'VersionError'].includes(e.name)); // ... so this write matches nothing
+    const stored = await raw(lost);
+    expect(stored.dueTime ?? null).toBeNull();
+    expect(stored.dueDate ?? null).toBeNull();
+  });
+
   it('saving a loaded task whose date was cleared stores neither field', async () => {
     const id = await seed('t', { dueDate: DATE, dueTime: '09:00' });
     const doc = (await Task.findById(id))!;

@@ -334,3 +334,59 @@ describe('validation switched off', () => {
     });
   });
 });
+
+// save() writes `$set` filtered by _id only, and its own check reads the copy in memory, so a date removed by another
+// writer after the load would leave a time behind. Giving the loaded task a time makes the write conditional on the
+// stored date, like the update paths. These tests show the command; the real-MongoDB suite shows the race.
+describe('save() of a loaded task that is given a time', () => {
+  const matched = () => driver.updateOne.mockResolvedValueOnce({ acknowledged: true, matchedCount: 1, modifiedCount: 1 });
+  const load = (fields: Record<string, unknown> = {}) => Task.hydrate({ _id: id(), userId, title: 'x', dueDate: DATE, ...fields });
+
+  it('requires the stored dueDate in the write itself', async () => {
+    matched();
+    const doc = load();
+    doc.set('dueTime', '09:00');
+    await doc.save();
+    const { filter, update } = sent('updateOne');
+    expect(filter).toMatchObject(STORED_DATE);
+    expect(update.$set).toMatchObject({ dueTime: '09:00' });
+  });
+
+  it('changing an existing time is conditional too', async () => {
+    matched();
+    const doc = load({ dueTime: '09:00' });
+    doc.set('dueTime', '10:00');
+    await doc.save();
+    expect(sent('updateOne').filter).toMatchObject(STORED_DATE);
+  });
+
+  it('rejects, storing nothing, when the date is gone by the time of the write (the write matches no document)', async () => {
+    const doc = load();
+    doc.set('dueTime', '09:00');
+    // the mocked driver answers matchedCount 0, as MongoDB does when the extra condition fails
+    const error = await rejection(() => doc.save());
+    // Mongoose reports a zero-match save as a VersionError when that save also bumps the version, else as a DocumentNotFoundError
+    expect(['DocumentNotFoundError', 'VersionError']).toContain(error.name);
+    expect(sent('updateOne').filter).toMatchObject(STORED_DATE);
+  });
+
+  it.each([
+    ['an unrelated edit of a task that already has a time', () => { const d = load({ dueTime: '09:00' }); d.set('title', 'renamed'); return d; }],
+    ['clearing only the time', () => { const d = load({ dueTime: '09:00' }); d.set('dueTime', undefined); return d; }],
+    ['setting a new date and a time together', () => { const d = load(); d.set('dueDate', new Date('2026-11-02T00:00:00.000Z')); d.set('dueTime', '09:00'); return d; }],
+  ])('adds no condition for %s', async (_label, make) => {
+    matched();
+    await make().save();
+    expect(sent('updateOne').filter).not.toHaveProperty('dueDate');
+    expect(sent('updateOne').filter).not.toHaveProperty('$and');
+  });
+
+  it('keeps a caller-supplied $where and adds the condition to it', async () => {
+    matched();
+    const doc = load();
+    doc.$where = { userId };
+    doc.set('dueTime', '09:00');
+    await doc.save();
+    expect(sent('updateOne').filter).toMatchObject({ userId, ...STORED_DATE });
+  });
+});

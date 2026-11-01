@@ -36,9 +36,18 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### Jump to month
 
+- [November 2026](#november-2026)
 - [October 2026](#october-2026)
 - [September 2026](#september-2026)
 - [May 2026](#may-2026)
+
+### November 2026
+
+#### make a loaded task’s dueTime save conditional on its stored dueDate (Issue #44)
+
+**2026-11-01 · Backend · completed · Priority: low**
+
+Audit of Issue #44 found the dueDate/dueTime invariant already enforced on every supported write path (the controller, update operators, bulkWrite, bulkSave, doc.updateOne, replacements, raw inserts), with one race left: save() of a loaded task given a time wrote $set filtered by _id only, so a date removed by another writer after the load could leave a time with no date. A pre-save hook now sets $where to require the stored dueDate when a loaded task’s dueTime is modified and its dueDate is not; if the date is gone the save rejects (DocumentNotFoundError, or VersionError when that save also bumps the version) and stores nothing. Saves that set or clear the date, or leave the time alone, are unchanged. New DB-less tests record the command save() sends (they fail without the hook); a real-MongoDB test in tests/taskWritePaths.realmongo.test.ts covers the removed-after-load case and was NOT executed in the sandbox because MongoDB cannot be downloaded here. Still unprotected by design: native driver writes, { middleware: false }, shell writes, pre-existing data.
 
 ### October 2026
 

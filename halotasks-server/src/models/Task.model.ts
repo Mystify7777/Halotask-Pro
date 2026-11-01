@@ -17,7 +17,9 @@ export const DUE_TIME_NEEDS_DUE_DATE_MESSAGE = 'dueTime requires a dueDate';
  *    does not depend on Mongoose validation being enabled.
  * Clearing a due date clears the due time with it (the API's rule). Setting a time on the date ALREADY stored is made
  * conditional inside the write (`dueDate: { $exists: true, $ne: null }` added to the filter), so a concurrent removal of
- * the date cannot slip between a check and the write: the write simply matches nothing.
+ * the date cannot slip between a check and the write: the write simply matches nothing. `save()` of a loaded task that is
+ * given a time (date untouched) gets the same condition through `$where`, and rejects, storing nothing, if the date was
+ * removed after the load.
  *
  * NOT protected, by design: the native driver (`Task.collection.*`, `Task.db`), `save({ middleware: false })` (which skips
  * every hook), a hand-written shell or script write, and data stored before this model existed. Mongoose cannot see
@@ -196,6 +198,17 @@ function enforceOnDocument(this: { dueTime?: unknown; dueDate?: unknown; isNew: 
 }
 taskSchema.pre('validate', enforceOnDocument);
 taskSchema.pre('save', enforceOnDocument);
+
+// Saving a loaded task that is given a time while keeping its date: `save()` writes `$set: { dueTime }` filtered by _id
+// only, and the check above looks at the copy in memory. Another writer could remove the date after the load, and the
+// save would then store a time with no date. Making the write itself conditional (the same condition the update paths
+// use) closes that window: if the date is gone the write matches nothing and `save()` rejects (a DocumentNotFoundError, or
+// a VersionError when that save also bumps the version), storing nothing. Saves that also set or clear the date, or that
+// leave the time alone, need no condition: they carry the date themselves or write no time.
+taskSchema.pre('save', function (this: { isNew: boolean; dueTime?: unknown; isModified(path: string): boolean; $where?: Record<string, unknown> | null }) {
+  if (this.isNew || isMissing(this.dueTime) || !this.isModified('dueTime') || this.isModified('dueDate')) return;
+  this.$where = { ...(this.$where ?? {}), ...STORED_DUE_DATE };
+});
 
 taskSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (this: Query<unknown, unknown>) {
   const update = this.getUpdate();
