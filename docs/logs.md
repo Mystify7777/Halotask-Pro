@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### subtasks on tasks: server contract (Issue #15, phase 1)
+
+**2026-11-02 · Backend · completed · Priority: medium**
+
+Tasks can now carry an optional checklist: subtasks [{ id, title, completed }], at most 20, default [] (a task stored before the field reads as []). New parseSubtasks (utils/taskValidators.ts) is strict and shared by create and update: ids 1-64 characters of letters, digits, _ or -, unique per task, titles 1-200 characters after trimming, completed a boolean; malformed input is a 400 naming the entry, never repaired, and the server never invents an id (client-made ids stay stable across edits, syncs and offline remapping). The list is replaced whole by one $set; [] or null stores []; a request that omits the key leaves stored subtasks alone, so an older client can never clear them. Parent and subtasks stay independent: completing every subtask does not complete the parent, completing the parent does not touch subtasks, and only the parent’s own incomplete-to-complete transition awards growth XP (tested by counting award writes). The Task model has a subdocument schema (no _id) and a cap validator as a second line. Known limit, documented: whole-list last-writer-wins applies online as well as offline, and the atomic $set does not prevent a lost update. Tests: validator unit tests, 36 route tests against the real app with an in-memory double (including omitted-key compatibility and no partial writes), 20 model tests with a stubbed driver; a six-mutant check was caught by them. tests/taskSubtasks.realmongo.test.ts was runlocally and found green. Server only: no client change yet (phases 2 and 3).
+
 #### cold-start experience before login, driven by a real backend health check (Issue #12)
 
 **2026-11-01 · Frontend · completed · Priority: medium**

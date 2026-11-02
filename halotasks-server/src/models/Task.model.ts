@@ -1,5 +1,5 @@
 import { Error as MongooseError, Query, Schema, model } from 'mongoose';
-import { DUE_TIME_PATTERN } from '../utils/taskValidators';
+import { DUE_TIME_PATTERN, MAX_SUBTASKS, SUBTASK_ID_PATTERN, TITLE_MAX_LENGTH } from '../utils/taskValidators';
 
 type UpdateShape = { $set?: Record<string, unknown>; $unset?: Record<string, unknown>; dueDate?: unknown };
 
@@ -121,6 +121,18 @@ export function guardDeadlineUpdate(update: unknown, options: { upsert?: boolean
   return { requireStoredDueDate: false };
 }
 
+// A subtask (Issue #15): just an id, a title and a done flag. No `_id` of its own: the client-made `id` is the identity.
+// The API validates strictly (utils/taskValidators.ts parseSubtasks); this schema is the second line for writes that
+// do not come through it.
+const subtaskSchema = new Schema(
+  {
+    id: { type: String, required: true, match: SUBTASK_ID_PATTERN },
+    title: { type: String, required: true, trim: true, minlength: 1, maxlength: TITLE_MAX_LENGTH },
+    completed: { type: Boolean, required: true, default: false },
+  },
+  { _id: false },
+);
+
 const taskSchema = new Schema(
   {
     userId: {
@@ -150,6 +162,15 @@ const taskSchema = new Schema(
     tags: {
       type: [String],
       default: [],
+    },
+    // Optional checklist (Issue #15), replaced as a whole. A task stored before this field existed reads as [].
+    subtasks: {
+      type: [subtaskSchema],
+      default: [],
+      validate: {
+        validator: (value: unknown[]) => value.length <= MAX_SUBTASKS,
+        message: `subtasks cannot have more than ${MAX_SUBTASKS} entries`,
+      },
     },
     dueDate: {
       type: Date,

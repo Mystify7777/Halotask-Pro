@@ -19,6 +19,8 @@ import {
   isValidPriority,
   parseDueDate,
   parseStartTime,
+  parseSubtasks,
+  type Subtask,
 } from '../utils/taskValidators';
 
 const isValidObjectId = (id: unknown): boolean => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id);
@@ -45,6 +47,8 @@ type ParsedTaskBody = {
   completed?: boolean;
   priority?: string;
   tags?: string[];
+  /** Replaces the whole list when present (null already parsed to []); absent means "leave the stored subtasks alone". */
+  subtasks?: Subtask[];
   dueDate?: Date;
   dueTime?: string;
   startTime?: Date;
@@ -120,6 +124,15 @@ const parseTaskBody = (
       return { ok: false, message: `each tag must be at most ${TAG_MAX_LENGTH} characters` };
     }
     result.tags = trimmedTags;
+  }
+
+  // Subtasks (Issue #15). Absent = unchanged, so a client that predates the field can never clear them by accident.
+  if (body.subtasks !== undefined) {
+    const parsedSubtasks = parseSubtasks(body.subtasks);
+    if (!parsedSubtasks.ok) {
+      return { ok: false, message: parsedSubtasks.message };
+    }
+    result.subtasks = parsedSubtasks.value;
   }
 
   if (body.dueDate !== undefined) {
@@ -235,6 +248,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
       completed: payload.completed ?? false,
       priority: payload.priority ?? 'medium',
       tags: payload.tags ?? [],
+      subtasks: payload.subtasks ?? [],
       dueDate: payload.dueDate,
       dueTime: payload.dueTime,
       startTime: payload.startTime,
@@ -339,6 +353,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
       ...(payload.completed !== undefined ? { completed: payload.completed } : {}),
       ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
       ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+      ...(payload.subtasks !== undefined ? { subtasks: payload.subtasks } : {}),
       ...(payload.dueDate !== undefined ? { dueDate: payload.dueDate } : {}),
       ...(payload.dueTime !== undefined ? { dueTime: payload.dueTime } : {}),
       ...(payload.startTime !== undefined ? { startTime: payload.startTime } : {}),
