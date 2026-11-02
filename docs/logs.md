@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### subtasks on tasks: client data layer (Issue #15, phase 2)
+
+**2026-11-02 · Frontend · completed · Priority: medium**
+
+The client now understands a task’s checklist, with no UI yet. Task, TaskCreatePayload and updates carry optional subtasks; utils/subtasks.ts reads a missing list as [], derives progress, normalizes and validates a list for saving (trim, drop blanks, keep ids, never invent one, cap 20, unique ids), and sets one subtask’s state. New toggleSubtask(taskId, subtaskId) works from the latest tasks (two taps in one tick build on each other), sends or queues the whole list as { subtasks } only, so it can never complete the parent or award XP, does nothing for an unknown id, is optimistic online and local-first offline, and keeps a newer local list when an older response arrives late. Failures undo only what they should: online, a per-subtask tap counter stops a failed request undoing a newer tap; offline, each queued write carries the whole list, so the last write to settle puts the checklist where the queue really is (last queued list, or the list from before the first write) and never overwrites a checklist changed meanwhile; the task's pending flag is set only after a queue write succeeds and is never touched by a rollback, so a concurrent edit or sync keeps its own value. Search also matches subtask titles (never ids or state); copy-selected adds the description and [x]/[ ] subtask lines, unchanged for tasks without them. The offline queue is unchanged: its shallow merge already replaces an array whole, now pinned by tests including create-merge and id stability through the local-id remap and the cache. Tests: new unit, hook and offline-layer suites; mutation checks were run three times and each survivor or review finding led to a fix and a test (a per-subtask tap counter online; settle-time reconciliation of offline queue failures; pendingSync owned by successful queue writes instead of restored by a rollback). Not verified: a real browser or a real IndexedDB. Whole-list last-writer-wins still applies. No user-visible change yet (phase 3 is the UI).
+
 #### subtasks on tasks: server contract (Issue #15, phase 1)
 
 **2026-11-02 · Backend · completed · Priority: medium**

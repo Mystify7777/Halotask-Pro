@@ -6,12 +6,13 @@ import { TaskSortOption, useTaskSorting } from './useTaskSorting';
 import { useTagSuggestions } from './useTagSuggestions';
 import { enqueueSyncAction } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
-import { Priority, Task, TaskCreatePayload, TaskUpdatePayload } from '../types/task';
+import { Priority, Subtask, Task, TaskCreatePayload, TaskUpdatePayload } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
 import { formatDateForInput } from '../utils/dateHelpers';
 import { dueDayKey, formatDayKey, isoToStartInput, isValidDueTime, startInputToIso } from '../utils/deadline';
 import { dateKeyInZone } from '../utils/timeZone';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
+import { getSubtasks, sameSubtasks, subtaskCopyLines, withSubtaskCompleted } from '../utils/subtasks';
 import { setCachedTasks } from '../offline/cache';
 import { updateTodaySnapshot } from '../offline/history';
 import type { TaskEditState } from '../components/dashboard/types';
@@ -77,6 +78,15 @@ export function useDashboardTasks({
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
   const latestTasksRef = useRef(tasks);
+  /** Counts taps per subtask, so a failed request only undoes ITS tap, never a newer one that happened to land on the same value. */
+  const subtaskTapsRef = useRef(new Map<string, { tap: number; inFlight: number }>());
+  /** Offline checklist writes per task, only while one is in flight: see toggleSubtask. */
+  const taskWritesRef = useRef(
+    new Map<
+      string,
+      { baseList: Subtask[]; latestList: Subtask[]; lastQueued: Subtask[] | null; inFlight: number; failed: boolean }
+    >(),
+  );
 
   useEffect(() => {
     latestTasksRef.current = tasks;
@@ -127,6 +137,7 @@ export function useDashboardTasks({
       completed: false,
       priority: payload.priority,
       tags: payload.tags ?? [],
+      subtasks: payload.subtasks ?? [],
       dueDate: payload.dueDate,
       dueTime: payload.dueTime,
       startTime: payload.startTime,
@@ -307,6 +318,125 @@ export function useDashboardTasks({
       setStatusError(axiosError.response?.data?.message ?? 'Unable to update task');
     } finally {
       setActiveActionTaskId(null);
+    }
+  };
+
+  /**
+   * Sets ONE subtask's state (Issue #15). It works from the LATEST tasks, read when it is called (the ref is advanced
+   * synchronously below, so two taps in the same tick build on each other), never from a task object a render captured.
+   * An unknown task or subtask id does nothing, and no other subtask is ever changed. The whole next list is what is
+   * sent or queued (the queue replaces an array whole, like `tags`), and the parent task's `completed` is never touched.
+   */
+  const toggleSubtask = async (taskId: string, subtaskId: string) => {
+    const current = latestTasksRef.current.find((item) => item._id === taskId);
+    if (!current) return;
+    const before = getSubtasks(current);
+    const target = before.find((subtask) => subtask.id === subtaskId);
+    if (!target) return;
+
+    const nextCompleted = !target.completed;
+    const next = withSubtaskCompleted(before, subtaskId, nextCompleted);
+    if (!next) return;
+
+    setStatusError(null);
+    setStatusInfo(null);
+
+    /** Sets this subtask's state and nothing else about the task but `updatedAt`. */
+    const applyState = (value: boolean) => (list: Task[]) =>
+      list.map((item) => {
+        if (item._id !== taskId) return item;
+        const updated = withSubtaskCompleted(getSubtasks(item), subtaskId, value);
+        // The task may have changed meanwhile (another edit, a sync): an id that is gone changes nothing.
+        return updated ? { ...item, subtasks: updated, updatedAt: new Date().toISOString() } : item;
+      });
+
+    // Advance the ref now: effects only refresh it after a render, and a second tap can arrive before that.
+    latestTasksRef.current = latestTasksRef.current.map((item) => (item._id === taskId ? { ...item, subtasks: next } : item));
+
+    if (!isOnline) {
+      // Every offline write queues the WHOLE list as it was at that tap, so a later list already contains earlier taps.
+      // That is why a failure cannot undo "its own tap" in isolation: if a later write got queued, the failed tap is
+      // already inside it. The record below is kept only while a write for this task is in flight, and the LAST write
+      // to settle puts the CHECKLIST where the queue really is: the last list that was queued, or the list from before
+      // the first write if none was (and only if nothing else has changed the checklist meanwhile).
+      //
+      // `pendingSync` is a different piece of state with a different owner: it belongs to whoever successfully queued
+      // work for the task (this write, a task edit, a sync). So a toggle sets it only AFTER its own queue write
+      // succeeded, and a failed toggle never touched it: there is nothing for a rollback to restore or trample.
+      const writes =
+        taskWritesRef.current.get(taskId) ?? { baseList: before, latestList: before, lastQueued: null, inFlight: 0, failed: false };
+      taskWritesRef.current.set(taskId, writes);
+      writes.inFlight += 1;
+      writes.latestList = next;
+
+      persistTasks(applyState(nextCompleted), true);
+      let queued = false;
+      try {
+        await enqueueSyncAction({ type: 'update', taskId, payload: { subtasks: next } });
+        queued = true;
+        writes.lastQueued = next;
+        persistTasks((list) => list.map((item) => (item._id === taskId ? { ...item, pendingSync: true } : item)), true);
+        await syncBridgeRef.current.refreshPendingQueueCount();
+      } catch {
+        if (!queued) {
+          writes.failed = true;
+          setStatusError('Could not queue the change — storage unavailable. Please try again.');
+        }
+      } finally {
+        writes.inFlight -= 1;
+        if (writes.inFlight <= 0) {
+          if (taskWritesRef.current.get(taskId) === writes) taskWritesRef.current.delete(taskId);
+          if (writes.failed) {
+            const restoreList = writes.lastQueued ?? writes.baseList;
+            persistTasks(
+              (list) =>
+                list.map((item) =>
+                  // Only if nothing else has changed the checklist since the last tap (an edit or a sync would win).
+                  // The task's other fields, `pendingSync` included, are never part of this rollback.
+                  item._id === taskId && sameSubtasks(getSubtasks(item), writes.latestList) ? { ...item, subtasks: restoreList } : item,
+                ),
+              true,
+            );
+          }
+        }
+      }
+      if (queued) {
+        syncBridgeRef.current.setSyncStatus('offline');
+        if (!writes.failed) setStatusInfo('Subtask updated offline. Pending sync.');
+      }
+      return;
+    }
+
+    // Online: a counter per subtask lets a FAILED request undo only its own tap, never a newer one (even one that
+    // landed on the same value). An entry lives only while a request for it is in flight.
+    const tapKey = `${taskId}:${subtaskId}`;
+    const taps = subtaskTapsRef.current.get(tapKey) ?? { tap: 0, inFlight: 0 };
+    taps.tap += 1;
+    taps.inFlight += 1;
+    subtaskTapsRef.current.set(tapKey, taps);
+    const tap = taps.tap;
+
+    persistTasks(applyState(nextCompleted), true);
+    try {
+      const response = await taskService.updateTask(taskId, { subtasks: next });
+      persistTasks((list) =>
+        list.map((item) => {
+          if (item._id !== taskId) return item;
+          const adopted = keepReminderIdentity(response.task, item);
+          // A newer local change to the checklist (another tap while this request was out) must not be overwritten by
+          // this older response: keep the local list, adopt everything else the server says.
+          return sameSubtasks(getSubtasks(item), next) ? adopted : { ...adopted, subtasks: getSubtasks(item) };
+        }),
+      );
+      applyServerGrowth(response.growth);
+    } catch (requestError) {
+      // Put back only this subtask, and only if no newer tap has touched it since.
+      if (subtaskTapsRef.current.get(tapKey)?.tap === tap) persistTasks(applyState(target.completed), true);
+      const axiosError = requestError as AxiosError<{ message?: string }>;
+      setStatusError(axiosError.response?.data?.message ?? 'Unable to update subtask');
+    } finally {
+      taps.inFlight -= 1;
+      if (taps.inFlight <= 0 && subtaskTapsRef.current.get(tapKey) === taps) subtaskTapsRef.current.delete(tapKey);
     }
   };
 
@@ -641,7 +771,9 @@ export function useDashboardTasks({
         if (meta.length > 0) parts.push(`(${meta.join(', ')})`);
         if (tags) parts.push(tags);
 
-        return parts.join(' ');
+        const firstLine = parts.join(' ');
+        const description = t.description?.trim();
+        return [firstLine, ...(description ? [description] : []), ...subtaskCopyLines(t)].join('\n');
       })
       .join('\n');
 
@@ -818,6 +950,7 @@ export function useDashboardTasks({
 
     handleCreateTask,
     handleToggleTask,
+    toggleSubtask,
     handleDeleteTask,
     handleClearCompleted,
     handleMarkSelectedComplete,

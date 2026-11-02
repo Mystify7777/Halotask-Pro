@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Priority, Task } from '../types/task';
+import { getSubtasks } from '../utils/subtasks';
 import { normalizeTag } from '../utils/tagHelpers';
 
 export type FilterMode = 'all' | 'active' | 'completed';
@@ -46,9 +47,11 @@ export const useTaskFilters = ({
         return true;
       }
 
+      // Title, description and subtask TITLES only: never subtask ids or completion state.
       return (
         task.title.toLowerCase().includes(normalizedSearch) ||
-        task.description?.toLowerCase().includes(normalizedSearch) === true
+        task.description?.toLowerCase().includes(normalizedSearch) === true ||
+        getSubtasks(task).some((subtask) => subtask.title.toLowerCase().includes(normalizedSearch))
       );
     });
   }, [tasks, search, filterMode, priorityFilter, tagFilter]);

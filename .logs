@@ -18,6 +18,25 @@
   "entries": [
     {
       "date": "2026-11-02",
+      "category": "Frontend",
+      "title": "subtasks on tasks: client data layer (Issue #15, phase 2)",
+      "description": "The client now understands a task’s checklist, with no UI yet. Task, TaskCreatePayload and updates carry optional subtasks; utils/subtasks.ts reads a missing list as [], derives progress, normalizes and validates a list for saving (trim, drop blanks, keep ids, never invent one, cap 20, unique ids), and sets one subtask’s state. New toggleSubtask(taskId, subtaskId) works from the latest tasks (two taps in one tick build on each other), sends or queues the whole list as { subtasks } only, so it can never complete the parent or award XP, does nothing for an unknown id, is optimistic online and local-first offline, and keeps a newer local list when an older response arrives late. Failures undo only what they should: online, a per-subtask tap counter stops a failed request undoing a newer tap; offline, each queued write carries the whole list, so the last write to settle puts the checklist where the queue really is (last queued list, or the list from before the first write) and never overwrites a checklist changed meanwhile; the task's pending flag is set only after a queue write succeeds and is never touched by a rollback, so a concurrent edit or sync keeps its own value. Search also matches subtask titles (never ids or state); copy-selected adds the description and [x]/[ ] subtask lines, unchanged for tasks without them. The offline queue is unchanged: its shallow merge already replaces an array whole, now pinned by tests including create-merge and id stability through the local-id remap and the cache. Tests: new unit, hook and offline-layer suites; mutation checks were run three times and each survivor or review finding led to a fix and a test (a per-subtask tap counter online; settle-time reconciliation of offline queue failures; pendingSync owned by successful queue writes instead of restored by a rollback). Not verified: a real browser or a real IndexedDB. Whole-list last-writer-wins still applies. No user-visible change yet (phase 3 is the UI).",
+      "files": [
+        "halotasks-client/src/types/task.ts",
+        "halotasks-client/src/utils/subtasks.ts",
+        "halotasks-client/src/utils/subtasks.test.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.subtasks.test.ts",
+        "halotasks-client/src/hooks/useTaskFilters.ts",
+        "halotasks-client/src/hooks/useTaskFilters.subtasks.test.ts",
+        "halotasks-client/src/offline/subtasks.offline.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-02",
       "category": "Backend",
       "title": "subtasks on tasks: server contract (Issue #15, phase 1)",
       "description": "Tasks can now carry an optional checklist: subtasks [{ id, title, completed }], at most 20, default [] (a task stored before the field reads as []). New parseSubtasks (utils/taskValidators.ts) is strict and shared by create and update: ids 1-64 characters of letters, digits, _ or -, unique per task, titles 1-200 characters after trimming, completed a boolean; malformed input is a 400 naming the entry, never repaired, and the server never invents an id (client-made ids stay stable across edits, syncs and offline remapping). The list is replaced whole by one $set; [] or null stores []; a request that omits the key leaves stored subtasks alone, so an older client can never clear them. Parent and subtasks stay independent: completing every subtask does not complete the parent, completing the parent does not touch subtasks, and only the parent’s own incomplete-to-complete transition awards growth XP (tested by counting award writes). The Task model has a subdocument schema (no _id) and a cap validator as a second line. Known limit, documented: whole-list last-writer-wins applies online as well as offline, and the atomic $set does not prevent a lost update. Tests: validator unit tests, 36 route tests against the real app with an in-memory double (including omitted-key compatibility and no partial writes), 20 model tests with a stubbed driver; a six-mutant check was caught by them. tests/taskSubtasks.realmongo.test.ts was NOT executed in the sandbox (MongoDB cannot be downloaded); run it locally. Server only: no client change yet (phases 2 and 3).",
@@ -1195,5 +1214,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-01T23:31:27.807Z"
+  "lastUpdated": "2026-11-02T11:01:22.523Z"
 }

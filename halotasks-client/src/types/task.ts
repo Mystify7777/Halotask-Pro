@@ -2,6 +2,17 @@ import type { GrowthResult } from '../growth/treeTypes';
 
 export type Priority = 'low' | 'medium' | 'high';
 
+/**
+ * One checklist item on a task (Issue #15). The `id` is created by the client once, when the subtask is created, and
+ * never changes (also across the offline local-id remap), so a later per-item merge stays possible. A subtask has only
+ * a title and a state: no priority, dates, tags or reminders, and it never completes (or reopens) its parent.
+ */
+export type Subtask = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
+
 export type Task = {
   _id: string;
   userId: string;
@@ -10,6 +21,8 @@ export type Task = {
   completed: boolean;
   priority: Priority;
   tags: string[];
+  /** Absent on tasks cached before the field existed: read it through utils/subtasks.ts, which treats that as `[]`. */
+  subtasks?: Subtask[];
   /** The due DAY. ISO date string; its UTC date part is the calendar day the user picked (see utils/deadline.ts). */
   dueDate?: string;
   /** Optional wall-clock time of day ("HH:mm") on the due day. Only ever present together with `dueDate`. */
@@ -42,6 +55,8 @@ export type TaskCreatePayload = {
   description?: string;
   priority: Priority;
   tags?: string[];
+  /** The WHOLE list (last writer wins). Omitting it leaves the stored list unchanged; `[]` clears it. */
+  subtasks?: Subtask[];
   dueDate?: string;
   dueTime?: string;
   startTime?: string;
