@@ -18,6 +18,29 @@
   "entries": [
     {
       "date": "2026-11-01",
+      "category": "Frontend",
+      "title": "cold-start experience before login, driven by a real backend health check (Issue #12)",
+      "description": "The login and register pages now show the existing Task Tapper cold-start overlay while the backend wakes, with no session needed. New public GET /api/health answers 200 { status: \"ok\" } when the database is connected and 503 { status: \"unavailable\" } when it is not (no-store, status only). The client probes it (services/healthService.ts, no credentials, not through apiClient) from a new useBackendReadiness hook: the warm-up appears only when the first probe is slow or a probe is not ok, ready comes only from an ok answer, and the check starts fresh on every mount (refresh, direct navigation). Failure is told apart from a cold start: nothing healthy within 90 s is a timeout, 3 consecutive \"unavailable\" answers is an unhealthy backend, each with its own notice and a Check again button that never blocks the form. The overlay is reused unchanged; the dashboard’s own 3 s trigger is untouched. Tests: server tests/health.test.ts (also through the real app), client healthService, hook, BackendWarmup and both auth pages; a six-mutant check was caught by them. Not run against a real sleeping Render host or in a real browser. Deploy the server first: a client against a server without /api/health waits up to 90 s, then shows the timeout notice. Forgot/reset password pages are not wired. Review corrections: the probe requires exact status and body pairs (200 { status: \"ok\" }, 503 { status: \"unavailable\" }; a pair that contradicts itself counts as no answer); tests added for going offline during a probe, an answer that arrives after going offline, one-at-a-time probing, and a failure notice after an early dismiss. Documented: probes run one at a time, so while a host does not answer the effective spacing is up to about 12 s (10 s probe timeout plus a 2 s pause) and a failed wait is reported at about 90 s, at most roughly 102 s; /api/health cannot report startup progress because the server connects to MongoDB before it listens (a sleeping host gives no usable response until then, and 503 is for a database that drops after start); \"proceeds automatically\" means the overlay closes and the form is available, nothing is submitted for the user.",
+      "files": [
+        "halotasks-server/src/routes/health.routes.ts",
+        "halotasks-server/src/app.ts",
+        "halotasks-server/tests/health.test.ts",
+        "halotasks-client/src/services/healthService.ts",
+        "halotasks-client/src/hooks/useBackendReadiness.ts",
+        "halotasks-client/src/components/BackendWarmup.tsx",
+        "halotasks-client/src/pages/LoginPage.tsx",
+        "halotasks-client/src/pages/RegisterPage.tsx",
+        "halotasks-client/src/services/healthService.test.ts",
+        "halotasks-client/src/hooks/useBackendReadiness.test.ts",
+        "halotasks-client/src/components/BackendWarmup.test.tsx",
+        "halotasks-client/src/pages/AuthPages.coldStart.test.tsx",
+        "docs/context.md"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-01",
       "category": "Backend",
       "title": "make a loaded task’s dueTime save conditional on its stored dueDate (Issue #44)",
       "description": "Audit of Issue #44 found the dueDate/dueTime invariant already enforced on every supported write path (the controller, update operators, bulkWrite, bulkSave, doc.updateOne, replacements, raw inserts), with one race left: save() of a loaded task given a time wrote $set filtered by _id only, so a date removed by another writer after the load could leave a time with no date. A pre-save hook now sets $where to require the stored dueDate when a loaded task’s dueTime is modified and its dueDate is not; if the date is gone the save rejects (DocumentNotFoundError, or VersionError when that save also bumps the version) and stores nothing. Saves that set or clear the date, or leave the time alone, are unchanged. New DB-less tests record the command save() sends (they fail without the hook); a real-MongoDB test in tests/taskWritePaths.realmongo.test.ts covers the removed-after-load case and was NOT executed in the sandbox because MongoDB cannot be downloaded here. Still unprotected by design: native driver writes, { middleware: false }, shell writes, pre-existing data.",
@@ -1154,5 +1177,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-01T02:35:14.469Z"
+  "lastUpdated": "2026-11-01T23:22:49.980Z"
 }

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
+import BackendWarmup from '../components/BackendWarmup';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import { hasCompletedOnboarding, isSessionTokenValid } from '../utils/authSession';
@@ -92,6 +93,8 @@ export default function RegisterPage() {
           <h1 className={styles.cardTitle}>Create your account</h1>
           <p className={styles.cardSub}>Plant your first seed. It's completely free.</p>
         </div>
+
+        <BackendWarmup />
 
         <form onSubmit={handleSubmit} className="auth-form" noValidate>
           <label>

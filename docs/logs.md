@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### cold-start experience before login, driven by a real backend health check (Issue #12)
+
+**2026-11-01 · Frontend · completed · Priority: medium**
+
+The login and register pages now show the existing Task Tapper cold-start overlay while the backend wakes, with no session needed. New public GET /api/health answers 200 { status: "ok" } when the database is connected and 503 { status: "unavailable" } when it is not (no-store, status only). The client probes it (services/healthService.ts, no credentials, not through apiClient) from a new useBackendReadiness hook: the warm-up appears only when the first probe is slow or a probe is not ok, ready comes only from an ok answer, and the check starts fresh on every mount (refresh, direct navigation). Failure is told apart from a cold start: nothing healthy within 90 s is a timeout, 3 consecutive "unavailable" answers is an unhealthy backend, each with its own notice and a Check again button that never blocks the form. The overlay is reused unchanged; the dashboard’s own 3 s trigger is untouched. Tests: server tests/health.test.ts (also through the real app), client healthService, hook, BackendWarmup and both auth pages; a six-mutant check was caught by them. Not run against a real sleeping Render host or in a real browser. Deploy the server first: a client against a server without /api/health waits up to 90 s, then shows the timeout notice. Forgot/reset password pages are not wired. Review corrections: the probe requires exact status and body pairs (200 { status: "ok" }, 503 { status: "unavailable" }; a pair that contradicts itself counts as no answer); tests added for going offline during a probe, an answer that arrives after going offline, one-at-a-time probing, and a failure notice after an early dismiss. Documented: probes run one at a time, so while a host does not answer the effective spacing is up to about 12 s (10 s probe timeout plus a 2 s pause) and a failed wait is reported at about 90 s, at most roughly 102 s; /api/health cannot report startup progress because the server connects to MongoDB before it listens (a sleeping host gives no usable response until then, and 503 is for a database that drops after start); "proceeds automatically" means the overlay closes and the form is available, nothing is submitted for the user.
+
 #### make a loaded task’s dueTime save conditional on its stored dueDate (Issue #44)
 
 **2026-11-01 · Backend · completed · Priority: low**

@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import aiRoutes from './routes/ai.routes';
 import authRoutes from './routes/auth.routes';
+import healthRoutes from './routes/health.routes';
 import pushRoutes from './routes/push.routes';
 import taskRoutes from './routes/task.routes';
 import treeRoutes from './routes/tree.routes';
@@ -35,6 +36,9 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/', (_req, res) => {
   res.send('HaloTasks API running');
 });
+
+// Public readiness probe for the pre-login cold-start experience (Issue #12). Mounted before every authenticated route.
+app.use('/api/health', healthRoutes);
 
 app.use('/api/auth',  authRoutes);
 app.use('/api/ai', aiRoutes);
