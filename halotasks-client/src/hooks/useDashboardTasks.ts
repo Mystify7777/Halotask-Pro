@@ -12,7 +12,7 @@ import { formatDateForInput } from '../utils/dateHelpers';
 import { dueDayKey, formatDayKey, isoToStartInput, isValidDueTime, startInputToIso } from '../utils/deadline';
 import { dateKeyInZone } from '../utils/timeZone';
 import { sanitizeTags, tryAddTag } from '../utils/tagHelpers';
-import { getSubtasks, sameSubtasks, subtaskCopyLines, withSubtaskCompleted } from '../utils/subtasks';
+import { getSubtasks, prepareSubtasks, sameSubtasks, subtaskCopyLines, withSubtaskCompleted } from '../utils/subtasks';
 import { setCachedTasks } from '../offline/cache';
 import { updateTodaySnapshot } from '../offline/history';
 import type { TaskEditState } from '../components/dashboard/types';
@@ -66,6 +66,9 @@ export function useDashboardTasks({
   const [createTags, setCreateTags] = useState<string[]>(['personal']);
   const [createTagInput, setCreateTagInput] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState('30');
+  const [description, setDescription] = useState('');
+  const [createSubtasks, setCreateSubtasksState] = useState<Subtask[]>([]);
+  const [createSubtasksError, setCreateSubtasksError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('active');
@@ -78,6 +81,8 @@ export function useDashboardTasks({
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editState, setEditState] = useState<TaskEditState | null>(null);
   const latestTasksRef = useRef(tasks);
+  /** A deep, private copy of the description and checklist as the edit sheet OPENED: the baseline for "did the user change it?". */
+  const editSnapshotRef = useRef<{ description: string; subtasks: Subtask[] } | null>(null);
   /** Counts taps per subtask, so a failed request only undoes ITS tap, never a newer one that happened to land on the same value. */
   const subtaskTapsRef = useRef(new Map<string, { tap: number; inFlight: number }>());
   /** Offline checklist writes per task, only while one is in flight: see toggleSubtask. */
@@ -199,6 +204,12 @@ export function useDashboardTasks({
     );
   };
 
+  const resetCreateExtras = () => {
+    setDescription('');
+    setCreateSubtasksState([]);
+    setCreateSubtasksError(null);
+  };
+
   const handleCreateTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatusError(null);
@@ -208,11 +219,22 @@ export function useDashboardTasks({
       return;
     }
 
+    // Refused before anything is sent, queued or stored; what the user typed stays in the form.
+    const prepared = prepareSubtasks(createSubtasks);
+    if (!prepared.ok) {
+      setCreateSubtasksError(prepared.message);
+      return;
+    }
+    setCreateSubtasksError(null);
+
     try {
       setCreatingTask(true);
       const parsedEstimatedMinutes = Number(estimatedMinutes);
       const payload: TaskCreatePayload = {
         title: title.trim(),
+        // Optional fields stay optional: sent only when the user filled them in.
+        description: description.trim() || undefined,
+        subtasks: prepared.subtasks.length > 0 ? prepared.subtasks : undefined,
         priority,
         tags: sanitizeTags(createTags),
         dueDate: dueDate || undefined,
@@ -246,6 +268,7 @@ export function useDashboardTasks({
         setCreateTags(['personal']);
         setCreateTagInput('');
         setEstimatedMinutes('30');
+        resetCreateExtras();
         return;
       }
 
@@ -260,6 +283,7 @@ export function useDashboardTasks({
       setCreateTags(['personal']);
       setCreateTagInput('');
       setEstimatedMinutes('30');
+      resetCreateExtras();
       setStatusInfo('Task created successfully.');
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -791,7 +815,15 @@ export function useDashboardTasks({
 
   const handleStartEditing = (task: Task) => {
     setEditingTaskId(task._id);
+    // Separate copies: the form's list and the baseline never share an object, so editing cannot move the baseline.
+    editSnapshotRef.current = {
+      description: task.description ?? '',
+      subtasks: getSubtasks(task).map((subtask) => ({ ...subtask })),
+    };
     setEditState({
+      description: task.description ?? '',
+      subtasks: getSubtasks(task).map((subtask) => ({ ...subtask })),
+      saveError: null,
       title: task.title,
       priority: task.priority,
       tags: sanitizeTags(task.tags),
@@ -804,6 +836,7 @@ export function useDashboardTasks({
   };
 
   const handleCancelEditing = () => {
+    editSnapshotRef.current = null;
     setEditingTaskId(null);
     setEditState(null);
   };
@@ -812,6 +845,29 @@ export function useDashboardTasks({
     if (!editState || !editState.title.trim()) {
       return;
     }
+
+    const snapshot = editSnapshotRef.current;
+    let subtasksToSend: Subtask[] | undefined;
+    if (snapshot && editState.subtasks !== undefined) {
+      const prepared = prepareSubtasks(editState.subtasks);
+      if (!prepared.ok) {
+        // No request, no queue write, no optimistic change; the form keeps everything the user typed.
+        setEditState((current) => (current ? { ...current, saveError: prepared.message } : current));
+        return;
+      }
+      // Sent ONLY when the user changed it (ids, titles, states, order). An unchanged list is omitted so this save can
+      // never overwrite a checkbox toggled elsewhere while the sheet was open.
+      if (!sameSubtasks(prepared.subtasks, snapshot.subtasks)) {
+        // The editor cannot change completion, so a toggle made since the sheet opened is the truth: keep it.
+        const latest = getSubtasks(latestTasksRef.current.find((item) => item._id === taskId) ?? {});
+        const latestState = new Map(latest.map((subtask) => [subtask.id, subtask.completed]));
+        subtasksToSend = prepared.subtasks.map((subtask) => ({ ...subtask, completed: latestState.get(subtask.id) ?? subtask.completed }));
+      }
+    }
+    const descriptionToSend =
+      snapshot && editState.description !== undefined && editState.description !== snapshot.description
+        ? editState.description.trim()
+        : undefined;
 
     setStatusError(null);
     setStatusInfo(null);
@@ -836,6 +892,8 @@ export function useDashboardTasks({
         editState.estimatedMinutes && Number.isFinite(parsedEstimatedMinutes) && parsedEstimatedMinutes >= 0
           ? parsedEstimatedMinutes
           : 0,
+      ...(descriptionToSend !== undefined ? { description: descriptionToSend } : {}),
+      ...(subtasksToSend !== undefined ? { subtasks: subtasksToSend } : {}),
     };
 
     if (!isOnline) {
@@ -851,6 +909,8 @@ export function useDashboardTasks({
                 dueTime: payload.dueTime ?? undefined,
                 startTime: payload.startTime ?? undefined,
                 estimatedMinutes: payload.estimatedMinutes ?? item.estimatedMinutes,
+                ...(payload.description !== undefined ? { description: payload.description } : {}),
+                ...(payload.subtasks !== undefined ? { subtasks: payload.subtasks } : {}),
                 updatedAt: new Date().toISOString(),
                 pendingSync: true,
               }
@@ -915,6 +975,14 @@ export function useDashboardTasks({
     setCreateTagInput,
     estimatedMinutes,
     setEstimatedMinutes,
+    description,
+    setDescription,
+    createSubtasks,
+    setCreateSubtasks: (next: Subtask[]) => {
+      setCreateSubtasksState(next);
+      setCreateSubtasksError(null);
+    },
+    createSubtasksError,
 
     search,
     setSearch,

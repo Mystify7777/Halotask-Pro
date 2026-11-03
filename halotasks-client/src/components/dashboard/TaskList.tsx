@@ -23,6 +23,7 @@ type TaskListProps = {
   onCancelEditing: () => void;
   onSaveTaskEdit: (taskId: string) => void;
   onToggleTask: (task: Task) => void;
+  onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onDeleteTask: (taskId: string) => void;
   onToggleSelect: (taskId: string) => void;
   onToggleTagFilter: (tag: string) => void;
@@ -47,6 +48,7 @@ export default function TaskList({
   onCancelEditing,
   onSaveTaskEdit,
   onToggleTask,
+  onToggleSubtask,
   onDeleteTask,
   onToggleSelect,
   onToggleTagFilter,
@@ -121,6 +123,7 @@ export default function TaskList({
               isSelected={selectedIdsSet.has(task._id)}
               bulkActionLoading={bulkActionLoading}
               onToggleTask={onToggleTask}
+              onToggleSubtask={onToggleSubtask}
               onDeleteTask={onDeleteTask}
               onStartEditing={onStartEditing}
               onToggleTagFilter={onToggleTagFilter}

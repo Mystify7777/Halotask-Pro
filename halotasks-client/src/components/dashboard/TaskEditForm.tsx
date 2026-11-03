@@ -61,6 +61,12 @@ export default function TaskEditForm({
         onTagInputChange={(value) => patch(onEditStateChange, { tagInput: value })}
         onAddTag={onAddEditTag}
         onRemoveTag={onRemoveEditTag}
+        // Only when this edit session carries them (the dashboard always does); a form without them renders as before.
+        description={editState.description}
+        onDescriptionChange={editState.description === undefined ? undefined : (value) => patch(onEditStateChange, { description: value })}
+        subtasks={editState.subtasks}
+        onSubtasksChange={editState.subtasks === undefined ? undefined : (next) => patch(onEditStateChange, { subtasks: next, saveError: null })}
+        subtasksError={editState.saveError}
       />
       <div className="task-edit-actions">
         <button

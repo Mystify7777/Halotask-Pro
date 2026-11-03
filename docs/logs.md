@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### subtasks and description in the task UI (Issue #15, phase 3)
+
+**2026-11-03 · Frontend · completed · Priority: medium**
+
+Tasks can now be given a description and a checklist in the same create/edit form, and the card shows them. The shared form gains an optional Description field (2000 characters) and a SubtaskEditor (add, rename, remove, at most 20; new rows get their id once, existing ids and states are never touched; Enter never submits the form). Saving refuses instead of repairing: an invalid entry, a duplicate id, more than 20 rows or an over-long title shows a message in the form and sends, queues and changes nothing, keeping what was typed; only well-formed blank rows are dropped. An edit sends the description and subtasks only when they changed from a private copy taken when the sheet opened (compared by id, title, state and order, so restoring a list counts as unchanged), so an unrelated edit can no longer overwrite a checkbox toggled elsewhere; when the list did change, completion comes from the latest task state. The card shows a done/total chip with a progressbar, and a collapsed-by-default disclosure (a real button with aria-expanded and aria-controls) that opens a region labelled by the task title with the description (line breaks kept) and native subtask checkboxes; subtask clicks and keys never toggle, select or edit the parent. The main checkbox also accepts Space. 44px touch targets and wrapping for long words. Tests: jsdom suites for the editor, forms, card and hook payloads, twelve mutation checks, and a scripted Chromium pass (real keyboard, request bodies, screenshots at 360px and 1280px) against the dev app with a stubbed API. Not verified: screen readers, a real phone, a real backend. Pre-existing and unchanged: the dashboard is about 16px wider than a 360px screen.
+
 #### subtasks on tasks: client data layer (Issue #15, phase 2)
 
 **2026-11-02 · Frontend · completed · Priority: medium**

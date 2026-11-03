@@ -112,3 +112,99 @@
 .deleteBtn:hover:not(:disabled) {
   background: var(--color-danger-bg);
 }
+
+
+/* Subtasks and description (Issue #15) */
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.progressText {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.progressTrack {
+  display: inline-block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  background: var(--color-text-tertiary);
+}
+
+.disclosure {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px; /* a comfortable touch target */
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.details {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.description {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap; /* keep the user's line breaks */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.subtaskList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.subtaskRow {
+  min-width: 0;
+}
+
+.subtaskLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.subtaskBox {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--color-task-check);
+}
+
+.subtaskDone {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}

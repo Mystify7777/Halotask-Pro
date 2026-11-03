@@ -1,5 +1,5 @@
 import { FormEvent, RefObject } from 'react';
-import { Priority } from '../../types/task';
+import { Priority, Subtask } from '../../types/task';
 import TaskFormFields from './TaskFormFields';
 import AiTaskInput from './AiTaskInput';
 import type { AiPhase, AiTaskDraft } from '../../hooks/useAiTaskCreation';
@@ -31,6 +31,11 @@ export type TaskCreateFormProps = {
   onTagInputChange: (value: string) => void;
   onAddTag: (tag: string) => AddTagResult;
   onRemoveTag: (tag: string) => void;
+  description?: string;
+  onDescriptionChange?: (value: string) => void;
+  subtasks?: Subtask[];
+  onSubtasksChange?: (next: Subtask[]) => void;
+  subtasksError?: string | null;
   aiPhase?: AiPhase;
   aiPrompt?: string;
   aiDrafts?: AiTaskDraft[];
@@ -68,6 +73,11 @@ export default function TaskCreateForm({
   onTagInputChange,
   onAddTag,
   onRemoveTag,
+  description,
+  onDescriptionChange,
+  subtasks,
+  onSubtasksChange,
+  subtasksError,
   aiPhase,
   aiPrompt,
   aiDrafts,
@@ -136,6 +146,11 @@ export default function TaskCreateForm({
             onTagInputChange={onTagInputChange}
             onAddTag={onAddTag}
             onRemoveTag={onRemoveTag}
+            description={description}
+            onDescriptionChange={onDescriptionChange}
+            subtasks={subtasks}
+            onSubtasksChange={onSubtasksChange}
+            subtasksError={subtasksError}
           />
           <button
             type="submit"

@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Task } from '../../types/task';
 import { getDateBadgeClass } from '../../utils/dateHelpers';
 import { formatDueLabel, formatStartLabel } from '../../utils/deadline';
+import { getSubtasks, subtaskProgress } from '../../utils/subtasks';
 import { normalizeTag } from '../../utils/tagHelpers';
 import styles from './TaskCard.module.css';
 
@@ -11,6 +13,7 @@ type TaskCardProps = {
   isSelected:         boolean;
   bulkActionLoading:  boolean;
   onToggleTask:       (task: Task) => void;
+  onToggleSubtask:    (taskId: string, subtaskId: string) => void;
   onDeleteTask:       (taskId: string) => void;
   onStartEditing:     (task: Task) => void;
   onToggleTagFilter:  (tag: string) => void;
@@ -36,6 +39,7 @@ export default function TaskCard({
   isSelected,
   bulkActionLoading,
   onToggleTask,
+  onToggleSubtask,
   onDeleteTask,
   onStartEditing,
   onToggleTagFilter,
@@ -48,6 +52,15 @@ export default function TaskCard({
   const dueClass = getDateBadgeClass(task.dueDate, task.dueTime);
   const dotClass = PRIORITY_DOT[task.priority] ?? 'low';
 
+  // Presentation state only: collapsed by default, not persisted, never part of the task.
+  const [expanded, setExpanded] = useState(false);
+  const subtasks = getSubtasks(task);
+  const { done, total } = subtaskProgress(task);
+  const description = task.description?.trim() ? task.description : '';
+  const hasDetails = total > 0 || description !== '';
+  const titleId = `${task._id}-title`;
+  const detailsId = `${task._id}-details`;
+
   return (
     <div className={`task-item ${task.completed ? 'complete' : ''} ${styles.card}`}>
       <span
@@ -57,7 +70,11 @@ export default function TaskCard({
         tabIndex={isDisabled ? -1 : 0}
         className={`task-check ${task.completed ? 'checked' : ''} ${styles.check}`}
         onClick={() => !isDisabled && onToggleTask(task)}
-        onKeyDown={(e) => e.key === 'Enter' && !isDisabled && onToggleTask(task)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault(); // Space would otherwise scroll the page
+          if (!isDisabled) onToggleTask(task);
+        }}
         aria-disabled={isDisabled}
       >
         {task.completed && !isActioning && (
@@ -69,7 +86,7 @@ export default function TaskCard({
       </span>
 
       <div className={styles.info}>
-        <strong className={styles.title}>{task.title}</strong>
+        <strong id={titleId} className={styles.title}>{task.title}</strong>
 
         <div className={styles.meta}>
           <span className={styles.priorityWrap}>
@@ -88,8 +105,64 @@ export default function TaskCard({
             </span>
           )}
 
+          {total > 0 && (
+            <span
+              className={styles.progress}
+              role="progressbar"
+              aria-label={`Subtasks completed for "${task.title}"`}
+              aria-valuemin={0}
+              aria-valuemax={total}
+              aria-valuenow={done}
+              aria-valuetext={`${done} of ${total} subtasks completed`}
+            >
+              <span className={styles.progressText}>{done}/{total}</span>
+              <span className={styles.progressTrack} aria-hidden="true">
+                <span className={styles.progressFill} style={{ width: `${(done / total) * 100}%` }} />
+              </span>
+            </span>
+          )}
+
           {task.pendingSync && <span className="task-pending-sync">⟳ Syncing</span>}
         </div>
+
+        {hasDetails && (
+          <button
+            type="button"
+            className={styles.disclosure}
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            aria-label={`${expanded ? 'Hide' : 'Show'} subtasks and description for "${task.title}"`}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+            <span aria-hidden="true">{expanded ? 'Hide details' : 'Details'}</span>
+          </button>
+        )}
+
+        {hasDetails && expanded && (
+          <div id={detailsId} role="region" aria-labelledby={titleId} className={styles.details}>
+            {description && <p className={styles.description}>{description}</p>}
+            {total > 0 && (
+              <ul className={styles.subtaskList}>
+                {subtasks.map((subtask) => (
+                  // Everything in here stops at the row: a subtask click or key can never toggle, select or edit the parent.
+                  <li key={subtask.id} className={styles.subtaskRow} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <label className={styles.subtaskLabel}>
+                      <input
+                        type="checkbox"
+                        className={styles.subtaskBox}
+                        checked={subtask.completed}
+                        disabled={isDisabled}
+                        onChange={() => onToggleSubtask(task._id, subtask.id)}
+                      />
+                      <span className={subtask.completed ? styles.subtaskDone : undefined}>{subtask.title}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {task.tags.length > 0 && (
           <div className="task-tag-row">

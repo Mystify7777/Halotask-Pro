@@ -52,6 +52,40 @@ export const normalizeSubtasks = (raw: unknown): Subtask[] => {
   return result;
 };
 
+export type PreparedSubtasks = { ok: true; subtasks: Subtask[] } | { ok: false; message: string };
+
+/**
+ * The SAVE-path gate for what a form holds (Issue #15): it refuses instead of repairing. Entries that are not
+ * `{ id, title, completed }` objects with a valid id, or that repeat an id (checked on every entry, blank ones too, so a
+ * blank row can never hide a duplicate), are refused with a message. The only thing dropped is a well-formed entry whose
+ * title is blank after trimming (the empty row a user added and did not fill); titles are trimmed, existing ids are kept
+ * exactly and none is generated, then the cap of 20 and the title length are enforced on what is left.
+ */
+export const prepareSubtasks = (raw: unknown): PreparedSubtasks => {
+  if (!Array.isArray(raw)) return { ok: false, message: 'Subtasks must be a list.' };
+
+  const ids = new Set<string>();
+  const kept: Subtask[] = [];
+  for (const [index, item] of raw.entries()) {
+    const entry = item as Partial<Subtask> | null;
+    const wellFormed =
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof entry.id === 'string' &&
+      SUBTASK_ID_PATTERN.test(entry.id) &&
+      typeof entry.title === 'string' &&
+      typeof entry.completed === 'boolean';
+    if (!wellFormed) return { ok: false, message: `Subtask ${index + 1} is not valid.` };
+    if (ids.has(entry.id!)) return { ok: false, message: 'Subtask ids must be unique.' };
+    ids.add(entry.id!);
+    const title = entry.title!.trim();
+    if (title) kept.push({ id: entry.id!, title, completed: entry.completed! });
+  }
+
+  const problem = validateSubtasks(kept);
+  return problem ? { ok: false, message: problem } : { ok: true, subtasks: kept };
+};
+
 /** What the server would refuse for a normalized list, as a message for the user; `null` when it is fine to send. */
 export const validateSubtasks = (subtasks: Subtask[]): string | null => {
   if (subtasks.length > MAX_SUBTASKS) return `A task can have at most ${MAX_SUBTASKS} subtasks.`;

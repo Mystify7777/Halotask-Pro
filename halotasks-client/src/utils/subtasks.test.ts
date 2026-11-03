@@ -4,6 +4,7 @@ import {
   getSubtasks,
   newSubtaskId,
   normalizeSubtasks,
+  prepareSubtasks,
   sameSubtasks,
   subtaskCopyLines,
   subtaskProgress,
@@ -102,5 +103,50 @@ describe('subtaskCopyLines / newSubtaskId / sameSubtasks', () => {
     expect(sameSubtasks([sub('a')], [sub('a')])).toBe(true);
     expect(sameSubtasks([sub('a')], [sub('a', { completed: true })])).toBe(false);
     expect(sameSubtasks([sub('a'), sub('b')], [sub('b'), sub('a')])).toBe(false);
+  });
+});
+
+describe('prepareSubtasks (the save gate: refuses, does not repair)', () => {
+  const ok = (raw: unknown) => {
+    const result = prepareSubtasks(raw);
+    if (!result.ok) throw new Error(result.message);
+    return result.subtasks;
+  };
+  const refusal = (raw: unknown) => {
+    const result = prepareSubtasks(raw);
+    if (result.ok) throw new Error('expected a refusal');
+    return result.message;
+  };
+
+  it('keeps ids and order, trims titles, and drops only well-formed blank rows', () => {
+    expect(ok([sub('b', { title: ' Pack ' }), sub('x', { title: '   ' }), sub('a', { completed: true })])).toEqual([
+      { id: 'b', title: 'Pack', completed: false },
+      { id: 'a', title: 'step a', completed: true },
+    ]);
+    expect(ok([])).toEqual([]);
+  });
+
+  it('refuses an entry that is not valid, even with a non-blank title, instead of silently dropping it', () => {
+    expect(refusal([sub('a'), { title: 'real', completed: false }])).toMatch(/Subtask 2 is not valid/);
+    expect(refusal([sub('bad id')])).toMatch(/Subtask 1/);
+    expect(refusal([sub('a', { completed: 'yes' })])).toMatch(/not valid/);
+    expect(refusal([null])).toMatch(/not valid/);
+    expect(refusal('nope')).toMatch(/must be a list/);
+  });
+
+  it('refuses duplicate ids, including one hidden behind a blank row', () => {
+    expect(refusal([sub('a'), sub('a')])).toMatch(/unique/);
+    expect(refusal([sub('a'), sub('a', { title: '   ' })])).toMatch(/unique/);
+  });
+
+  it('enforces the cap on what is kept (blank rows do not count) and the title length', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => sub(`s${i}`));
+    expect(ok([...many(MAX_SUBTASKS), sub('blank', { title: ' ' })])).toHaveLength(MAX_SUBTASKS);
+    expect(refusal(many(MAX_SUBTASKS + 1))).toMatch(/at most 20/);
+    expect(refusal([sub('a', { title: 'x'.repeat(201) })])).toMatch(/200/);
+  });
+
+  it('never generates an id and never changes an existing one', () => {
+    expect(ok([sub('keep-me_1')]).map((s) => s.id)).toEqual(['keep-me_1']);
   });
 });

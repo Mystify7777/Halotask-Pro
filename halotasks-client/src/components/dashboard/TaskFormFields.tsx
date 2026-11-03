@@ -1,7 +1,8 @@
 import { ReactNode, RefObject } from 'react';
-import { Priority } from '../../types/task';
+import { Priority, Subtask } from '../../types/task';
 import { SUGGESTED_TAGS } from '../../utils/tagHelpers';
 import TagInput from '../shared/TagInput';
+import SubtaskEditor from './SubtaskEditor';
 
 type AddTagResult = {
   message: string | null;
@@ -28,9 +29,18 @@ type TaskFormFieldsProps = {
   onTagInputChange: (value: string) => void;
   onAddTag: (tag: string) => AddTagResult;
   onRemoveTag: (tag: string) => void;
+  /** Optional: the description and checklist controls appear only when their handlers are given. */
+  description?: string;
+  onDescriptionChange?: (value: string) => void;
+  subtasks?: Subtask[];
+  onSubtasksChange?: (next: Subtask[]) => void;
+  subtasksError?: string | null;
   aiButton?: ReactNode;
   children?: ReactNode;
 };
+
+/** Mirrors the server's limit (DESCRIPTION_MAX_LENGTH): the server stays authoritative. */
+export const DESCRIPTION_MAX_LENGTH = 2000;
 
 export default function TaskFormFields({
   title,
@@ -53,6 +63,11 @@ export default function TaskFormFields({
   onTagInputChange,
   onAddTag,
   onRemoveTag,
+  description,
+  onDescriptionChange,
+  subtasks,
+  onSubtasksChange,
+  subtasksError,
   aiButton,
   children,
 }: TaskFormFieldsProps) {
@@ -142,6 +157,22 @@ export default function TaskFormFields({
           aria-label="Estimated minutes"
         />
       </label>
+
+      {onDescriptionChange && (
+        <label className="form-field-label">
+          <span>Description (optional)</span>
+          <textarea
+            value={description ?? ''}
+            onChange={(event) => onDescriptionChange(event.target.value)}
+            maxLength={DESCRIPTION_MAX_LENGTH}
+            rows={3}
+            placeholder="Details, links, notes"
+            aria-label="Description"
+          />
+        </label>
+      )}
+
+      {onSubtasksChange && <SubtaskEditor subtasks={subtasks ?? []} onChange={onSubtasksChange} error={subtasksError} />}
 
       {children}
     </>

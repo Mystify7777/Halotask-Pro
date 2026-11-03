@@ -247,6 +247,11 @@ export default function DashboardPage() {
               onTagInputChange={tasksHook.setCreateTagInput}
               onAddTag={tasksHook.addCreateTag}
               onRemoveTag={tasksHook.removeCreateTag}
+              description={tasksHook.description}
+              onDescriptionChange={tasksHook.setDescription}
+              subtasks={tasksHook.createSubtasks}
+              onSubtasksChange={tasksHook.setCreateSubtasks}
+              subtasksError={tasksHook.createSubtasksError}
               inputRef={titleInputRef}
             />
           </>
@@ -377,6 +382,7 @@ export default function DashboardPage() {
               onCancelEditing={tasksHook.handleCancelEditing}
               onSaveTaskEdit={tasksHook.handleSaveTaskEdit}
               onToggleTask={tasksHook.handleToggleTask}
+              onToggleSubtask={tasksHook.toggleSubtask}
               onDeleteTask={tasksHook.handleDeleteTask}
               onToggleSelect={tasksHook.toggleSelect}
               onToggleTagFilter={(tag) => tasksHook.setTagFilter((current) => (current === tag ? null : tag))}
@@ -421,6 +427,11 @@ export default function DashboardPage() {
         onTagInputChange={tasksHook.setCreateTagInput}
         onAddTag={tasksHook.addCreateTag}
         onRemoveTag={tasksHook.removeCreateTag}
+        description={tasksHook.description}
+        onDescriptionChange={tasksHook.setDescription}
+        subtasks={tasksHook.createSubtasks}
+        onSubtasksChange={tasksHook.setCreateSubtasks}
+        subtasksError={tasksHook.createSubtasksError}
         inputRef={titleInputRef}
         aiPhase={ai.aiPhase}
         aiPrompt={ai.aiPrompt}

@@ -300,6 +300,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);
 }
 
+/* ─── Subtask editor (Issue #15) ──────────────────────────── */
+.subtask-editor { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: none; }
+.subtask-editor legend { padding: 0; font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-secondary); }
+.subtask-editor-count { font-weight: var(--weight-normal); color: var(--color-text-tertiary); }
+.subtask-editor-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.subtask-editor-row { display: flex; gap: var(--space-2); align-items: center; min-width: 0; }
+.subtask-editor-row input { flex: 1; min-width: 0; }
+.subtask-editor .ghost-btn { min-height: 44px; justify-self: start; }
+.subtask-editor-error { margin: 0; font-size: var(--text-xs); color: var(--color-danger, #c0392b); }
+
 /* ─── Task edit action row ────────────────────────────────── */
 .task-edit-actions {
   display: flex; gap: var(--space-2); margin-top: var(--space-2);
