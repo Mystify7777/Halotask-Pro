@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### search panel: collapsible Summary section, 320px overflow fixed
+
+**2026-11-03 · Frontend · completed · Priority: medium**
+
+The six smart-section cards moved out of the task area into the search panel behind a new Summary toggle next to Filters (collapsed by default, aria-expanded), so the task area only shows tasks. At 320px the search box and the + New task button stuck out of the panel because its grid columns could not shrink; the panel columns now use minmax(0, 1fr) and the status row and buttons wrap. A blank strip under the collapsed filter row is also gone. Checked in Chromium at 1615, 1280, 768, 360 and 320px (50 of 50 scripted checks: nothing outside the panel, no sideways scroll, collapsed by default, opens inside the panel, cards one line, modal still opens, closes again), the earlier 21 subtask checks, and 4 new jsdom tests. The state is not remembered across reloads. Not checked: other browsers, widths below 320px, screen readers.
+
 #### task cards: equal-width grid, ellipsis titles revealed on click, one-line smart cards
 
 **2026-11-03 · Frontend · completed · Priority: medium**

@@ -9,6 +9,8 @@ type TaskFiltersProps = {
   sortBy: TaskSortOption;
   tagFilter: string | null;
   filtersExpanded: boolean;
+  summaryExpanded?: boolean;
+  onSummaryExpandedChange?: (value: boolean) => void;
   onSearchChange: (value: string) => void;
   onFilterModeChange: (value: FilterMode) => void;
   onPriorityFilterChange: (value: 'all' | Priority) => void;
@@ -31,6 +33,8 @@ export default function TaskFilters({
   sortBy,
   tagFilter,
   filtersExpanded,
+  summaryExpanded = false,
+  onSummaryExpandedChange,
   onSearchChange,
   onFilterModeChange,
   onPriorityFilterChange,
@@ -84,6 +88,18 @@ export default function TaskFilters({
               <span className="filter-active-dot" aria-label="Active filters" />
             )}
           </button>
+
+          {onSummaryExpandedChange && (
+            <button
+              type="button"
+              className="ghost-btn btn-sm filter-toggle-btn"
+              onClick={() => onSummaryExpandedChange(!summaryExpanded)}
+              aria-expanded={summaryExpanded}
+              aria-controls="summary-panel"
+            >
+              {summaryExpanded ? '▲ Summary' : '▼ Summary'}
+            </button>
+          )}
 
           {onAddTask && (
             <button

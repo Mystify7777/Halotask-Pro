@@ -269,8 +269,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 
 /* ─── Dashboard toolbar ──────────────────────────────────── */
-.toolbar-panel { display: grid; gap: var(--space-3); }
-.toolbar-filters { display: grid; gap: var(--space-3); }
+.toolbar-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
+.toolbar-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
+.toolbar-summary { min-width: 0; }
 .toolbar-meta-wrap {
   display: grid;
   max-height: 0;
@@ -281,6 +282,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   max-height: 400px;
   overflow: visible;
 }
+/* collapsed, the row has no height but the panel's grid gap would still add a blank strip */
+.toolbar-meta-wrap:not(.toolbar-meta-wrap--open) { margin-top: calc(-1 * var(--space-3)); }
 .toolbar-meta-inner { min-height: 0; }
 .toolbar-meta {
   display: flex; align-items: center; justify-content: space-between;
@@ -318,12 +321,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 
 /* ─── Filters block ───────────────────────────────────────── */
-.filters-block { display: grid; gap: var(--space-3); }
-.filter-search { width: 100%; }
+.filters-block { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
+.filter-search { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .filter-row-selects { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 
 /* Segment + CTA row */
-.filter-segment-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.filter-segment-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
 
 /* Status segment control */
 .filter-segment {
@@ -348,7 +351,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 
 /* ─── Filter toggle + collapsible advanced filters ─────────── */
-.filter-segment-actions { display: flex; align-items: center; gap: var(--space-2); }
+.filter-segment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
 
 .filter-toggle-btn { position: relative; white-space: nowrap; }
 .filter-toggle-btn--active { color: var(--color-primary); }

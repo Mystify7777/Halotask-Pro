@@ -1,15 +1,11 @@
 import type { ReactNode } from 'react';
 
 type DashboardContentProps = {
-  smartSections: ReactNode;
   taskList: ReactNode;
 };
 
-export default function DashboardContent({ smartSections, taskList }: DashboardContentProps) {
-  return (
-    <>
-      {smartSections}
-      {taskList}
-    </>
-  );
+// The productivity snapshot (SmartSections) lives in the toolbar panel, collapsed by default,
+// so this area only shows tasks.
+export default function DashboardContent({ taskList }: DashboardContentProps) {
+  return <>{taskList}</>;
 }

@@ -103,6 +103,7 @@ export default function DashboardPage() {
   const location = useLocation();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [isGrowthSheetOpen, setIsGrowthSheetOpen] = useState(false);
 
   // Register orb-tap handler — AppLayout calls this when the orb is tapped.
@@ -271,6 +272,8 @@ export default function DashboardPage() {
             sortBy={tasksHook.sortBy}
             tagFilter={tasksHook.tagFilter}
             filtersExpanded={filtersExpanded}
+            summaryExpanded={summaryExpanded}
+            onSummaryExpandedChange={setSummaryExpanded}
               onSearchChange={tasksHook.setSearch}
               onFilterModeChange={tasksHook.setFilterMode}
               onPriorityFilterChange={tasksHook.setPriorityFilter}
@@ -281,6 +284,11 @@ export default function DashboardPage() {
           />
         }
         isFiltersExpanded={filtersExpanded}
+        summary={
+          summaryExpanded ? (
+            <SmartSections tasks={tasksHook.tasks} onToggleTask={tasksHook.handleToggleTask} todayHistory={todayHistory} />
+          ) : null
+        }
         syncArea={
           <div className="sync-status-row">
             <p className={`sync-status ${sync.syncStatus}`}>
@@ -365,7 +373,6 @@ export default function DashboardPage() {
 
       <div className="panel">
         <DashboardContent
-          smartSections={<SmartSections tasks={tasksHook.tasks} onToggleTask={tasksHook.handleToggleTask} todayHistory={todayHistory} />}
           taskList={
             <TaskList
               tasks={tasksHook.sortedTasks}

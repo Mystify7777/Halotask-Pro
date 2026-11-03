@@ -19,6 +19,23 @@
     {
       "date": "2026-11-03",
       "category": "Frontend",
+      "title": "search panel: collapsible Summary section, 320px overflow fixed",
+      "description": "The six smart-section cards moved out of the task area into the search panel behind a new Summary toggle next to Filters (collapsed by default, aria-expanded), so the task area only shows tasks. At 320px the search box and the + New task button stuck out of the panel because its grid columns could not shrink; the panel columns now use minmax(0, 1fr) and the status row and buttons wrap. A blank strip under the collapsed filter row is also gone. Checked in Chromium at 1615, 1280, 768, 360 and 320px (50 of 50 scripted checks: nothing outside the panel, no sideways scroll, collapsed by default, opens inside the panel, cards one line, modal still opens, closes again), the earlier 21 subtask checks, and 4 new jsdom tests. The state is not remembered across reloads. Not checked: other browsers, widths below 320px, screen readers.",
+      "files": [
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/components/dashboard/DashboardToolbar.tsx",
+        "halotasks-client/src/components/dashboard/DashboardContent.tsx",
+        "halotasks-client/src/components/dashboard/TaskFilters.tsx",
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/components/dashboard/DashboardToolbar.summary.test.tsx",
+        "docs/context.md"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-03",
+      "category": "Frontend",
       "title": "task cards: equal-width grid, ellipsis titles revealed on click, one-line smart cards",
       "description": "The task list is now a CSS grid (auto-fill, 320px minimum per card) so every card has the same width and the column count adapts to the screen. Long task names are cut with an ellipsis; clicking the title or the card shows the full name and clicking again cuts it (the title is a keyboard-operable button with aria-expanded; Edit, Delete, checkboxes, tags and the subtask disclosure do not toggle it). The card is no longer drawn twice (nested task-item chrome removed). Smart sections are now one row per card (icon, label, number) about 46px high instead of three stacked lines, with 1, 2 or 3 columns chosen by a container query on the panel width; the Insights page cards are unchanged. Checked in Chromium at 1615, 1280, 900, 768, 600 and 360px: equal card widths, no sideways scroll, ellipsis on long titles and unbroken words, click and keyboard reveal, equal 46px smart cards (29 of 29 scripted checks), plus 7 new jsdom tests. Not checked: other browsers, widths below 360px, screen readers.",
       "files": [
@@ -1266,5 +1283,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-03T11:20:07.948Z"
+  "lastUpdated": "2026-11-03T11:36:50.932Z"
 }

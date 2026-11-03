@@ -7,6 +7,8 @@ type DashboardToolbarProps = {
   bulkActions: ReactNode;
   statusMessages: ReactNode;
   isFiltersExpanded: boolean;
+  /** Productivity snapshot; null while collapsed. */
+  summary?: ReactNode;
 };
 
 export default function DashboardToolbar({
@@ -16,10 +18,17 @@ export default function DashboardToolbar({
   bulkActions,
   statusMessages,
   isFiltersExpanded,
+  summary = null,
 }: DashboardToolbarProps) {
   return (
     <div className="toolbar-panel panel">
       <div className="toolbar-filters">{filters}</div>
+
+      {summary && (
+        <div id="summary-panel" className="toolbar-summary">
+          {summary}
+        </div>
+      )}
 
       <div className={`toolbar-meta-wrap${isFiltersExpanded ? ' toolbar-meta-wrap--open' : ''}`} aria-hidden={!isFiltersExpanded}>
         <div className="toolbar-meta-inner">
