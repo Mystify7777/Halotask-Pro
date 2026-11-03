@@ -357,7 +357,16 @@ The checklist and the description are now visible and editable. No server change
 - **Card.** The row is unchanged. A task with subtasks shows a `done/total` chip and a thin bar (`role="progressbar"` with now/min/max and a text value). A task with a description or subtasks gets a real `<button>` disclosure ("Show/Hide subtasks and description for "<title>"", `aria-expanded`, `aria-controls`), collapsed by default, with the expanded state kept only in the component (not persisted, not part of the task). The expanded `role="region"` is labelled by the task title and shows the description (line breaks kept) and one native checkbox with a visible label per subtask. A subtask click or key stops at its row, so it never toggles, selects or edits the parent. The main checkbox now also accepts Space (and prevents the page scroll), exactly once per press.
 - **Mobile.** 44px touch targets for the disclosure and each subtask row, `min-width: 0` and `overflow-wrap: anywhere` on titles and descriptions.
 - **Verified:** jsdom tests for the editor, forms, card, hook payloads and the lost-update cases, plus twelve mutation checks (all caught). A scripted real-Chromium pass against the Vite dev app with the API stubbed: real Enter and Space on the disclosure, a subtask checkbox and the main checkbox; the request bodies for subtask toggle, unrelated edit and changed list; creating from the mobile sheet; and screenshots at 360px and 1280px.
-- **Not verified:** screen-reader output, a real phone, cross-tab behaviour, and anything against a real backend or MongoDB. Known and not part of this change: at 360px the dashboard is about 16px wider than the screen (the toolbar panel and main column), identical on the build before this phase.
+- **Not verified:** screen-reader output, a real phone, cross-tab behaviour, and anything against a real backend or MongoDB. The 360px sideways scroll found during this pass was a layout bug that existed before this phase; it is fixed separately (see "Dashboard grid columns" below).
+
+## Dashboard grid columns (layout fix)
+
+A grid column written as `1fr` is really `minmax(auto, 1fr)`: it cannot shrink below the minimum width of its widest content. Three places relied on it and let content push a column wider than its track:
+
+- **Desktop sidebar.** The Task Panel is a 300px column, but the create form inside it (an implicit auto column, plus two-column rows of date, time and select inputs with their own minimum widths) grew to about 380px, so the panel spilled over the 16px gap and under the main column and the date inputs looked cut off. The sidebar, the create and edit form columns and the two-column field rows now use `minmax(0, 1fr)`, and inputs in those rows get `min-width: 0`. Measured in Chromium at 1615, 1280, 1024 and 800px: the panel stays exactly 300px wide and the gap to the main column stays 16px (`--space-4`).
+- **Mobile page.** `.dashboard-page` and `.main-column` used a plain `1fr`, so the toolbar panel made the whole page about 16px wider than a 360px screen. Both now use `minmax(0, 1fr)`; there is no sideways scroll at 360px.
+
+If more space is wanted between the columns, change the grid `gap` on `.dashboard-page` (one token, `--space-4`).
 
 ## Task Start Time and Due Time (Issues #9, #10)
 

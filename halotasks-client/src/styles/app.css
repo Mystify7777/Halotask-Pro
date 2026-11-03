@@ -252,9 +252,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   border: 1.5px solid var(--color-border); padding: var(--space-4);
   transition: background-color var(--duration-theme) var(--ease-in-out), border-color var(--duration-theme) var(--ease-in-out);
 }
-.dashboard-page { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
+.dashboard-page { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
 /* Toolbar + content wrapped together so the 2-col desktop grid sees exactly 2 children */
-.main-column { display: grid; gap: var(--space-4); align-content: start; }
+.main-column { display: grid; gap: var(--space-4); align-content: start; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .panel {
   background: var(--color-surface); border-radius: var(--radius-xl);
   border: 1.5px solid var(--color-border); padding: var(--space-4);
@@ -297,8 +297,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   color: var(--color-text-secondary);
 }
 .form-row-2col {
-  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3);
 }
+.form-row-2col > * { min-width: 0; }
+.form-row-2col input, .form-row-2col select { min-width: 0; max-width: 100%; }
 
 /* ─── Subtask editor (Issue #15) ──────────────────────────── */
 .subtask-editor { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: none; }
@@ -504,6 +506,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 
 /* ─── Forms ───────────────────────────────────────────────── */
 .task-create-form, .filter-row, .edit-panel { display: grid; gap: var(--space-3); }
+/* Single column that can shrink: an auto column would grow to the widest input and push the form out of its panel. */
+.task-create-form, .edit-panel { grid-template-columns: minmax(0, 1fr); }
 
 .title-input-row {
   display: flex;
@@ -961,10 +965,14 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   }
   .sidebar {
     display: grid;
+    /* minmax(0, 1fr): the column may shrink below its content's minimum width, so the panel stays inside its 300px
+       track instead of spilling over the main column. */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
     align-content: start;
     position: sticky;
     top: var(--space-4);
+    min-width: 0;
   }
   .bottom-nav { display: none; }
   /* Sidebar create form replaces the mobile FAB on desktop. */
