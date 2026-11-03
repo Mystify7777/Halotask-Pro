@@ -103,6 +103,7 @@ export default function SmartSections({ tasks, onToggleTask, todayHistory }: Sma
 
   return (
     <>
+      <div className="smart-sections-wrap">
       <section className="smart-sections" aria-label="Productivity snapshot">
         <InsightCard icon="⚠️" label="Overdue"         value={overdueTasks.length}              variant="overdue"   onClick={() => open('overdue')}   />
         <InsightCard icon="📅" label="Due Today"        value={dueTodayTasks.length}             variant="due-today" onClick={() => open('due-today')} />
@@ -111,6 +112,7 @@ export default function SmartSections({ tasks, onToggleTask, todayHistory }: Sma
         <InsightCard icon="⏱️" label="Workload Today"   value={formatMinutes(workloadMinutes)}   variant="workload"  onClick={() => open('workload')}  />
         <InsightCard icon="💪" label="Work Done Today"  value={formatMinutes(workDoneTodayCount)} variant="work-done" onClick={() => open('work-done')} />
       </section>
+      </div>
 
       {openModal && (
         <InsightModal

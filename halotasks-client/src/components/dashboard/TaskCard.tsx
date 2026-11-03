@@ -54,6 +54,8 @@ export default function TaskCard({
 
   // Presentation state only: collapsed by default, not persisted, never part of the task.
   const [expanded, setExpanded] = useState(false);
+  // The title is cut with an ellipsis so every card stays the same width and height class; clicking the card shows it in full.
+  const [titleOpen, setTitleOpen] = useState(false);
   const subtasks = getSubtasks(task);
   const { done, total } = subtaskProgress(task);
   const description = task.description?.trim() ? task.description : '';
@@ -62,7 +64,15 @@ export default function TaskCard({
   const detailsId = `${task._id}-details`;
 
   return (
-    <div className={`task-item ${task.completed ? 'complete' : ''} ${styles.card}`}>
+    // The list item around this card already draws the card (border, background, padding); this is only its content row.
+    <div
+      className={styles.card}
+      onClick={(event) => {
+        // A click on blank card area toggles the full title; clicks on any control keep doing only their own job.
+        if ((event.target as HTMLElement).closest('button, input, a, label, [role="checkbox"], [role="region"]')) return;
+        setTitleOpen((current) => !current);
+      }}
+    >
       <span
         role="checkbox"
         aria-checked={task.completed}
@@ -86,7 +96,14 @@ export default function TaskCard({
       </span>
 
       <div className={styles.info}>
-        <strong id={titleId} className={styles.title}>{task.title}</strong>
+        <button
+          type="button"
+          className={styles.titleButton}
+          aria-expanded={titleOpen}
+          onClick={() => setTitleOpen((current) => !current)}
+        >
+          <strong id={titleId} className={`${styles.title} ${titleOpen ? styles.titleOpen : ''}`}>{task.title}</strong>
+        </button>
 
         <div className={styles.meta}>
           <span className={styles.priorityWrap}>

@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### task cards: equal-width grid, ellipsis titles revealed on click, one-line smart cards
+
+**2026-11-03 · Frontend · completed · Priority: medium**
+
+The task list is now a CSS grid (auto-fill, 320px minimum per card) so every card has the same width and the column count adapts to the screen. Long task names are cut with an ellipsis; clicking the title or the card shows the full name and clicking again cuts it (the title is a keyboard-operable button with aria-expanded; Edit, Delete, checkboxes, tags and the subtask disclosure do not toggle it). The card is no longer drawn twice (nested task-item chrome removed). Smart sections are now one row per card (icon, label, number) about 46px high instead of three stacked lines, with 1, 2 or 3 columns chosen by a container query on the panel width; the Insights page cards are unchanged. Checked in Chromium at 1615, 1280, 900, 768, 600 and 360px: equal card widths, no sideways scroll, ellipsis on long titles and unbroken words, click and keyboard reveal, equal 46px smart cards (29 of 29 scripted checks), plus 7 new jsdom tests. Not checked: other browsers, widths below 360px, screen readers.
+
 #### dashboard layout: sidebar no longer overlaps the task list, no sideways scroll on phones
 
 **2026-11-03 · Frontend · completed · Priority: medium**

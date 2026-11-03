@@ -437,6 +437,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .task-item label span { display: grid; gap: var(--space-1); }
 .task-item strong { display: block; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
 .task-item small { font-size: var(--text-xs); color: var(--color-text-tertiary); }
+/* The dashboard's task list: a grid of equal-width cards that adapts to the space (one column on a phone, more as the
+   panel widens). min(100%, 320px) keeps a single column from ever being wider than its container. */
+.task-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--space-3); align-items: stretch; }
+.task-grid > .task-item { align-items: flex-start; min-width: 0; }
 .task-item.complete { background: var(--color-task-done-bg); opacity: 0.7; }
 .task-item.complete strong { text-decoration: line-through; color: var(--color-task-done-text); }
 
@@ -780,7 +784,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 
 /* ─── Smart sections ──────────────────────────────────────── */
-.smart-sections { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: var(--space-2); }
+/* The wrapper is the size container: the number of columns follows the width the cards really get (the sidebar takes a
+   share of the screen on desktop), not the width of the window. One column by default. */
+.smart-sections-wrap { container-type: inline-size; }
+.smart-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+@container (min-width: 340px) { .smart-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (min-width: 560px) { .smart-sections { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .insight-card {
   border: 1.5px solid var(--color-insight-border); border-radius: var(--radius-lg);
   background: var(--color-insight-bg); padding: var(--space-3); display: grid; gap: var(--space-1);
@@ -789,6 +798,23 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .insight-icon { font-size: 1.1rem; line-height: 1; }
 .insight-card small { font-size: var(--text-xs); color: var(--color-text-tertiary); }
 .insight-card strong { font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--color-text-primary); }
+/* One line on the dashboard: icon, name, number. (The Insights page uses the same classes with its own stacked layout.) */
+.smart-sections .insight-card {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: 44px; padding: var(--space-2) var(--space-3);
+}
+.smart-sections .insight-icon {
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--radius-full); font-size: 0.95rem;
+  background: color-mix(in srgb, var(--color-surface) 65%, transparent);
+}
+.smart-sections .insight-card small {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-secondary);
+}
+.smart-sections .insight-card strong {
+  flex-shrink: 0; font-size: var(--text-lg); line-height: 1; font-variant-numeric: tabular-nums;
+}
 .insight-card.overdue  { border-color: var(--color-danger-border);  background: var(--color-danger-bg); }
 .insight-card.due-today{ border-color: var(--color-warning-border); background: var(--color-warning-bg); }
 .insight-card.upcoming { border-color: var(--color-info-border);    background: var(--color-info-bg); }
@@ -1314,7 +1340,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 
 /* ─── Responsive ──────────────────────────────────────────── */
 @media (max-width: 767px) {
-  .smart-sections { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .feature-grid { grid-template-columns: 1fr; }
   .cta-band { flex-direction: column; align-items: flex-start; }
   .task-create-form, .filter-row, .edit-panel { grid-template-columns: 1fr; }

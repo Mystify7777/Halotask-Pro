@@ -19,6 +19,23 @@
     {
       "date": "2026-11-03",
       "category": "Frontend",
+      "title": "task cards: equal-width grid, ellipsis titles revealed on click, one-line smart cards",
+      "description": "The task list is now a CSS grid (auto-fill, 320px minimum per card) so every card has the same width and the column count adapts to the screen. Long task names are cut with an ellipsis; clicking the title or the card shows the full name and clicking again cuts it (the title is a keyboard-operable button with aria-expanded; Edit, Delete, checkboxes, tags and the subtask disclosure do not toggle it). The card is no longer drawn twice (nested task-item chrome removed). Smart sections are now one row per card (icon, label, number) about 46px high instead of three stacked lines, with 1, 2 or 3 columns chosen by a container query on the panel width; the Insights page cards are unchanged. Checked in Chromium at 1615, 1280, 900, 768, 600 and 360px: equal card widths, no sideways scroll, ellipsis on long titles and unbroken words, click and keyboard reveal, equal 46px smart cards (29 of 29 scripted checks), plus 7 new jsdom tests. Not checked: other browsers, widths below 360px, screen readers.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCard.tsx",
+        "halotasks-client/src/components/dashboard/TaskCard.module.css",
+        "halotasks-client/src/components/dashboard/TaskList.tsx",
+        "halotasks-client/src/components/dashboard/SmartSections.tsx",
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/components/dashboard/TaskCard.titleReveal.test.tsx",
+        "docs/context.md"
+      ],
+      "priority": "medium",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-03",
+      "category": "Frontend",
       "title": "dashboard layout: sidebar no longer overlaps the task list, no sideways scroll on phones",
       "description": "On desktop the Task Panel is meant to be a 300px column, but the create form inside it grew to about 380px (grid columns written as 1fr cannot shrink below their content), so the panel spilled over the gap and under the main column and the date inputs looked cut off. The sidebar, the create and edit form columns and the two-column field rows now use minmax(0, 1fr) with min-width 0 on their inputs, so the panel stays 300px with the 16px gap to the main column intact. The same cause made the whole page about 16px wider than a 360px screen; .dashboard-page and .main-column now use minmax(0, 1fr) too. CSS only. Checked in Chromium at 1615, 1280, 1024, 800 and 360px: panel width and gap measured, no horizontal scroll at 360px, and the scripted subtask and form checks still pass (21 of 21). Not checked: other browsers, or very small phone widths below 360px.",
       "files": [
@@ -1249,5 +1266,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-03T10:59:40.917Z"
+  "lastUpdated": "2026-11-03T11:20:07.948Z"
 }

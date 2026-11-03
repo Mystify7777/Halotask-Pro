@@ -63,7 +63,7 @@ export default function TaskList({
   /** Three shimmer cards shown while tasks are loading */
   function TaskListSkeleton() {
     return (
-      <ul className="task-list" aria-busy="true" aria-label="Loading tasks">
+      <ul className="task-list task-grid" aria-busy="true" aria-label="Loading tasks">
         {[0, 1, 2].map((i) => (
           <li key={i} className="task-item task-skeleton" aria-hidden="true">
             <div className="skeleton-check" />
@@ -100,7 +100,7 @@ export default function TaskList({
   }
 
   return (
-    <ul className="task-list">
+    <ul className="task-list task-grid">
       {tasks.map((task) => (
         <li key={task._id} className={task.completed ? 'task-item complete' : 'task-item'}>
           {editingTaskId === task._id && editState ? (

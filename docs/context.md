@@ -368,6 +368,13 @@ A grid column written as `1fr` is really `minmax(auto, 1fr)`: it cannot shrink b
 
 If more space is wanted between the columns, change the grid `gap` on `.dashboard-page` (one token, `--space-4`).
 
+## Task grid, title reveal and one-line smart cards
+
+- **Task grid.** `TaskList` renders `ul.task-list.task-grid`: `repeat(auto-fill, minmax(min(100%, 320px), 1fr))`, so every card in the list has the same width and the number of columns follows the available width (320px minimum per card, one column when narrower). Cards in a row are stretched to the same height. The inner `TaskCard` div no longer carries the `task-item` class, so the card is drawn once by the `li` instead of twice.
+- **Long titles.** The title is cut with an ellipsis (`white-space: nowrap`, `text-overflow: ellipsis`, `min-width: 0` down the flex chain). Clicking the title, or a blank part of the card, shows the whole title (wrapped, `overflow-wrap: anywhere`) and clicking again cuts it. The title is a real `<button aria-expanded>`, so the keyboard (Enter, Space) and screen readers get the same behaviour. A click that starts on a button, input, link, label, checkbox or the details region does not toggle it. The details region is still labelled by the title element.
+- **Smart sections.** Each card is one row (icon chip, label that ellipsizes, number on the right) with `min-height: 44px`, about 46px measured, instead of three stacked lines. The columns come from a container query on `.smart-sections-wrap` (1 column below 340px, 2 from 340px, 3 from 560px) so they follow the space the panel actually has, not the screen. The rules are scoped to `.smart-sections`, so the Insights page cards are unchanged. Markup change: a wrapper div around the section.
+- **Not verified:** other browsers, widths below 360px, screen-reader output.
+
 ## Task Start Time and Due Time (Issues #9, #10)
 
 Both fields are optional and independent of the legacy `dueDate`.
