@@ -386,6 +386,11 @@ If more space is wanted between the columns, change the grid `gap` on `.dashboar
 - **Floating buttons.** The add (+) button and the growth orb sit at 50% opacity at rest and go fully opaque on hover, keyboard focus, press, and (orb) while its tooltip is open. On the Tasks page at 768px and wider the add button is hidden, because the Task Panel is already on screen; other pages keep it, and below 768px it is unchanged apart from the fade.
 - **Not verified:** other browsers, real phones (touch was emulated with Chromium's touch events), screen readers, widths below 320px.
 
+## App width and search-panel spacing
+
+- **Width.** `--desktop-max-width` (tokens.css) is now 1920px (was 1280px). The shell, the bottom nav, and the add button and growth orb positions all derive from this one token, so the app fills the screen up to 1920px and is centred beyond it. Nothing else is hard-coded: the sidebar stays 300px, the main column takes the rest, and the task grid adds columns (2 at 1280px, 3 at 1615px, 4 at 1920px, 439 / 400 / 374px cards). Measured in Chromium at 1280, 1615, 1920, 2560 and 360px: equal card widths, no sideways scroll, and the floating buttons stay inside the shell edges.
+- **Blank strip under the filter row.** Collapsed rows (advanced filters, the sync row) have no height but a grid `gap` still added space for them, and an empty status container added another. The search panel and filters block now space their children with `margin-top` (zeroed for the collapsed rows) and `.toolbar-status:empty` is hidden, so the panel is 17px under the filter row when collapsed (it was 53px). Negative margins do not work for this: they move the item, not the track.
+
 ## Task Start Time and Due Time (Issues #9, #10)
 
 Both fields are optional and independent of the legacy `dueDate`.

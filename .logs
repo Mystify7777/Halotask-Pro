@@ -19,6 +19,19 @@
     {
       "date": "2026-11-04",
       "category": "Frontend",
+      "title": "wider layout (1920px cap) and no blank strip under the filter row",
+      "description": "The app width cap moved from 1280px to 1920px in one token, so the shell, nav, add button and growth orb follow it and the dashboard grid simply adds columns on wider screens (2 columns at 1280px, 3 at 1615px, 4 at 1920px); beyond 1920px the app is centred. The search panel no longer leaves a blank strip under the filter row: collapsed rows now take no spacing (panel gap was 53px, now 17px). Checked in Chromium at 1280, 1615, 1920, 2560 and 360px (21 scripted checks: shell width and centring, equal card widths, no sideways scroll, sidebar 300px, floating buttons inside the shell) with the Filters and Summary panels open and closed, plus every earlier scripted suite. Not checked: other browsers, screens narrower than 320px.",
+      "files": [
+        "halotasks-client/src/styles/tokens.css",
+        "halotasks-client/src/styles/app.css",
+        "docs/context.md"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-04",
+      "category": "Frontend",
       "title": "task card: actions move to a bottom row when details are open",
       "description": "With the details of a card open, the Edit, Delete and select controls moved from the right-hand column into a full-width row along the bottom (right-aligned, thin divider), so the description and subtasks get the whole card width; collapsed cards are unchanged. Checked in Chromium at 1280 and 360px (12 scripted checks: row position, right alignment, wider details column 279 to 371px and 134 to 226px, no sideways scroll, collapsing restores the layout) plus the earlier suites, and 2 new jsdom tests with a mutation check. Not checked: other browsers, screen readers.",
       "files": [
@@ -1315,5 +1328,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-04T04:02:30.918Z"
+  "lastUpdated": "2026-11-04T04:21:42.786Z"
 }

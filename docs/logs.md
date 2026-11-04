@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### wider layout (1920px cap) and no blank strip under the filter row
+
+**2026-11-04 · Frontend · completed · Priority: low**
+
+The app width cap moved from 1280px to 1920px in one token, so the shell, nav, add button and growth orb follow it and the dashboard grid simply adds columns on wider screens (2 columns at 1280px, 3 at 1615px, 4 at 1920px); beyond 1920px the app is centred. The search panel no longer leaves a blank strip under the filter row: collapsed rows now take no spacing (panel gap was 53px, now 17px). Checked in Chromium at 1280, 1615, 1920, 2560 and 360px (21 scripted checks: shell width and centring, equal card widths, no sideways scroll, sidebar 300px, floating buttons inside the shell) with the Filters and Summary panels open and closed, plus every earlier scripted suite. Not checked: other browsers, screens narrower than 320px.
+
 #### task card: actions move to a bottom row when details are open
 
 **2026-11-04 · Frontend · completed · Priority: low**

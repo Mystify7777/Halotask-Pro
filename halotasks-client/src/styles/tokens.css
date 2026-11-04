@@ -598,7 +598,8 @@
     MOBILE LAYOUT
     ---------------------------------------------------------- */
   --mobile-max-width:   430px;
-  --desktop-max-width: 1280px;
+  /* The app fills the screen up to this width; the dashboard grid adds columns as it grows. Beyond it the app is centred. */
+  --desktop-max-width: 1920px;
   --header-height:      112px;   /* status bar + header */
   --nav-height:         72px;
   --orb-size:           64px;
