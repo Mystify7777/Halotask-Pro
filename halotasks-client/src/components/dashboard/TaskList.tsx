@@ -102,7 +102,10 @@ export default function TaskList({
   return (
     <ul className="task-list task-grid">
       {tasks.map((task) => (
-        <li key={task._id} className={task.completed ? 'task-item complete' : 'task-item'}>
+        <li
+          key={task._id}
+          className={`${task.completed ? 'task-item complete' : 'task-item'} priority-${task.priority}${selectedIdsSet.has(task._id) ? ' selected' : ''}`}
+        >
           {editingTaskId === task._id && editState ? (
             <TaskEditForm
               taskId={task._id}
@@ -121,6 +124,7 @@ export default function TaskList({
               activeActionTaskId={activeActionTaskId}
               tagFilter={tagFilter}
               isSelected={selectedIdsSet.has(task._id)}
+              selectionMode={selectedIds.length > 0}
               bulkActionLoading={bulkActionLoading}
               onToggleTask={onToggleTask}
               onToggleSubtask={onToggleSubtask}

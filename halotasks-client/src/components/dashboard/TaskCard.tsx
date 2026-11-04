@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Task } from '../../types/task';
 import { getDateBadgeClass } from '../../utils/dateHelpers';
 import { formatDueLabel, formatStartLabel } from '../../utils/deadline';
@@ -11,6 +11,8 @@ type TaskCardProps = {
   activeActionTaskId: string | null;
   tagFilter:          string | null;
   isSelected:         boolean;
+  /** True while at least one task is selected: every card then shows its select checkbox. */
+  selectionMode?:     boolean;
   bulkActionLoading:  boolean;
   onToggleTask:       (task: Task) => void;
   onToggleSubtask:    (taskId: string, subtaskId: string) => void;
@@ -32,11 +34,36 @@ const PRIORITY_LABEL: Record<string, string> = {
   low: 'Low',
 };
 
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_PX = 10;
+// Android fires a contextmenu event after a long press, iOS does not: both paths select, but only once.
+const SELECT_DEDUPE_MS = 800;
+
+function PencilIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
 export default function TaskCard({
   task,
   activeActionTaskId,
   tagFilter,
   isSelected,
+  selectionMode = false,
   bulkActionLoading,
   onToggleTask,
   onToggleSubtask,
@@ -63,10 +90,58 @@ export default function TaskCard({
   const titleId = `${task._id}-title`;
   const detailsId = `${task._id}-details`;
 
+  // Selecting without a visible checkbox: right-click (or long-press on touch) on the card. The checkbox itself appears
+  // once something is selected, and for keyboard users when it takes focus (it stays in the tab order).
+  const lastSelectAt = useRef(0);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const swallowNextClick = useRef(false);
+  const selectFromGesture = () => {
+    const now = Date.now();
+    if (isDisabled || now - lastSelectAt.current < SELECT_DEDUPE_MS) return;
+    lastSelectAt.current = now;
+    onToggleSelect(task._id);
+  };
+  const cancelPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    pressStart.current = null;
+  };
+
   return (
     // The list item around this card already draws the card (border, background, padding); this is only its content row.
     <div
-      className={styles.card}
+      className={`${styles.card} ${styles.noCallout}`}
+      onContextMenu={(event) => {
+        // Keep the browser's own menu for text fields and links.
+        if ((event.target as HTMLElement).closest('input, textarea, a')) return;
+        event.preventDefault();
+        selectFromGesture();
+      }}
+      onPointerDown={(event) => {
+        if (event.pointerType !== 'touch' || (event.target as HTMLElement).closest('input, textarea, a')) return;
+        cancelPress();
+        pressStart.current = { x: event.clientX, y: event.clientY };
+        pressTimer.current = setTimeout(() => {
+          pressTimer.current = null;
+          swallowNextClick.current = true;
+          selectFromGesture();
+        }, LONG_PRESS_MS);
+      }}
+      onPointerMove={(event) => {
+        const start = pressStart.current;
+        if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > LONG_PRESS_MOVE_PX) cancelPress();
+      }}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
+      onClickCapture={(event) => {
+        // The click that ends a long press must not also toggle the title, the checkbox or a button under the finger.
+        if (swallowNextClick.current) {
+          swallowNextClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onClick={(event) => {
         // A click on blank card area toggles the full title; clicks on any control keep doing only their own job.
         if ((event.target as HTMLElement).closest('button, input, a, label, [role="checkbox"], [role="region"]')) return;
@@ -206,33 +281,38 @@ export default function TaskCard({
       </div>
 
       <div className={`task-actions ${styles.actions}`}>
-        <input
-          type="checkbox"
-          className={styles.selectBox}
-          checked={isSelected}
-          onChange={() => onToggleSelect(task._id)}
-          disabled={isDisabled}
-          aria-label={`Select task: ${task.title}`}
-        />
+        <span className={`${styles.selectSlot} ${selectionMode || isSelected ? styles.selectSlotShown : ''}`}>
+          <input
+            type="checkbox"
+            className={styles.selectBox}
+            checked={isSelected}
+            onChange={() => onToggleSelect(task._id)}
+            disabled={isDisabled}
+            aria-label={`Select task: ${task.title}`}
+          />
+        </span>
 
         <button
           type="button"
-          className={`ghost-btn btn-sm ${styles.editBtn}`}
+          className={`${styles.iconBtn} ${styles.editBtn}`}
           onClick={() => onStartEditing(task)}
           disabled={isDisabled}
           aria-label={`Edit task: ${task.title}`}
+          title="Edit"
         >
-          Edit
+          <PencilIcon />
         </button>
 
         <button
           type="button"
-          className={`danger-btn btn-sm ${styles.deleteBtn}`}
+          className={`${styles.iconBtn} ${styles.deleteBtn}`}
           onClick={() => onDeleteTask(task._id)}
           disabled={isDisabled}
           aria-label={`Delete task: ${task.title}`}
+          aria-busy={isActioning}
+          title="Delete"
         >
-          {isActioning ? '...' : 'Del'}
+          {isActioning ? <span aria-hidden="true">…</span> : <TrashIcon />}
         </button>
       </div>
     </div>

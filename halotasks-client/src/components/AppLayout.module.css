@@ -113,6 +113,15 @@
 .orbWrap {
 }
 
+/* On the Tasks page at 768px+ the Task Panel (the create form) is always on screen next to the list, so the floating
+   add button is redundant there. Other pages keep it. */
+@media (min-width: 768px) {
+  /* two classes: must beat the global .fab rule's display, whatever the stylesheet order */
+  .fab.fabHiddenOnDesktop {
+    display: none;
+  }
+}
+
 /* FAB label */
 .fab svg { flex-shrink: 0; pointer-events: none; }
 

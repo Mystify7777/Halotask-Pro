@@ -180,7 +180,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       <button
         type="button"
-        className={`fab ${styles.fab}`}
+        className={`fab ${styles.fab}${activeNav === 'tasks' ? ` ${styles.fabHiddenOnDesktop}` : ''}`}
         aria-label="Add new task"
         onClick={() => {
           navigate('/dashboard', { state: { openCreate: true } });

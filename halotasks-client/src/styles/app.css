@@ -444,6 +444,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
    panel widens). min(100%, 320px) keeps a single column from ever being wider than its container. */
 .task-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--space-3); align-items: stretch; }
 .task-grid > .task-item { align-items: flex-start; min-width: 0; }
+.task-grid > .task-item { position: relative; }
+/* Priority marker: a short tab hanging from the top edge, inset from the corner. Colour and length both carry the
+   priority (low 16px, medium 28px, high 44px), so it still reads without colour. Only on the dashboard grid. */
+.task-grid > .task-item::before {
+  content: ''; position: absolute; top: -1.5px; left: var(--space-4);
+  width: 16px; height: 4px; border-radius: 0 0 var(--radius-full) var(--radius-full);
+  background: var(--color-priority-low); pointer-events: none;
+}
+.task-grid > .task-item.priority-medium::before { width: 28px; background: var(--color-priority-med); }
+.task-grid > .task-item.priority-high::before   { width: 44px; background: var(--color-priority-high); }
+.task-grid > .task-item.selected {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-task-bg));
+}
 .task-item.complete { background: var(--color-task-done-bg); opacity: 0.7; }
 .task-item.complete strong { text-decoration: line-through; color: var(--color-task-done-text); }
 
@@ -883,9 +897,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   color: var(--color-fab-text); border: none; box-shadow: var(--shadow-fab);
   z-index: var(--z-orb);
   display: grid; place-items: center; /* more reliable centering for SVGs on iOS */
-  transition: background-color var(--duration-theme) var(--ease-in-out), transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast);
+  transition: background-color var(--duration-theme) var(--ease-in-out), transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast), opacity var(--duration-normal) var(--ease-out);
 }
 
+/* Floating buttons sit over the content, so at rest they fade back; they come fully forward on hover, keyboard focus,
+   press, and (orb) while its tooltip is open. */
+.fab, .orb-wrap { opacity: 0.5; }
+.orb-wrap { transition: opacity var(--duration-normal) var(--ease-out); }
+.fab:hover, .fab:focus-visible, .fab:active,
+.orb-wrap:hover, .orb-wrap:focus-within, .orb-wrap:has(.orb-tooltip.visible) { opacity: 1; }
 .fab:hover { filter: brightness(1.06); transform: scale(1.06); box-shadow: var(--shadow-fab), 0 0 0 6px color-mix(in srgb, var(--color-fab-bg) 22%, transparent); }
 .fab:active { filter: brightness(0.95); transform: scale(0.92); box-shadow: var(--shadow-fab); }
 

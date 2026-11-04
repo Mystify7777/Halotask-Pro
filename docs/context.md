@@ -377,6 +377,14 @@ If more space is wanted between the columns, change the grid `gap` on `.dashboar
 - **Search panel at 320px.** The search box and the `+ New task` button stuck out of the panel because the panel grids used a plain `1fr` (see the layout-fix section). `.toolbar-panel`, `.toolbar-filters` and `.filters-block` now use `minmax(0, 1fr)`, the segment row and its action buttons wrap, and the collapsed filter row no longer leaves a blank strip at the bottom of the panel.
 - **Not verified:** other browsers, widths below 320px, screen-reader output.
 
+## Task card hierarchy (actions, selection, priority marker, floating buttons)
+
+- **Icon actions.** Edit and Delete are 32px icon buttons (pencil, trash; inline SVG, `stroke: currentColor`) in a single row, neutral tertiary text colour at rest, theme primary (edit) or danger (delete) on hover. They keep their `aria-label`s ("Edit task: ...", "Delete task: ...") and get a `title` tooltip. A delete in flight shows "…" with `aria-busy`.
+- **Selecting without a competing checkbox.** The select checkbox is hidden until something is selected. Right-click on a card selects it (the browser menu is suppressed on the card, but not on inputs or links); on touch a 500ms long-press does the same (cancelled by movement over 10px, the click that ends the press is swallowed; Android's own contextmenu after a long press is de-duplicated within 800ms). Once any task is selected every card shows its checkbox (`selectionMode`); deselecting the last one hides them again. The hidden checkbox stays in the DOM and tab order and reveals itself when it takes keyboard focus, so selection is possible without a mouse or touch. A selected card gets a primary-tinted border and background (`li.selected`). The title tap/click behaviour is unchanged.
+- **Priority marker.** A short tab hanging from the card's top edge, inset from the corner (not a left border): colour from the priority tokens and length by priority (low 16px, medium 28px, high 44px) so it does not rely on colour alone. `TaskList` adds `priority-<level>` to each `li`; the marker is `.task-grid > .task-item::before`, so it only appears on the dashboard grid. The title is now `--text-base`.
+- **Floating buttons.** The add (+) button and the growth orb sit at 50% opacity at rest and go fully opaque on hover, keyboard focus, press, and (orb) while its tooltip is open. On the Tasks page at 768px and wider the add button is hidden, because the Task Panel is already on screen; other pages keep it, and below 768px it is unchanged apart from the fade.
+- **Not verified:** other browsers, real phones (touch was emulated with Chromium's touch events), screen readers, widths below 320px.
+
 ## Task Start Time and Due Time (Issues #9, #10)
 
 Both fields are optional and independent of the legacy `dueDate`.

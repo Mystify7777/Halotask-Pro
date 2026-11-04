@@ -47,7 +47,7 @@
 
 .title {
   display: block;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
   white-space: nowrap;
@@ -110,45 +110,81 @@
   color: var(--color-text-tertiary);
 }
 
-/* Actions column */
+/* Actions: a quiet row of icon buttons. Colour comes from the theme tokens, so it follows every theme. */
 .actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-2);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
-/* Bulk select checkbox */
+.iconBtn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+}
+
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.editBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* Bulk select: not shown until a task is selected (right-click or long-press a card), then on every card.
+   While hidden it takes no space and cannot be clicked, but it stays focusable: focusing it reveals it. */
+.selectSlot {
+  display: inline-grid;
+  place-items: center;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: width var(--duration-fast) var(--ease-out), opacity var(--duration-fast);
+}
+
+.selectSlotShown,
+.selectSlot:focus-within {
+  width: 24px;
+  opacity: 1;
+}
+
 .selectBox {
   width: 16px;
   height: 16px;
+  margin: 0;
   cursor: pointer;
   accent-color: var(--color-primary);
-  width: 16px !important;
   padding: 0 !important;
   border: none !important;
   box-shadow: none !important;
 }
 
-.editBtn {
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
+/* No long-press callout on iOS: a long press selects the card instead. */
+.noCallout {
+  -webkit-touch-callout: none;
 }
-
-.deleteBtn {
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
-  background: transparent;
-  color: var(--color-danger);
-  border: 1px solid var(--color-danger-border);
-}
-
-.deleteBtn:hover:not(:disabled) {
-  background: var(--color-danger-bg);
-}
-
 
 /* Subtasks and description (Issue #15) */
 .progress {

@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### task cards: icon actions, right-click/long-press select, priority tab marker, fading floating buttons
+
+**2026-11-04 · Frontend · completed · Priority: medium**
+
+Task cards now put the title first. Edit and Delete became neutral line icons (theme colours on hover, names and tooltips kept). The select checkbox no longer competes with the complete circle: it is hidden until a task is selected by right-click (or a 500ms long-press on touch), after which every card shows it; it stays keyboard-reachable and reveals itself on focus, and selected cards are tinted. Each card has a short priority tab on its top edge (colour plus length: 16/28/44px) instead of a left border. On the Tasks page at 768px+ the floating add button is hidden because the Task Panel is already visible; on all screens the add button and the growth orb fade to 50% at rest and become solid on hover, focus or press. Checked in Chromium (23 scripted checks: right-click, long-press via touch events, selection mode, keyboard reveal, icon hover colours, marker sizes, button visibility and opacity) plus the earlier 50, 23 and 21 checks, and 15 new jsdom tests with mutation checks. One 360px truncation check failed once and passed on four reruns. Not checked: other browsers, real phones, screen readers.
+
 #### search panel: collapsible Summary section, 320px overflow fixed
 
 **2026-11-03 · Frontend · completed · Priority: medium**
