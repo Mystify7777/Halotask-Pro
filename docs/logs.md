@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### task card: actions move to a bottom row when details are open
+
+**2026-11-04 · Frontend · completed · Priority: low**
+
+With the details of a card open, the Edit, Delete and select controls moved from the right-hand column into a full-width row along the bottom (right-aligned, thin divider), so the description and subtasks get the whole card width; collapsed cards are unchanged. Checked in Chromium at 1280 and 360px (12 scripted checks: row position, right alignment, wider details column 279 to 371px and 134 to 226px, no sideways scroll, collapsing restores the layout) plus the earlier suites, and 2 new jsdom tests with a mutation check. Not checked: other browsers, screen readers.
+
 #### task cards: icon actions, right-click/long-press select, priority tab marker, fading floating buttons
 
 **2026-11-04 · Frontend · completed · Priority: medium**

@@ -19,6 +19,20 @@
     {
       "date": "2026-11-04",
       "category": "Frontend",
+      "title": "task card: actions move to a bottom row when details are open",
+      "description": "With the details of a card open, the Edit, Delete and select controls moved from the right-hand column into a full-width row along the bottom (right-aligned, thin divider), so the description and subtasks get the whole card width; collapsed cards are unchanged. Checked in Chromium at 1280 and 360px (12 scripted checks: row position, right alignment, wider details column 279 to 371px and 134 to 226px, no sideways scroll, collapsing restores the layout) plus the earlier suites, and 2 new jsdom tests with a mutation check. Not checked: other browsers, screen readers.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCard.tsx",
+        "halotasks-client/src/components/dashboard/TaskCard.module.css",
+        "halotasks-client/src/components/dashboard/TaskCard.selection.test.tsx",
+        "docs/context.md"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-04",
+      "category": "Frontend",
       "title": "task cards: icon actions, right-click/long-press select, priority tab marker, fading floating buttons",
       "description": "Task cards now put the title first. Edit and Delete became neutral line icons (theme colours on hover, names and tooltips kept). The select checkbox no longer competes with the complete circle: it is hidden until a task is selected by right-click (or a 500ms long-press on touch), after which every card shows it; it stays keyboard-reachable and reveals itself on focus, and selected cards are tinted. Each card has a short priority tab on its top edge (colour plus length: 16/28/44px) instead of a left border. On the Tasks page at 768px+ the floating add button is hidden because the Task Panel is already visible; on all screens the add button and the growth orb fade to 50% at rest and become solid on hover, focus or press. Checked in Chromium (23 scripted checks: right-click, long-press via touch events, selection mode, keyboard reveal, icon hover colours, marker sizes, button visibility and opacity) plus the earlier 50, 23 and 21 checks, and 15 new jsdom tests with mutation checks. One 360px truncation check failed once and passed on four reruns. Not checked: other browsers, real phones, screen readers.",
       "files": [
@@ -1301,5 +1315,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-04T03:40:17.037Z"
+  "lastUpdated": "2026-11-04T04:02:30.918Z"
 }

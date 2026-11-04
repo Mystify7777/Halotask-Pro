@@ -111,7 +111,7 @@ export default function TaskCard({
   return (
     // The list item around this card already draws the card (border, background, padding); this is only its content row.
     <div
-      className={`${styles.card} ${styles.noCallout}`}
+      className={`${styles.card} ${styles.noCallout}${hasDetails && expanded ? ` ${styles.cardExpanded}` : ''}`}
       onContextMenu={(event) => {
         // Keep the browser's own menu for text fields and links.
         if ((event.target as HTMLElement).closest('input, textarea, a')) return;

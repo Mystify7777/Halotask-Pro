@@ -155,3 +155,22 @@ describe('edit and delete are icon buttons with names', () => {
     expect(b).toHaveAttribute('aria-busy', 'true');
   });
 });
+
+describe('expanded details move the actions into a bottom row', () => {
+  it('adds the expanded layout class only while the details are open', async () => {
+    const task = makeTask({ _id: 't1', title: 'Plan trip', description: 'notes' });
+    const { container } = render(<TaskCard task={task} activeActionTaskId={null} tagFilter={null} isSelected={false} bulkActionLoading={false} onToggleTask={vi.fn()} onToggleSubtask={vi.fn()} onDeleteTask={vi.fn()} onStartEditing={vi.fn()} onToggleTagFilter={vi.fn()} onToggleSelect={vi.fn()} />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).not.toMatch(/cardExpanded/);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /subtasks and description/ }));
+    expect(root.className).toMatch(/cardExpanded/);
+    await user.click(screen.getByRole('button', { name: /subtasks and description/ }));
+    expect(root.className).not.toMatch(/cardExpanded/);
+  });
+
+  it('a card without details never gets it', () => {
+    const { card } = mount();
+    expect(card.className).not.toMatch(/cardExpanded/);
+  });
+});

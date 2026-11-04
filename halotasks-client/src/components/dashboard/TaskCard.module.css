@@ -14,6 +14,20 @@
     opacity var(--duration-normal) var(--ease-out);
 }
 
+/* Details open: the actions leave the right-hand column and sit in a row along the bottom, so the description and the
+   subtasks get the card's full width instead of sharing it with a mostly empty column. */
+.cardExpanded {
+  flex-wrap: wrap;
+}
+
+.cardExpanded .actions {
+  order: 3;
+  flex: 0 0 100%;
+  justify-content: flex-end;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
 /* Checkbox */
 .check {
   flex-shrink: 0;
