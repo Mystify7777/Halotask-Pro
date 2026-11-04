@@ -59,10 +59,11 @@
   gap: var(--space-1);
 }
 
-.title {
+/* `.card .title` (two classes) so it outranks the global `.task-item strong` rule, which would otherwise pin the size to 14px. */
+.card .title {
   display: block;
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -93,7 +94,7 @@
   border-radius: var(--radius-sm);
 }
 
-.titleOpen {
+.card .titleOpen {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;

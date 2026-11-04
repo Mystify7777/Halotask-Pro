@@ -19,6 +19,32 @@
     {
       "date": "2026-11-04",
       "category": "Frontend",
+      "title": "task card: bigger, bolder task title",
+      "description": "The task name is now 18px bold so it leads the card (meta is 12px). The previous attempt to enlarge it had no effect because the global .task-item strong rule (14px) outranked the card single-class rule; the card now uses two-class selectors for the title and its click-to-reveal state. Checked by computed style in Chromium at 1280, 1615, 900, 768, 600 and 360px (18px / 700 on every width, ellipsis and click reveal still work, 29 scripted checks), and every earlier scripted suite still passes. Not checked: other browsers; a jsdom test cannot see computed styles.",
+      "files": [
+        "halotasks-client/src/components/dashboard/TaskCard.module.css",
+        "docs/context.md"
+      ],
+      "priority": "low",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-04",
+      "category": "Frontend",
+      "title": "offline sync: edits made while a sync is running are no longer lost",
+      "description": "Found while verifying Issue #15 phase 4: the sync processor read the offline queue, waited on the network, then overwrote the queue with what was left, so an edit queued in that window (for example a subtask tick after the connection dropped mid-sync) was silently dropped. The processor now settles against the current queue under the queue lock: unfinished entries stay as they are, a finished entry only leaves a residual update if something was merged into it after it was read, and a task deleted while its create was in flight gets a delete queued. New tests: 17 on ordering, omitted subtasks and these cases (real queue and processor, mutation-checked: six mutations all caught), plus a scripted Chromium run on real IndexedDB (24 checks: offline create/edit with subtasks, reload with the server down, Retry Sync, offline-to-online, connection drop mid-sync; the last one fails on the old code and passes now). Not verified: other browsers, a real phone, the real-MongoDB suite (run by the owner). Seen and not changed: online ticks bypass the queue, the Retry Sync button is inside the collapsed Filters panel, and two concurrent sync runs (dev StrictMode) are not prevented.",
+      "files": [
+        "halotasks-client/src/offline/syncQueue.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/offline/queueOrdering.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-04",
+      "category": "Frontend",
       "title": "wider layout (1920px cap) and no blank strip under the filter row",
       "description": "The app width cap moved from 1280px to 1920px in one token, so the shell, nav, add button and growth orb follow it and the dashboard grid simply adds columns on wider screens (2 columns at 1280px, 3 at 1615px, 4 at 1920px); beyond 1920px the app is centred. The search panel no longer leaves a blank strip under the filter row: collapsed rows now take no spacing (panel gap was 53px, now 17px). Checked in Chromium at 1280, 1615, 1920, 2560 and 360px (21 scripted checks: shell width and centring, equal card widths, no sideways scroll, sidebar 300px, floating buttons inside the shell) with the Filters and Summary panels open and closed, plus every earlier scripted suite. Not checked: other browsers, screens narrower than 320px.",
       "files": [
@@ -1328,5 +1354,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-04T04:21:42.786Z"
+  "lastUpdated": "2026-11-04T11:16:50.307Z"
 }

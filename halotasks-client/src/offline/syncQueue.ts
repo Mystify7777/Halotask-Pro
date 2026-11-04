@@ -81,6 +81,69 @@ export const setSyncQueue = async (
 export const clearSyncQueue = async (userId: string | null = getCurrentQueueOwner()): Promise<void> =>
   setSyncQueue([], userId);
 
+/** What the processor did with one queue entry during a run (see settleSyncQueue). */
+export type SettledEntry =
+  /** Sent and accepted. `payload` is exactly what was read when the run started; `serverTaskId` is the task it landed on. */
+  | { outcome: 'sent'; payload: QueuePayload | undefined; serverTaskId: string | null }
+  /** Permanently refused by the server: dropped, never retried (the pre-existing rule for 4xx answers). */
+  | { outcome: 'discarded' };
+
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/** The fields of `current` that `sent` did not carry (or carried with another value). */
+const changedSince = (sent: QueuePayload | undefined, current: QueuePayload | undefined): QueuePayload => {
+  const delta: QueuePayload = {};
+  for (const [key, value] of Object.entries(current ?? {})) {
+    if (!sent || !(key in sent) || !sameValue(sent[key], value)) delta[key] = value;
+  }
+  return delta;
+};
+
+/**
+ * Writes the outcome of a processor run back to the queue WITHOUT overwriting what happened while it ran. The run reads
+ * the queue, then waits on the network entry by entry; in that time the user can queue more edits (a new entry, or a merge
+ * into an entry that is already in flight). So the queue is re-read here, under the same lock as enqueueSyncAction, and:
+ *  - an entry the run did not finish stays exactly as it is NOW (including edits merged into it meanwhile);
+ *  - a finished entry is dropped when nothing was merged into it after it was read, and otherwise only what was merged
+ *    after is kept, as an update to the task the entry landed on, so the late edit is not lost and not sent twice;
+ *  - a discarded entry is dropped;
+ *  - a create that was sent but is no longer queued was deleted while it was in flight: the task now exists on the server,
+ *    so a delete for it is queued instead of leaving it behind.
+ * Returns the queue as written.
+ */
+export const settleSyncQueue = (
+  ownerId: string,
+  settled: Map<string, SettledEntry>,
+  sentCreates: Map<string, string>,
+): Promise<SyncQueueRecord[]> =>
+  withQueueLock(async () => {
+    const current = await getSyncQueue(ownerId);
+    const next: SyncQueueRecord[] = [];
+    const stillQueued = new Set(current.map((entry) => entry.id));
+
+    for (const entry of current) {
+      const result = settled.get(entry.id);
+      if (!result) {
+        next.push(entry);
+        continue;
+      }
+      if (result.outcome === 'discarded') continue;
+
+      const delta = changedSince(result.payload, entry.payload);
+      if (Object.keys(delta).length === 0 || !result.serverTaskId) continue;
+      next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta });
+    }
+
+    for (const [entryId, serverTaskId] of sentCreates) {
+      if (!stillQueued.has(entryId)) {
+        next.push({ id: getId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now() });
+      }
+    }
+
+    await setSyncQueue(next, ownerId);
+    return next;
+  });
+
 /** resetSyncQueueState — for testing only. */
 export const resetSyncQueueState = (): void => {
   legacyPurged = false;

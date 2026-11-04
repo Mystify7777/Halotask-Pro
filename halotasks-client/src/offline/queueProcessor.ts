@@ -2,7 +2,7 @@ import { captureSession, isSameSession, isSessionChangedError } from '../service
 import { taskService } from '../services/taskService';
 import { TaskCreatePayload, TaskUpdatePayload, Task } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
-import { getSyncQueue, setSyncQueue, SyncQueueRecord } from './syncQueue';
+import { getSyncQueue, settleSyncQueue, SettledEntry } from './syncQueue';
 
 /**
  * The queue merges later edits into earlier entries ({...old, ...new}), so a merged payload can in principle hold a due
@@ -142,22 +142,25 @@ export const processSyncQueue = async ({
   }
 
   const idMap = new Map<string, string>();
-  const remainingQueue: SyncQueueRecord[] = [];
+  // What happened to each entry, by queue-entry id. Everything NOT listed here is still queued. The queue is written back
+  // by settleSyncQueue against the queue as it is at the end of the run, so edits made while this run waited on the
+  // network are never overwritten.
+  const settled = new Map<string, SettledEntry>();
+  const sentCreates = new Map<string, string>(); // create entry id -> server id, to notice a delete made while it was in flight
   let processed = 0;
 
   for (const [index, entry] of queue.entries()) {
     // Early exit only (saves building a request that would be refused). The API client's check at send
     // time is the real guard; this one cannot be, because the account can still change after it.
-    if (!stillSignedIn()) {
-      remainingQueue.push(...queue.slice(index));
-      break;
-    }
+    if (!stillSignedIn()) break;
 
     try {
       if (entry.type === 'create') {
         const localTaskId = entry.taskId;
         const payload = withConsistentDeadline((entry.payload ?? {}) as TaskCreatePayload, 'create');
         const response = await taskService.createTask(payload, { session });
+        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: response.task._id });
+        sentCreates.set(entry.id, response.task._id);
 
         if (localTaskId) {
           idMap.set(localTaskId, response.task._id);
@@ -174,6 +177,7 @@ export const processSyncQueue = async ({
       if (entry.type === 'update') {
         const sourceTaskId = entry.taskId;
         if (!sourceTaskId) {
+          settled.set(entry.id, { outcome: 'discarded' }); // nothing to send it to
           processed += 1;
           continue;
         }
@@ -181,8 +185,7 @@ export const processSyncQueue = async ({
         const resolvedTaskId = idMap.get(sourceTaskId) ?? sourceTaskId;
 
         if (resolvedTaskId.startsWith('local-')) {
-          remainingQueue.push(entry);
-          continue;
+          continue; // its create has not synced: stays queued, in order
         }
 
         const payload = withConsistentDeadline((entry.payload ?? {}) as TaskUpdatePayload, 'update');
@@ -195,6 +198,7 @@ export const processSyncQueue = async ({
           conflictedDueTime = payload.dueTime as string;
           response = await taskService.updateTask(resolvedTaskId, withoutDueTime(payload), { session });
         }
+        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
         if (stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
         if (conflictedDueTime !== null && stillSignedIn()) onDueTimeConflict?.(resolvedTaskId, conflictedDueTime);
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
@@ -206,6 +210,7 @@ export const processSyncQueue = async ({
       if (entry.type === 'delete') {
         const sourceTaskId = entry.taskId;
         if (!sourceTaskId) {
+          settled.set(entry.id, { outcome: 'discarded' }); // nothing to send it to
           processed += 1;
           continue;
         }
@@ -213,11 +218,13 @@ export const processSyncQueue = async ({
         const resolvedTaskId = idMap.get(sourceTaskId) ?? sourceTaskId;
 
         if (resolvedTaskId.startsWith('local-')) {
+          settled.set(entry.id, { outcome: 'discarded' }); // never reached the server, so there is nothing to delete
           processed += 1;
           continue;
         }
 
         await taskService.deleteTask(resolvedTaskId, { session });
+        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
         if (stillSignedIn()) onTaskDeleted(resolvedTaskId);
 
         processed += 1;
@@ -227,7 +234,6 @@ export const processSyncQueue = async ({
         // The account or token changed between building this request and sending it, and the API client
         // refused to send it. Nothing was sent. Keep this entry and everything not yet attempted for the
         // owner; do not retry under whoever is signed in now.
-        remainingQueue.push(...queue.slice(index));
         break;
       }
 
@@ -236,25 +242,24 @@ export const processSyncQueue = async ({
         // request would go out without credentials, fail the same way, and (before this) be thrown
         // away one by one. Keep this entry and everything not yet attempted, in order, for the next
         // run after the user signs in again.
-        remainingQueue.push(...queue.slice(index));
         break;
       }
 
       if (isPermanentError(error)) {
         console.warn('[syncQueue] Discarding permanently failed entry:', entry.type, entry.taskId, error);
+        settled.set(entry.id, { outcome: 'discarded' });
         processed += 1;
         continue;
       }
-
-      remainingQueue.push(entry);
+      // any other failure: not settled, so the entry stays queued for the next run
     }
   }
 
-  await setSyncQueue(remainingQueue, ownerId);
+  const remaining = (await settleSyncQueue(ownerId, settled, sentCreates)).length;
 
   return {
     processed,
-    failed: remainingQueue.length,
-    remaining: remainingQueue.length,
+    failed: remaining,
+    remaining,
   };
 };

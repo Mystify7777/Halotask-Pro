@@ -43,6 +43,18 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### task card: bigger, bolder task title
+
+**2026-11-04 · Frontend · completed · Priority: low**
+
+The task name is now 18px bold so it leads the card (meta is 12px). The previous attempt to enlarge it had no effect because the global .task-item strong rule (14px) outranked the card single-class rule; the card now uses two-class selectors for the title and its click-to-reveal state. Checked by computed style in Chromium at 1280, 1615, 900, 768, 600 and 360px (18px / 700 on every width, ellipsis and click reveal still work, 29 scripted checks), and every earlier scripted suite still passes. Not checked: other browsers; a jsdom test cannot see computed styles.
+
+#### offline sync: edits made while a sync is running are no longer lost
+
+**2026-11-04 · Frontend · completed · Priority: high**
+
+Found while verifying Issue #15 phase 4: the sync processor read the offline queue, waited on the network, then overwrote the queue with what was left, so an edit queued in that window (for example a subtask tick after the connection dropped mid-sync) was silently dropped. The processor now settles against the current queue under the queue lock: unfinished entries stay as they are, a finished entry only leaves a residual update if something was merged into it after it was read, and a task deleted while its create was in flight gets a delete queued. New tests: 17 on ordering, omitted subtasks and these cases (real queue and processor, mutation-checked: six mutations all caught), plus a scripted Chromium run on real IndexedDB (24 checks: offline create/edit with subtasks, reload with the server down, Retry Sync, offline-to-online, connection drop mid-sync; the last one fails on the old code and passes now). Not verified: other browsers, a real phone, the real-MongoDB suite (run by the owner). Seen and not changed: online ticks bypass the queue, the Retry Sync button is inside the collapsed Filters panel, and two concurrent sync runs (dev StrictMode) are not prevented.
+
 #### wider layout (1920px cap) and no blank strip under the filter row
 
 **2026-11-04 · Frontend · completed · Priority: low**
