@@ -19,6 +19,25 @@
     {
       "date": "2026-11-04",
       "category": "Frontend",
+      "title": "sync: one run at a time (no duplicate creates), visible pending-sync notice, aria-controls fix",
+      "description": "From the review of the committed phase 4 work. Two overlapping sync runs could both read the same queue and send the same create twice (a reload with a queued create put two tasks on the server in Chromium; React StrictMode in development triggers it every load). processSyncQueue now serializes runs per account, and across browser tabs through a Web Lock where the browser supports it; a second caller waits and then runs against the settled queue. A new PendingSyncNotice is always visible in the toolbar status area (N changes waiting to sync, Sync now when online, an offline note when not), so pending work no longer hides inside the collapsed Filters panel. The details disclosure only sets aria-controls while its region is rendered. Not changed after checking: the subtask cap counts rows after blank ones are dropped, as the approved design says, and the editor already stops at 20 rows. Checked: 8 concurrency tests, 5 notice tests, 1 aria test (six mutations caught), and a Chromium run on real IndexedDB where the duplicate create reproduces without the guard (2 requests) and not with it (1); the earlier 24 offline checks and all other scripted suites still pass. Not verified: a real second browser tab, other browsers.",
+      "files": [
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/offline/queueProcessor.concurrency.test.ts",
+        "halotasks-client/src/components/dashboard/PendingSyncNotice.tsx",
+        "halotasks-client/src/components/dashboard/PendingSyncNotice.test.tsx",
+        "halotasks-client/src/components/dashboard/TaskCard.tsx",
+        "halotasks-client/src/components/dashboard/TaskCard.subtasks.test.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/styles/app.css",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-04",
+      "category": "Frontend",
       "title": "task card: bigger, bolder task title",
       "description": "The task name is now 18px bold so it leads the card (meta is 12px). The previous attempt to enlarge it had no effect because the global .task-item strong rule (14px) outranked the card single-class rule; the card now uses two-class selectors for the title and its click-to-reveal state. Checked by computed style in Chromium at 1280, 1615, 900, 768, 600 and 360px (18px / 700 on every width, ellipsis and click reveal still work, 29 scripted checks), and every earlier scripted suite still passes. Not checked: other browsers; a jsdom test cannot see computed styles.",
       "files": [
@@ -1354,5 +1373,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-04T11:16:50.307Z"
+  "lastUpdated": "2026-11-04T11:46:18.486Z"
 }

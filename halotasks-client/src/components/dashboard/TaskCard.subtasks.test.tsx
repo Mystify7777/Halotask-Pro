@@ -89,6 +89,12 @@ describe('progress and disclosure', () => {
     expect(screen.queryByRole('region')).toBeNull();
   });
 
+  it('does not point aria-controls at an element that is not rendered (collapsed)', () => {
+    mount(rich());
+    expect(disclosure()).not.toHaveAttribute('aria-controls');
+    expect(document.getElementById('t1-details')).toBeNull();
+  });
+
   it('is operable by keyboard (Enter and Space on the real button)', async () => {
     const user = userEvent.setup();
     mount(rich());

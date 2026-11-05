@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### sync: one run at a time (no duplicate creates), visible pending-sync notice, aria-controls fix
+
+**2026-11-04 · Frontend · completed · Priority: high**
+
+From the review of the committed phase 4 work. Two overlapping sync runs could both read the same queue and send the same create twice (a reload with a queued create put two tasks on the server in Chromium; React StrictMode in development triggers it every load). processSyncQueue now serializes runs per account, and across browser tabs through a Web Lock where the browser supports it; a second caller waits and then runs against the settled queue. A new PendingSyncNotice is always visible in the toolbar status area (N changes waiting to sync, Sync now when online, an offline note when not), so pending work no longer hides inside the collapsed Filters panel. The details disclosure only sets aria-controls while its region is rendered. Not changed after checking: the subtask cap counts rows after blank ones are dropped, as the approved design says, and the editor already stops at 20 rows. Checked: 8 concurrency tests, 5 notice tests, 1 aria test (six mutations caught), and a Chromium run on real IndexedDB where the duplicate create reproduces without the guard (2 requests) and not with it (1); the earlier 24 offline checks and all other scripted suites still pass. Not verified: a real second browser tab, other browsers.
+
 #### task card: bigger, bolder task title
 
 **2026-11-04 · Frontend · completed · Priority: low**

@@ -222,7 +222,8 @@ export default function TaskCard({
             type="button"
             className={styles.disclosure}
             aria-expanded={expanded}
-            aria-controls={detailsId}
+            // The region is only rendered while open, so only then is there an element for aria-controls to point at.
+            aria-controls={expanded ? detailsId : undefined}
             aria-label={`${expanded ? 'Hide' : 'Show'} subtasks and description for "${task.title}"`}
             onClick={() => setExpanded((current) => !current)}
           >

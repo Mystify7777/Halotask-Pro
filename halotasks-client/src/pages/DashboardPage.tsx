@@ -5,6 +5,7 @@ import BulkActionsBar from '../components/dashboard/BulkActionsBar';
 import DashboardContent from '../components/dashboard/DashboardContent';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardToolbar from '../components/dashboard/DashboardToolbar';
+import PendingSyncNotice from '../components/dashboard/PendingSyncNotice';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
@@ -365,6 +366,12 @@ export default function DashboardPage() {
         }
         statusMessages={
           <>
+            <PendingSyncNotice
+              pendingCount={sync.pendingQueueCount}
+              isOnline={isOnline}
+              syncing={sync.syncStatus === 'syncing' || sync.retryingSync}
+              onRetry={sync.handleRetrySync}
+            />
             {statusError && <p className="form-error">{statusError}</p>}
             {statusInfo && <p className="form-success">{statusInfo}</p>}
           </>

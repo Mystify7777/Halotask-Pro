@@ -107,7 +107,7 @@ function isPermanentError(error: unknown): boolean {
   return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
-export const processSyncQueue = async ({
+const runSyncQueue = async ({
   onTaskCreated,
   onTaskUpdated,
   onTaskDeleted,
@@ -262,4 +262,35 @@ export const processSyncQueue = async ({
     failed: remaining,
     remaining,
   };
+};
+
+// ─── One sync run at a time, per account ────────────────────────────────────────────────────────────────────────────────
+// Two runs that overlap would both read the same queue and both send the same create (the settle step protects the LOCAL
+// queue, it cannot take back a request that was already sent). So runs are serialized: a second caller waits for the one
+// in progress and then runs against the settled queue, so it only sends what is still queued. Across browser tabs the
+// same is done with a Web Lock named after the account, where the browser has them; without Web Locks (older browsers,
+// tests) only runs inside one page are serialized. A run is bounded by the API client's request timeout, so a hung
+// request cannot hold the lock forever.
+const runningFor = new Map<string, Promise<unknown>>();
+
+const withCrossTabLock = <T>(ownerId: string, fn: () => Promise<T>): Promise<T> => {
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  return locks && typeof locks.request === 'function' ? locks.request(`halotasks-sync:${ownerId}`, fn) : fn();
+};
+
+export const processSyncQueue = (params: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
+  const ownerId = captureSession()?.userId;
+  if (!ownerId) return Promise.resolve({ processed: 0, failed: 0, remaining: 0 });
+
+  const previous = runningFor.get(ownerId) ?? Promise.resolve();
+  const run = previous.then(() => withCrossTabLock(ownerId, () => runSyncQueue(params)));
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  runningFor.set(ownerId, tail);
+  void tail.then(() => {
+    if (runningFor.get(ownerId) === tail) runningFor.delete(ownerId);
+  });
+  return run;
 };
