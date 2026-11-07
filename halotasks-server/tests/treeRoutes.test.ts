@@ -202,14 +202,16 @@ describe('POST /api/tasks — a task created already completed (offline create-t
 });
 
 describe('failure and retry semantics', () => {
-  it('PUT: the award fails -> 500, the task is untouched, and the retry awards exactly once', async () => {
+  // Issue #47 Phase 1B: the award runs AFTER the task's conditional completion commits (a completion that loses the task
+  // arbitration must never award), so these failure modes mirror the old ones the other way round.
+  it('PUT: the award fails -> 500, the task already holds the completion, and the retry awards exactly once', async () => {
     const task = tasks.seed(OWNER_A);
     users.faults.push({ op: 'findOneAndUpdate', count: 1 });
 
     const failed = await complete(String(task._id));
 
     expect(failed.status).toBe(500);
-    expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
+    expect(tasks.get(String(task._id))).toMatchObject({ completed: true });
     expect(xpOf()).toBe(0);
 
     const retry = await complete(String(task._id));
@@ -218,19 +220,19 @@ describe('failure and retry semantics', () => {
     expect(xpOf()).toBe(10);
   });
 
-  it('PUT: the award lands but the task write fails -> 500; the retry completes the task and awards nothing more', async () => {
+  it('PUT: the task write fails -> 500 and NOTHING is awarded (the award never runs for a transition that did not commit); the retry completes and awards once', async () => {
     const task = tasks.seed(OWNER_A);
     tasks.faults.push({ op: 'findOneAndUpdate', count: 1 });
 
     const failed = await complete(String(task._id));
     expect(failed.status).toBe(500);
-    expect(xpOf()).toBe(10);
+    expect(xpOf()).toBe(0);
     expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
 
     const retry = await complete(String(task._id));
     expect(retry.status).toBe(200);
     expect(retry.body.task.completed).toBe(true);
-    expect(retry.body.growth).toMatchObject({ awarded: false, reason: 'already_awarded' });
+    expect(retry.body.growth).toMatchObject({ awarded: true });
     expect(xpOf()).toBe(10);
   });
 
@@ -269,7 +271,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
   const activeDays = () => (users.tree(OWNER_A) as { activeDays?: string[] }).activeDays;
   const incrementsApplied = () => users.applied.filter((o) => o.update?.$inc).length;
 
-  it('PUT: the request fails and the task stays incomplete, XP is recorded once, and the retry finishes the job without a second award', async () => {
+  it('PUT: the request fails after the task committed, XP is recorded once, and the retry finishes the derived write without a second award', async () => {
     const task = tasks.seed(OWNER_A);
     failNextDerivedWrite();
 
@@ -277,7 +279,7 @@ describe('recovery when the award is recorded but its streak/derived write is no
 
     expect(failed.status).toBe(500);
     expect(failed.body).not.toHaveProperty('growth'); // no unpersisted projection is ever reported
-    expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
+    expect(tasks.get(String(task._id))).toMatchObject({ completed: true });
     expect(users.tree(OWNER_A)).toMatchObject({ xp: 10, awardedTaskIds: [String(task._id)], streakDays: 0 });
     expect(activeDays()).toHaveLength(1); // the award day is recorded with the XP
 
@@ -292,19 +294,20 @@ describe('recovery when the award is recorded but its streak/derived write is no
     expect(incrementsApplied()).toBe(1);
   });
 
-  it('PUT: derived write fails, then the task write fails, then it works: still exactly one award', async () => {
+  it('PUT: derived write fails, then a retry whose task write fails, then it works: still exactly one award', async () => {
     const task = tasks.seed(OWNER_A);
     failNextDerivedWrite();
     expect((await complete(String(task._id))).status).toBe(500);
 
     tasks.faults.push({ op: 'findOneAndUpdate', count: 1 });
     expect((await complete(String(task._id))).status).toBe(500);
-    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 1 }); // the second attempt already finished the derived write
-    expect(tasks.get(String(task._id))).toMatchObject({ completed: false });
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 0 }); // the second attempt died before the award step
+    expect(tasks.get(String(task._id))).toMatchObject({ completed: true });
 
     const third = await complete(String(task._id));
     expect(third.status).toBe(200);
     expect(third.body.task.completed).toBe(true);
+    expect(users.tree(OWNER_A)).toMatchObject({ streakDays: 1 });
     expect(xpOf()).toBe(10);
     expect(incrementsApplied()).toBe(1);
   });

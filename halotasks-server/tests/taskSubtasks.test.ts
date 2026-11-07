@@ -3,6 +3,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_JWT_SECRET as SECRET } from './testConfig';
+import { createCompletionStore, installCompletionRecordMock, removeCompletionRecordMock } from './helpers/completionDoubles';
 
 // Issue #15 (Phase 1, server contract): subtasks on a task, against the REAL app and controller with an in-memory Task
 // double and a counting User double. Mongo-free. The double applies updates the way MongoDB does ($set writes, $unset
@@ -17,6 +18,7 @@ const db = vi.hoisted(() => ({
   ops: [] as string[],
   /** Growth Tree award writes: every award goes through User.findOneAndUpdate. */
   awardWrites: 0,
+  awarded: new Set<string>(),
   nextId: 1,
 }));
 
@@ -37,13 +39,24 @@ async function loadApp(): Promise<Express> {
 
   vi.doMock('../src/models/User.model', () => ({
     default: {
-      findById: () => ({ select: () => ({ lean: async () => ({ tokenVersion: 0 }) }) }),
-      findOneAndUpdate: () => {
+      // the ledger is remembered, so a retry of a completion finds the task already awarded (no second award attempt)
+      findById: () => ({
+        select: () => ({
+          lean: async () => ({
+            tokenVersion: 0,
+            treeState: { xp: 10 * db.awarded.size, streakDays: 0, lastActiveDate: null, activeDays: [], awardedTaskIds: [...db.awarded] },
+          }),
+        }),
+      }),
+      findOneAndUpdate: (_filter: unknown, update: { $push?: Record<string, string> }) => {
         db.awardWrites += 1;
+        const pushed = update?.$push?.['treeState.awardedTaskIds'];
+        if (pushed) db.awarded.add(pushed);
         return { lean: async () => ({ treeState: { xp: 10, streakDays: 1, lastActiveDate: '2026-10-06', awardedTaskIds: ['x'] } }) };
       },
     },
   }));
+  installCompletionRecordMock(createCompletionStore());
   vi.doMock('../src/models/DayHistory.model', () => ({ default: {} }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined } }));
   vi.doMock('../src/models/Task.model', () => ({
@@ -63,11 +76,21 @@ async function loadApp(): Promise<Express> {
         db.tasks.set(doc._id, doc);
         return doc;
       },
-      findOne: async (filter: Record<string, unknown>) => owns(filter),
+      findOne: (filter: Record<string, unknown>) => {
+        const run = (async () => {
+          const found = owns(filter);
+          return found ? { ...found } : null;
+        })();
+        return Object.assign(run, { lean: () => run });
+      },
       findOneAndUpdate: async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
         db.ops.push('findOneAndUpdate');
         const task = owns(filter);
         if (!task) return null;
+        for (const [key, condition] of Object.entries(filter)) {
+          if (key === '_id' || key === 'userId' || (typeof condition === 'object' && condition !== null)) continue;
+          if ((task[key] ?? null) !== condition) return null;
+        }
         const { $set, $unset, ...plain } = update as { $set?: Record<string, unknown>; $unset?: Record<string, unknown> };
         Object.assign(task, JSON.parse(JSON.stringify({ ...plain, ...($set ?? {}) })));
         for (const key of Object.keys($unset ?? {})) delete task[key];
@@ -103,6 +126,7 @@ beforeEach(() => {
   db.tasks.clear();
   db.ops.length = 0;
   db.awardWrites = 0;
+  db.awarded.clear();
   db.nextId = 1;
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -112,6 +136,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock('../src/models/User.model');
   vi.doUnmock('../src/models/Task.model');
+  removeCompletionRecordMock();
   vi.doUnmock('../src/models/DayHistory.model');
   vi.doUnmock('web-push');
 });

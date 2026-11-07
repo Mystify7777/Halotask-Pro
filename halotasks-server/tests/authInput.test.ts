@@ -113,6 +113,7 @@ async function loadApp(env: Record<string, string | undefined> = {}): Promise<Ex
     },
   }));
   vi.doMock('../src/models/Task.model', () => ({ default: {} }));
+  vi.doMock('../src/models/CompletionRecord.model', () => ({ default: {} }));
   vi.doMock('../src/models/DayHistory.model', () => ({ default: {} }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined } }));
 
@@ -141,6 +142,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock('../src/models/User.model');
   vi.doUnmock('../src/models/Task.model');
+  vi.doUnmock('../src/models/CompletionRecord.model');
   vi.doUnmock('../src/models/DayHistory.model');
   vi.doUnmock('web-push');
 });

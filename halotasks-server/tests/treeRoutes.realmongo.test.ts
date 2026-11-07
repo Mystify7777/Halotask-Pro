@@ -158,24 +158,30 @@ const expectFirstAward200 = ({ id, res }: Outcome) => {
 
 /**
  * What must be true the moment a burst of PUTs (one per task, no injected fault) has settled. Every request either
- * recorded its award and finished (200), or recorded it and failed only afterwards (the documented 500). So every task
- * is in the ledger exactly once and xp is exactly one award per task; and because the task write only follows a
- * recorded award, the completed tasks are exactly the 200s.
+ * committed its completion, recorded its award and finished (200), or did both and failed only afterwards (the documented
+ * 500, Issue #47 Phase 1B order: the task commit comes first, the award last). So every task is completed and in the
+ * ledger exactly once, and xp is exactly one award per task, whichever requests got the 500.
  */
 const expectPutBurstInvariants = async (owner: Account, ids: string[], ok: Outcome[]) => {
   const burst = await stored(owner);
   expect([...burst.ledger].sort()).toEqual([...ids].sort());
   expect(burst.xp).toBe(XP_PER_COMPLETION * ids.length);
-  expect(await completedTaskIds(owner)).toEqual(ok.map((outcome) => outcome.id).sort());
+  expect(await completedTaskIds(owner)).toEqual([...ids].sort());
+  expect(ok.length).toBeLessThanOrEqual(ids.length);
 };
 
-/** The client retries what failed. The award is already recorded, so the retry completes the task and pays nothing. */
+/**
+ * The client retries what failed. The task is already completed and the award recorded, so the retry pays nothing; it only
+ * reports the tree (growth) when the derived copy still needed finishing, otherwise it adds no growth block.
+ */
 const retryFailedPuts = async (owner: Account, retry: Outcome[]) => {
   for (const { id } of retry) {
     const res = await complete(owner, id);
     expect(res.status, `retry of ${id}: ${JSON.stringify(res.body)}`).toBe(200);
     expect(res.body.task).toMatchObject({ _id: id, completed: true });
-    expect(res.body.growth).toMatchObject({ taskId: id, awarded: false, xpGained: 0, reason: 'already_awarded' });
+    if (res.body.growth !== undefined) {
+      expect(res.body.growth).toMatchObject({ taskId: id, awarded: false, xpGained: 0, reason: 'already_awarded' });
+    }
   }
 };
 
@@ -371,8 +377,8 @@ describe('real MongoDB over HTTP: concurrent completions (no injected faults)', 
     expectOnlyDocumentedFailuresLogged(retry.length);
     await expectPutBurstInvariants(owner, ids, ok);
 
-    // For every 500 the award is recorded and the task is not completed: retrying completes it and pays nothing.
-    expect(await completedTaskIds(owner)).not.toContain(retry[0].id);
+    // For every 500 the task is already completed and the award recorded: retrying pays nothing.
+    expect(await completedTaskIds(owner)).toContain(retry[0].id);
     await retryFailedPuts(owner, retry);
     await expectConverged(owner, ids);
   });
@@ -432,7 +438,7 @@ describe('real MongoDB over HTTP: isolation between users under concurrent load'
 
 describe('real MongoDB over HTTP: failure and retry paths (one planned failure, everything else the real database)', () => {
   describe('PUT /api/tasks/:id', () => {
-    it('award recorded but derived write fails: documented 500, task untouched; the retry completes it without a second award and reconciles', async () => {
+    it('award recorded but derived write fails: documented 500, the task already holds the completion; the retry pays nothing more and reconciles', async () => {
       const owner = await makeAccount('owner');
       const [taskId] = await makeTasks(owner, 1);
       faults.failNext('derived');
@@ -442,7 +448,7 @@ describe('real MongoDB over HTTP: failure and retry paths (one planned failure, 
       expect(faults.injected('derived')).toBe(1);
       expectRetryable500(failed, 'PUT with a failed derived write');
       expectOnlyDocumentedFailuresLogged(1);
-      expect((await taskDoc(taskId))?.completed).toBe(false);
+      expect((await taskDoc(taskId))?.completed).toBe(true);
       const afterFailure = await stored(owner);
       expect(afterFailure.ledger).toEqual([taskId]); // the award IS recorded ...
       expect(afterFailure.xp).toBe(XP_PER_COMPLETION);
@@ -464,7 +470,7 @@ describe('real MongoDB over HTTP: failure and retry paths (one planned failure, 
       await expectConverged(owner, [taskId]);
     });
 
-    it('the award itself fails: 500, nothing recorded and the task untouched; the retry awards exactly once', async () => {
+    it('the award itself fails: 500, the task already holds the completion but nothing is awarded; the retry awards exactly once', async () => {
       const owner = await makeAccount('owner');
       const [taskId] = await makeTasks(owner, 1);
       faults.failNext('award');
@@ -473,6 +479,25 @@ describe('real MongoDB over HTTP: failure and retry paths (one planned failure, 
 
       expect(faults.injected('award')).toBe(1);
       expectInjectedFailure500(failed, 'PUT with a failed award');
+      expect((await taskDoc(taskId))?.completed).toBe(true);
+      expect(await stored(owner)).toMatchObject({ xp: 0, ledger: [] });
+
+      const retry = await complete(owner, taskId);
+      expect(retry.status).toBe(200);
+      expect(retry.body.task).toMatchObject({ _id: taskId, completed: true });
+      expect(retry.body.growth).toMatchObject({ taskId, awarded: true, xpGained: XP_PER_COMPLETION });
+      await expectConverged(owner, [taskId]);
+    });
+
+    it('the task write fails: 500 and NOTHING is awarded (the award never ran for a transition that did not commit); the retry completes the task and awards once', async () => {
+      const owner = await makeAccount('owner');
+      const [taskId] = await makeTasks(owner, 1);
+      faults.failNext('taskUpdate');
+
+      const failed = await complete(owner, taskId);
+
+      expect(faults.injected('taskUpdate')).toBe(1);
+      expectInjectedFailure500(failed, 'PUT with a failed task write');
       expect((await taskDoc(taskId))?.completed).toBe(false);
       expect(await stored(owner)).toMatchObject({ xp: 0, ledger: [] });
 
@@ -483,29 +508,7 @@ describe('real MongoDB over HTTP: failure and retry paths (one planned failure, 
       await expectConverged(owner, [taskId]);
     });
 
-    it('award recorded but the task write fails: 500; the retry completes the task and pays nothing more', async () => {
-      const owner = await makeAccount('owner');
-      const [taskId] = await makeTasks(owner, 1);
-      faults.failNext('taskUpdate');
-
-      const failed = await complete(owner, taskId);
-
-      expect(faults.injected('taskUpdate')).toBe(1);
-      expectInjectedFailure500(failed, 'PUT with a failed task write');
-      expect((await taskDoc(taskId))?.completed).toBe(false);
-      const afterFailure = await stored(owner);
-      expect(afterFailure.ledger).toEqual([taskId]); // a task never yields a second award: this one holds the first while incomplete
-      expect(afterFailure.xp).toBe(XP_PER_COMPLETION);
-      expect(needsReconcile(afterFailure.tree, new Date())).toBe(false); // the derived write did land
-
-      const retry = await complete(owner, taskId);
-      expect(retry.status).toBe(200);
-      expect(retry.body.task).toMatchObject({ _id: taskId, completed: true });
-      expect(retry.body.growth).toMatchObject({ taskId, awarded: false, xpGained: 0, reason: 'already_awarded' });
-      await expectConverged(owner, [taskId]);
-    });
-
-    it('derived write fails, then the task write fails, then it works: still exactly one award', async () => {
+    it('derived write fails, then a retry whose task write fails, then it works: still exactly one award', async () => {
       const owner = await makeAccount('owner');
       const [taskId] = await makeTasks(owner, 1);
 
@@ -525,8 +528,8 @@ describe('real MongoDB over HTTP: failure and retry paths (one planned failure, 
       expect((errors[0] as TreeAwardError).kind).toBe('derived_unpersisted');
       expect(errors[1]).not.toBeInstanceOf(TreeAwardError);
       expect(String((errors[1] as Error).message)).toContain(SIMULATED_FAILURE_MESSAGE);
-      expect((await stored(owner)).tree).toMatchObject({ streakDays: 1 }); // the second attempt already finished the derived write
-      expect((await taskDoc(taskId))?.completed).toBe(false);
+      expect((await stored(owner)).tree).toMatchObject({ streakDays: 0 }); // the second attempt died before the award step
+      expect((await taskDoc(taskId))?.completed).toBe(true);
 
       const third = await complete(owner, taskId);
       expect(third.status).toBe(200);

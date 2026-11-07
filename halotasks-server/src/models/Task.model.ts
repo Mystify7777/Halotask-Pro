@@ -197,6 +197,17 @@ const taskSchema = new Schema(
       type: Date,
       default: null,
     },
+    // Issue #47 (Phase 1B): the id of the completion this task currently OWNS while `completed` is true, and of the one it
+    // owned last while it is false. It is written in the SAME single-document write as `completed`, so the task alone says
+    // which completion record is current: that is what lets two opposing requests (complete vs uncomplete) be arbitrated by
+    // one conditional write instead of by two independent ones (see utils/taskCompletion.ts). It is a reference to
+    // CompletionRecord.completionId, not history: the history is the records. null for a task that was completed before this
+    // field existed, or never completed.
+    completionId: {
+      type: String,
+      default: null,
+      match: /^[A-Za-z0-9_-]{1,64}$/,
+    },
   },
   {
     timestamps: true,

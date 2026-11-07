@@ -3,6 +3,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_JWT_SECRET as SECRET } from './testConfig';
+import { createCompletionStore, installCompletionRecordMock, removeCompletionRecordMock } from './helpers/completionDoubles';
 
 // Issue #21 — task identifier, ownership and input boundaries, against the REAL app with an in-memory Task
 // double. Mongo-free: before this file these cases were only covered by tests/api.routes.test.ts, which needs
@@ -44,6 +45,7 @@ async function loadApp(): Promise<Express> {
       findOneAndUpdate: () => ({ lean: async () => ({ treeState: { xp: 10, streakDays: 1, lastActiveDate: '2026-10-06', awardedTaskIds: ['x'] } }) }),
     },
   }));
+  installCompletionRecordMock(createCompletionStore());
   vi.doMock('../src/models/DayHistory.model', () => ({ default: {} }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined } }));
   vi.doMock('../src/models/Task.model', () => ({
@@ -60,16 +62,21 @@ async function loadApp(): Promise<Express> {
       countDocuments: async (filter: Record<string, unknown>) => [...db.tasks.values()].filter((t) => t.userId === filter.userId).length,
       create: async (data: Record<string, unknown>) => {
         db.queries.push({ op: 'create', filter: { userId: data.userId } });
-        const doc = { _id: idOf(db.nextId++), ...data };
+        const doc = { _id: idOf(db.nextId++), ...data, ...(data._id !== undefined ? { _id: String(data._id) } : {}) };
         db.tasks.set(doc._id, doc);
         return doc;
       },
-      findOne: async (filter: Record<string, unknown>) => {
-        db.queries.push({ op: 'findOne', filter });
-        const hook = db.beforeNextFindOne;
-        db.beforeNextFindOne = undefined;
-        hook?.();
-        return owns(filter);
+      // Like Mongoose, awaitable and with .lean(); returns a copy so a later write cannot change what a caller read.
+      findOne: (filter: Record<string, unknown>) => {
+        const run = (async () => {
+          db.queries.push({ op: 'findOne', filter });
+          const hook = db.beforeNextFindOne;
+          db.beforeNextFindOne = undefined;
+          hook?.();
+          const found = owns(filter);
+          return found ? { ...found } : null;
+        })();
+        return Object.assign(run, { lean: () => run });
       },
       findOneAndUpdate: async (filter: Record<string, unknown>, update: Record<string, unknown>) => {
         db.queries.push({ op: 'findOneAndUpdate', filter });
@@ -84,6 +91,10 @@ async function loadApp(): Promise<Express> {
           const present = task[key] !== undefined && task[key] !== null;
           const wantsPresent = typeof condition === 'object' && condition !== null && (condition as { $exists?: boolean }).$exists === true;
           if (wantsPresent && !present) return null;
+          // Plain equality (null matches a missing field), as the completion transitions use.
+          if (typeof condition !== 'object' || condition === null) {
+            if ((task[key] ?? null) !== condition) return null;
+          }
         }
         Object.assign(task, plain, $set ?? {});
         for (const key of Object.keys($unset ?? {})) delete task[key];
@@ -123,6 +134,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock('../src/models/User.model');
   vi.doUnmock('../src/models/Task.model');
+  removeCompletionRecordMock();
   vi.doUnmock('../src/models/DayHistory.model');
   vi.doUnmock('web-push');
 });

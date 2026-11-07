@@ -64,6 +64,7 @@ async function loadApp(): Promise<Express> {
       countDocuments: async () => 0,
     },
   }));
+  vi.doMock('../src/models/CompletionRecord.model', () => ({ default: {} }));
   vi.doMock('../src/models/DayHistory.model', () => ({
     default: { find: () => ({ lean: async () => [] }), findOneAndUpdate: async () => ({}) },
   }));
@@ -90,6 +91,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock('../src/models/User.model');
   vi.doUnmock('../src/models/Task.model');
+  vi.doUnmock('../src/models/CompletionRecord.model');
   vi.doUnmock('../src/models/DayHistory.model');
   vi.doUnmock('web-push');
 });
@@ -274,6 +276,7 @@ describe('every protected route is still guarded', () => {
     process.env.JWT_SECRET = SECRET;
     vi.doMock('../src/models/User.model', () => ({ default: {} }));
     vi.doMock('../src/models/Task.model', () => ({ default: {} }));
+    vi.doMock('../src/models/CompletionRecord.model', () => ({ default: {} }));
     vi.doMock('../src/models/DayHistory.model', () => ({ default: {} }));
     vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined } }));
     const { requireAuth } = await import('../src/middleware/auth.middleware.js');

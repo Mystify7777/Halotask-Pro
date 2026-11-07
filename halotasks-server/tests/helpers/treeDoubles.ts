@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import type { Express } from 'express';
+import { createCompletionStore, installCompletionRecordMock, removeCompletionRecordMock, type CompletionStore } from './completionDoubles';
 
 // In-memory stand-ins for the User and Task models, for tests that need MongoDB's observable behaviour
 // without a MongoDB (the sandbox cannot download MongoMemoryServer's binary).
@@ -240,6 +241,13 @@ export function createTaskStore() {
   const tasks = new Map<string, Doc>();
   const ops: StoreOp[] = [];
   const faults: { op: string; count: number }[] = [];
+  // Test hooks. `beforeWrite` runs after a findOneAndUpdate's filter was accepted for the call but BEFORE the match and the
+  // write, which is exactly where a concurrent request interleaves in production; `delay` lets a seeded scheduler shuffle
+  // the order of concurrent requests (every operation yields at least one macrotask tick first).
+  const hooks: {
+    beforeWrite?: (filter: Filter, update: Doc) => Promise<void> | void;
+    delay?: (op: string) => Promise<void> | void;
+  } = {};
   let nextId = 1;
 
   const enter = (op: string, filter: Filter): void => {
@@ -272,22 +280,26 @@ export function createTaskStore() {
       tasks.set(String(doc._id), doc);
       return doc;
     },
-    findOne: async (filter: Filter) => {
-      enter('findOne', filter);
-      const task = owns(filter);
-      return task ? { ...task } : null;
+    // Like Mongoose, the query is awaitable and also offers .lean().
+    findOne: (filter: Filter) => {
+      const run = (async () => {
+        enter('findOne', filter);
+        await hooks.delay?.('findOne');
+        const task = owns(filter);
+        return task ? { ...task } : null;
+      })();
+      return Object.assign(run, { lean: () => run });
     },
     findOneAndUpdate: async (filter: Filter, update: Doc) => {
       enter('findOneAndUpdate', filter);
+      await hooks.delay?.('findOneAndUpdate');
+      await hooks.beforeWrite?.(filter, update);
       const task = owns(filter);
       if (!task) return null;
-      // Mirror MongoDB: `$set` assigns, `$unset` removes, and an `$exists` precondition on the filter must hold.
-      for (const [key, cond] of Object.entries(filter)) {
-        if (cond && typeof cond === 'object' && '$exists' in (cond as Doc)) {
-          const present = task[key] !== undefined && ((cond as Doc).$ne === undefined || task[key] !== (cond as Doc).$ne);
-          if (present !== Boolean((cond as Doc).$exists)) return null;
-        }
-      }
+      // Mirror MongoDB: every other condition of the filter (equality, null = missing, $exists/$ne) must hold ATOMICALLY
+      // with the write: there is no await between this check and the assignment below.
+      const { _id: _ignoredId, userId: _ignoredUser, ...conditions } = filter;
+      if (!matches(task, conditions)) return null;
       const { $set, $unset, ...plain } = update as { $set?: Doc; $unset?: Doc } & Doc;
       Object.assign(task, plain, $set ?? {});
       for (const key of Object.keys($unset ?? {})) delete task[key];
@@ -305,6 +317,7 @@ export function createTaskStore() {
     model,
     ops,
     faults,
+    hooks,
     seed(userId: string, over: Doc = {}): Doc {
       const doc: Doc = { _id: taskIdOf(nextId++), userId, title: 'seeded', completed: false, completedAt: null, ...over };
       tasks.set(String(doc._id), doc);
@@ -325,7 +338,12 @@ export function createTaskStore() {
 // ── App loader ───────────────────────────────────────────────────────────────────
 
 /** Loads the REAL app with the User and Task models replaced by the stores. Call after `vi.resetModules()`-safe setup. */
-export async function loadAppWith(users: UserStore, tasks: TaskStore, jwtSecret: string): Promise<Express> {
+export async function loadAppWith(
+  users: UserStore,
+  tasks: TaskStore,
+  jwtSecret: string,
+  completions: CompletionStore = createCompletionStore(),
+): Promise<Express> {
   vi.resetModules();
   process.env.JWT_SECRET = jwtSecret;
   process.env.CLIENT_ORIGIN = 'http://localhost:5173';
@@ -334,6 +352,7 @@ export async function loadAppWith(users: UserStore, tasks: TaskStore, jwtSecret:
   // requireAuth reads `tokenVersion` with findById().select().lean(): answered from the same user store.
   vi.doMock('../../src/models/User.model', () => ({ default: users.model }));
   vi.doMock('../../src/models/Task.model', () => ({ default: tasks.model }));
+  installCompletionRecordMock(completions);
   vi.doMock('../../src/models/DayHistory.model', () => ({ default: {} }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined, sendNotification: async () => undefined } }));
 
@@ -343,6 +362,7 @@ export async function loadAppWith(users: UserStore, tasks: TaskStore, jwtSecret:
 export function unmockModels(): void {
   vi.doUnmock('../../src/models/User.model');
   vi.doUnmock('../../src/models/Task.model');
+  removeCompletionRecordMock();
   vi.doUnmock('../../src/models/DayHistory.model');
   vi.doUnmock('web-push');
 }

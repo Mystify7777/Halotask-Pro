@@ -337,3 +337,16 @@ export async function awardTaskCompletion(
 
   return { taskId, awarded: true, xpGained: XP_PER_COMPLETION, treeState: summarizeTree(final) };
 }
+
+/**
+ * True when completing `taskId` still has work to do for the Growth Tree: the task is not in the ledger yet, or its derived
+ * copy is stale. A retry of a completion that already committed asks this first, so a benign duplicate neither calls the
+ * award nor reports a growth block (read-only; never writes).
+ */
+export async function awardPending(userId: string, taskId: string, now: Date = new Date()): Promise<boolean> {
+  const current = await User.findById(userId).select('treeState').lean();
+  if (!current) return true; // let the award itself report it
+  const stored = treeOf(current);
+  const ledger = Array.isArray(stored.awardedTaskIds) ? stored.awardedTaskIds : [];
+  return !ledger.includes(taskId) || needsReconcile(stored, now);
+}

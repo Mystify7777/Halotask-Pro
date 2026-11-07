@@ -43,6 +43,30 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 1B review 2: reward ordering and the strong completion invariant
+
+**2026-11-07 · Backend · completed · Priority: high**
+
+refine completion and retry logic in tree route tests for accurate award handling
+
+#### Issue #47 phase 1B review 2: reward ordering and the strong completion invariant
+
+**2026-11-07 · Backend · completed · Priority: high**
+
+Moves the Growth Tree award to the end of a completion: task arbitration (conditional write), then the completion record, then the convergence check, then the award, and only while the task still holds the completion, so a completion that loses the race, is superseded, refused or taken back never grants progression (this reverses the Issue #24 award-before-write order; a retry finds the task completed with the same completionId and finishes the record and the award). A completion event the server refuses (reused id, outside the window, a revoke naming another task) now refuses the whole request with 400 and changes nothing, so the invariant has no exception: a completed task has exactly one active live record matching Task.completionId. Adds deterministic losing-award, retry, convergence and refusal tests, a reward check in the 1500-seed random interleaving test, mutation checks, and real-MongoDB reward/refusal suites (not run here). docs/context.md now separates task/record consistency from reward consistency.
+
+#### Issue #47 phase 1B: completion transitions arbitrated by the task write
+
+**2026-11-06 · Backend · completed · Priority: high**
+
+Fixes the cross-device complete/uncomplete race. A completion transition is now one conditional write of completed + Task.completionId; the records follow it. Exact-id revokes only (no revoke-by-task), monotone record lifecycle, ownership re-check after insert, a convergence check per request, stale retries cannot undo a newer completion, the standalone endpoint answers 409 COMPLETION_TASK_EXISTS for tasks that still exist. Adds seeded random-interleaving tests, deterministic race tests, fault-injection tests and real-MongoDB suites (not run here: no MongoDB binary). docs/context.md now separates failure/retry consistency from concurrent-transition consistency and marks legacy {completed:false} as best effort.
+
+#### Issue #47 phase 1: durable completion records (server contract)
+
+**2026-11-05 · Backend · completed · Priority: high**
+
+Adds CompletionRecord, the authoritative completion history: one record per completion transition, written only from a validated event. The client generates completionId at transition time; completedAt (client-observed, accepted 90 days back and 5 minutes ahead, never re-dated) and receivedAt are stored separately, and localDate is derived from completedAt + utcOffsetMinutes. Uncomplete revokes the exact record (status revoked); a partial unique index allows one active live completion per task and the loser of a race is stored superseded. Events arrive as completionEvent on PUT/POST /api/tasks or through POST /api/completion-events for orphaned tasks, through one idempotent service. Legacy clients get lower-fidelity server-observed records. Record-before-task ordering plus idempotence is the transaction boundary. DayHistory, GET /api/history and all client code are unchanged; client, migration, summaries and the version signal are later phases. Includes a model fix found by the tests (a null offset failed validation). The real-MongoDB suite is added but was not run in the authoring environment.
+
 #### sync: one run at a time (no duplicate creates), visible pending-sync notice, aria-controls fix
 
 **2026-11-04 · Frontend · completed · Priority: high**

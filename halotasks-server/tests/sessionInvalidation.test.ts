@@ -188,6 +188,7 @@ async function loadApp(): Promise<Express> {
       countDocuments: async () => 0,
     },
   }));
+  vi.doMock('../src/models/CompletionRecord.model', () => ({ default: {} }));
   vi.doMock('../src/models/DayHistory.model', () => ({ default: { find: vi.fn(), findOneAndUpdate: vi.fn() } }));
 
   return ((await import('../src/app.js')) as unknown as { default: Express }).default;
