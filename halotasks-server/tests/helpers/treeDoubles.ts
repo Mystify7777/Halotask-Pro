@@ -343,6 +343,7 @@ export async function loadAppWith(
   tasks: TaskStore,
   jwtSecret: string,
   completions: CompletionStore = createCompletionStore(),
+  dayHistory: object = {},
 ): Promise<Express> {
   vi.resetModules();
   process.env.JWT_SECRET = jwtSecret;
@@ -353,7 +354,7 @@ export async function loadAppWith(
   vi.doMock('../../src/models/User.model', () => ({ default: users.model }));
   vi.doMock('../../src/models/Task.model', () => ({ default: tasks.model }));
   installCompletionRecordMock(completions);
-  vi.doMock('../../src/models/DayHistory.model', () => ({ default: {} }));
+  vi.doMock('../../src/models/DayHistory.model', () => ({ default: dayHistory }));
   vi.doMock('web-push', () => ({ default: { setVapidDetails: () => undefined, sendNotification: async () => undefined } }));
 
   return ((await import('../../src/app.js')) as unknown as { default: Express }).default;

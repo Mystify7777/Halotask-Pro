@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2A: history reads from CompletionRecord, DayHistory as fallback
+
+**2026-11-07 · Backend · completed · Priority: high**
+
+GET /api/history now derives each day from CompletionRecord (active records only, titles/minutes from the record snapshots, the record localDate as the day) and falls back to the legacy DayHistory snapshot for days with no record. One source per day, never merged or deduplicated; a day whose records are all revoked reads as zero; an empty canonical history leaves legacy days untouched; legacy days are read only when needed. Response shape, validation and legacy writes are unchanged; no migration, no client change, completion transition model untouched. Adds route tests (deleted tasks, localDate contract, complete-uncomplete-complete, canonical over legacy, legacy-only fallback, empty canonical, response contract) with six mutation checks and a real-MongoDB history test (not run here). docs/context.md documents the transitional read contract and the consumer audit.
+
 #### Issue #47 phase 1B review 2: reward ordering and the strong completion invariant
 
 **2026-11-07 · Backend · completed · Priority: high**

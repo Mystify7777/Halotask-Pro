@@ -14,6 +14,11 @@ const model = vi.hoisted(() => ({
 
 vi.mock('../src/models/DayHistory.model', () => ({ default: model }));
 
+// Phase 2A: GET reads CompletionRecord first. These tests are about the LEGACY contract, so the canonical store is empty
+// (every day falls back to DayHistory); the canonical behaviour is covered in historyCanonical.routes.test.ts.
+const canonical = vi.hoisted(() => ({ find: vi.fn() }));
+vi.mock('../src/models/CompletionRecord.model', () => ({ default: canonical }));
+
 // requireAuth checks the token against the account's current session version. These tokens are the
 // legacy shape (no `tv`), so an account at version 0 must keep accepting them.
 vi.mock('../src/models/User.model', () => ({
@@ -56,6 +61,10 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
   storedRows.length = 0;
+  canonical.find.mockReset().mockImplementation(() => {
+    const q = { select: () => q, lean: async () => [] };
+    return q;
+  });
   model.find.mockReset().mockImplementation((filter: { userId: string; date: { $in: string[] } }) => ({
     lean: async () => storedRows.filter((r) => r.userId === filter.userId && filter.date.$in.includes(r.date as string)),
   }));

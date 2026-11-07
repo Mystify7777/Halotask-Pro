@@ -32,7 +32,7 @@ export type CompletionStore = {
     /** Return an error to make an update (revoke) fail. */
     failUpdate?: (filter: Filter, update: Doc) => Error | null;
     /** Awaited at the start of every operation: a seeded scheduler shuffles concurrent requests here. */
-    delay?: (op: 'findOne' | 'create' | 'findOneAndUpdate') => Promise<void> | void;
+    delay?: (op: 'findOne' | 'create' | 'findOneAndUpdate' | 'find') => Promise<void> | void;
   };
 };
 
@@ -55,6 +55,7 @@ const matches = (doc: Doc, filter: Filter): boolean =>
 const query = <T>(run: () => Promise<T>) => {
   const q = {
     lean: () => q,
+    select: () => q,
     then: (resolve: (value: T) => unknown, reject?: (reason: unknown) => unknown) => run().then(resolve, reject),
   };
   return q;
@@ -69,6 +70,17 @@ export const completionRecordDouble = (store: CompletionStore) => ({
       if (fault) throw fault;
       const found = store.docs.find((doc) => matches(doc, filter));
       return found ? clone(found) : null;
+    }),
+
+  // Reads for history (Phase 2A): { userId, localDate: { $in: [...] } } is the only shape the history read uses.
+  find: (filter: Filter) =>
+    query(async () => {
+      store.ops.push('find');
+      await store.hooks.delay?.('find');
+      const { localDate, ...rest } = filter as Filter & { localDate?: { $in: string[] } };
+      const days = localDate && typeof localDate === 'object' ? (localDate as { $in: string[] }).$in : null;
+      if (!days) throw new Error('completionDoubles: find supports only { localDate: { $in } }');
+      return store.docs.filter((doc) => matches(doc, rest) && doc.localDate != null && days.includes(doc.localDate as string)).map(clone);
     }),
 
   create: async (input: Doc) => {

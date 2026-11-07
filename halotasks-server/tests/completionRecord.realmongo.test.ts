@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
+import { addDays, getToday, localDateAt } from '../src/utils/calendarDate';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -440,6 +441,34 @@ describe('real MongoDB: opposing transitions (Issue #47, Phase 1B)', () => {
     expect(await forTask(second.id)).toHaveLength(0);
     const user = (await User.collection.findOne({ _id: new mongoose.Types.ObjectId(owner.id) })) as unknown as { treeState?: { awardedTaskIds?: string[] } };
     expect(user.treeState?.awardedTaskIds).toEqual([first.id]);
+  });
+
+  it('HISTORY (Phase 2A): a deleted task stays in GET /api/history; canonical days win, legacy days fall back, per day (real indexes and $in)', async () => {
+    const owner = await makeAccount('history');
+    const IST = 330;
+    const today = getToday(IST);
+    const get = () => request(app).get(`/api/history?days=7&endDate=${today}&utcOffsetMinutes=${IST}`).set(owner.auth);
+    const task = await Task.create({ userId: owner.id, title: 'Write report', estimatedMinutes: 30 });
+    await request(app).put(`/api/tasks/${task.id}`).set(owner.auth).send({
+      completed: true,
+      completionEvent: { completionId: 'h1', completedAt: new Date(Date.now() - MIN).toISOString(), utcOffsetMinutes: IST },
+    });
+    await Task.deleteOne({ _id: task._id });
+    // a legacy snapshot for today (must lose to the canonical day) and for two days ago (must be served as stored)
+    await request(app).put('/api/history/today').set(owner.auth).send({
+      date: today, utcOffsetMinutes: IST, completedCount: 1, workDoneMinutes: 5, completedTasks: [{ taskId: 'legacy-1', title: 'Legacy today', estimatedMinutes: 5 }],
+    });
+    await request(app).put(`/api/history/${addDays(today, -2)}`).set(owner.auth).send({
+      date: addDays(today, -2), utcOffsetMinutes: IST, completedCount: 1, workDoneMinutes: 7, completedTasks: [{ taskId: 'legacy-2', title: 'Legacy older', estimatedMinutes: 7 }],
+    });
+
+    const res = await get();
+
+    expect(res.status).toBe(200);
+    const byDate = new Map<string, { completedTasks: { title: string }[]; completedCount: number }>(res.body.history.map((e: { date: string }) => [e.date, e]));
+    expect(byDate.get(localDateAt(new Date(Date.now() - MIN), IST))?.completedTasks.map((t) => t.title)).toEqual(['Write report']);
+    expect(byDate.get(addDays(today, -2))?.completedTasks.map((t) => t.title)).toEqual(['Legacy older']);
+    expect(byDate.get(addDays(today, -1))?.completedCount).toBe(0);
   });
 
   describe('fault injection: inspect the task, the records and the award state after the failed request AND after the retry', () => {

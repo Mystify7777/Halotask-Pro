@@ -1,5 +1,6 @@
 import { NextFunction, Response } from 'express';
 import DayHistory from '../models/DayHistory.model';
+import { readCompletionDays } from '../utils/completionHistory';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import {
   buildDateWindow,
@@ -17,8 +18,19 @@ import {
 // -- GET /api/history?days=7&endDate=YYYY-MM-DD&utcOffsetMinutes=330 --
 // `endDate` and `utcOffsetMinutes` are required. Returns exactly `days` entries
 // (oldest → newest) ending at `endDate` (the client's local today).
-// Days with no stored snapshot come back as zeros with `updatedAt: null`, so a
+// Days with no stored data come back as zeros with `updatedAt: null`, so a
 // client can tell "no record" from "a record that is genuinely zero".
+//
+// TRANSITIONAL READ CONTRACT (Issue #47, Phase 2A). Each day is answered from ONE source, chosen per day:
+//   1. CANONICAL: the day has CompletionRecords (utils/completionHistory.ts). The entry is derived from them (active records
+//      only; deleted tasks stay, because a record carries its own title and estimate; the day is the record's `localDate`).
+//      A day whose records are all revoked is canonical too and reads as zero.
+//   2. LEGACY: no record has that local day, so the day's DayHistory snapshot is used exactly as stored.
+//   3. NONE: neither has the day: zeros, `updatedAt: null`.
+// The two sources are never merged, added or deduplicated by task/date: a day is wholly one or the other, so nothing can be
+// counted twice, and a day with canonical data never has its legacy snapshot mixed in. The choice is per day, not per
+// request, so a few new records cannot hide the rest of a week that only the legacy snapshots know about. The response
+// shape is unchanged for every day, whichever source answered it.
 export const getHistory = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user.id;
@@ -30,15 +42,25 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response, next:
 
     const dates = buildDateWindow(parsed.value.days, parsed.value.endDate);
 
-    const stored = await DayHistory.find({
-      userId,
-      date: { $in: dates },
-    }).lean();
+    const canonical = await readCompletionDays(userId, dates);
 
-    const byDate = new Map(stored.map((e) => [e.date, e]));
+    // Legacy snapshots are only needed for the days the canonical source does not know.
+    const legacyDates = dates.filter((date) => !canonical.has(date));
+    const stored = legacyDates.length === 0 ? [] : await DayHistory.find({ userId, date: { $in: legacyDates } }).lean();
+    const legacy = new Map(stored.map((e) => [e.date, e]));
 
     const entries = dates.map((date) => {
-      const entry = byDate.get(date);
+      const record = canonical.get(date);
+      if (record) {
+        return {
+          date,
+          completedCount: record.completedCount,
+          workDoneMinutes: record.workDoneMinutes,
+          completedTasks: record.completedTasks,
+          updatedAt: record.updatedAt,
+        };
+      }
+      const entry = legacy.get(date);
       return {
         date,
         completedCount: entry?.completedCount ?? 0,

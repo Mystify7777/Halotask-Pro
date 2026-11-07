@@ -675,6 +675,54 @@ after the task moved on is revoked by its own request (ownership re-check); and 
   conditional guards, the convergence check, the refusal, or moving the award before the task write makes them fail). `tests/completionRecord.realmongo.test.ts` proves the indexes, real concurrency, opposing
   transitions over HTTP and fault injection, but needs a MongoDB binary: it has been typechecked, **not run** in the environment that produced it.
 
+### Historical Completion Reads: the Transitional Read Contract (Issue #47, Phase 2A)
+
+`GET /api/history?days=N&endDate&utcOffsetMinutes` (the only server read of completion history) now derives its days from `CompletionRecord`
+(`utils/completionHistory.ts`) and falls back to the legacy `DayHistory` snapshot. Request, response shape, validation and error codes are
+**unchanged**; the writes (`PUT /api/history/today`, `PUT /api/history/:date`) are unchanged and still go to `DayHistory`. Nothing is migrated,
+the completion transition model is untouched, and the client is untouched.
+
+**The rule: one source per DAY, canonical first.**
+1. *Canonical*: a day is canonical when **any** `CompletionRecord` of the account has that `localDate` (any status, any source). Its entry is
+   derived from the records: only `active` records are listed and counted (`completedCount` = how many, `workDoneMinutes` = sum of
+   `estimatedMinutesSnapshot`), each as `{ taskId, title: titleSnapshot, estimatedMinutes }`, oldest `completedAt` first (a `migrated` record,
+   which has no instant, after the dated ones; `completionId` breaks ties), `updatedAt` = the latest `receivedAt`/`revokeReceivedAt` of the
+   day's records (so "a record that exists" is never `null`). A deleted task stays (the record holds its own title and estimate); a later
+   rename or edit does not change it; the day is the record's `localDate` (the user's day at completion, never re-derived from the request
+   offset or the receipt time). A day whose records are **all revoked** is canonical and reads as zero: the authoritative answer is "nothing
+   stands", and a stale legacy snapshot must not bring the completion back.
+2. *Legacy*: no record has that local day: the day's `DayHistory` snapshot is served exactly as stored.
+3. *None*: neither: zeros and `updatedAt: null` ("no record", as before).
+
+**Never merged.** The two sources are not added, merged or deduplicated by task/date (decision O5): a day is wholly one or the other, so nothing is
+counted twice and a canonical day never absorbs its legacy snapshot. The choice is per day and not per request, so a few new records cannot
+hide the rest of a week that only legacy snapshots know about; and an empty canonical history (no records, only another account's or
+out-of-window records, or records with no local day) leaves every legacy day exactly as before. Complete -> uncomplete -> complete is two
+records (one revoked, one active): history lists the completion that stands, once.
+
+**Records with no `localDate`** (the server-observed record written for a legacy client that sends no event: its day is unknown) belong to no day,
+so a legacy client's days keep being answered by the `DayHistory` snapshot it writes. Consequence while legacy writes exist: a legacy
+client's deleted-task completions are only as durable as its snapshot, as before.
+
+**Read-only and cheap.** The history read writes nothing, and reads `DayHistory` only for the days the canonical source does not know (none
+at all when every requested day is canonical). It uses the `(userId, localDate, status)` index.
+
+**Consumer audit** (everything that reads completion history; the client is unchanged in this phase):
+
+| Consumer | How it reads | Effect of 2A |
+|---|---|---|
+| `GET /api/history` (server) | the only server read endpoint | switched to canonical-first, same shape |
+| `historyService.getHistory` -> `parseServerEntry` (client) | requires `date`, counts, `completedTasks[{taskId,title,estimatedMinutes}]`; `exists` = `updatedAt` is a non-empty string | unchanged: canonical days always carry an `updatedAt`, empty days still `null` |
+| client `reconcile()` (`offline/history.ts`) | an acknowledged local copy yields to the server row; a day with unsent local changes is merged by task id with the server row and pushed to `PUT /api/history/*` | canonical rows now win in the first case. In the second, the merged result is pushed to `DayHistory` (legacy), which the server ignores for a canonical day: the push cannot change what the server reads, the next acknowledged reconcile shows the canonical row |
+| `getWeekHistory()` (client) | 7 entries from the local mirror, reconciled with the server on first read | gets canonical data through the reconcile above; offline it still answers from the local mirror |
+| Insights `WeeklySummary`, `PatternInsight`, `WeekHistoryChart` | read `completedCount`, `workDoneMinutes`, `completedTasks`, `date` of `getWeekHistory()` | same fields, same meaning |
+| Dashboard `SmartSections` (`todayHistory`) | the last `getWeekHistory()` entry: `completedCount`, `workDoneMinutes` | same fields, same meaning |
+| `updateTodaySnapshot` / `PUT /api/history/*` | legacy writes | unchanged; still the fallback source until the migration and client phases |
+
+**Known limits (documented, not hidden).** Until the legacy writes are retired, a day can be canonical for tasks completed by an event-sending client and
+legacy-only for the tasks a legacy client completed the same day; the canonical day then shows only the canonical ones (O5: no dedupe). Only the
+last 7 local days are mirrored by the client, and the server read accepts up to 90 days: older days are canonical-only or legacy-only by the same rule.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

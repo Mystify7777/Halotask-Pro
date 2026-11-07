@@ -19,6 +19,25 @@
     {
       "date": "2026-11-07",
       "category": "Backend",
+      "title": "Issue #47 phase 2A: history reads from CompletionRecord, DayHistory as fallback",
+      "description": "GET /api/history now derives each day from CompletionRecord (active records only, titles/minutes from the record snapshots, the record localDate as the day) and falls back to the legacy DayHistory snapshot for days with no record. One source per day, never merged or deduplicated; a day whose records are all revoked reads as zero; an empty canonical history leaves legacy days untouched; legacy days are read only when needed. Response shape, validation and legacy writes are unchanged; no migration, no client change, completion transition model untouched. Adds route tests (deleted tasks, localDate contract, complete-uncomplete-complete, canonical over legacy, legacy-only fallback, empty canonical, response contract) with six mutation checks and a real-MongoDB history test (not run here). docs/context.md documents the transitional read contract and the consumer audit.",
+      "files": [
+        "halotasks-server/src/utils/completionHistory.ts",
+        "halotasks-server/src/controllers/history.controller.ts",
+        "halotasks-server/tests/historyCanonical.routes.test.ts",
+        "halotasks-server/tests/historyRoutes.test.ts",
+        "halotasks-server/tests/helpers/historyDoubles.ts",
+        "halotasks-server/tests/helpers/completionDoubles.ts",
+        "halotasks-server/tests/helpers/treeDoubles.ts",
+        "halotasks-server/tests/completionRecord.realmongo.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-07",
+      "category": "Backend",
       "title": "Issue #47 phase 1B review 2: reward ordering and the strong completion invariant",
       "description": "Moves the Growth Tree award to the end of a completion: task arbitration (conditional write), then the completion record, then the convergence check, then the award, and only while the task still holds the completion, so a completion that loses the race, is superseded, refused or taken back never grants progression (this reverses the Issue #24 award-before-write order; a retry finds the task completed with the same completionId and finishes the record and the award). A completion event the server refuses (reused id, outside the window, a revoke naming another task) now refuses the whole request with 400 and changes nothing, so the invariant has no exception: a completed task has exactly one active live record matching Task.completionId. Adds deterministic losing-award, retry, convergence and refusal tests, a reward check in the 1500-seed random interleaving test, mutation checks, and real-MongoDB reward/refusal suites (not run here). docs/context.md now separates task/record consistency from reward consistency.",
       "files": [
@@ -1433,5 +1452,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-07T08:18:06.915Z"
+  "lastUpdated": "2026-11-07T13:17:13.549Z"
 }
