@@ -112,7 +112,7 @@ export function buildDateWindow(days: number, endDate: string): string[] {
   return dates;
 }
 
-const parseCompletedTask = (raw: unknown, index: number): ValidationResult<CompletedTaskInput> => {
+export const parseCompletedTask = (raw: unknown, index: number): ValidationResult<CompletedTaskInput> => {
   if (!isPlainObject(raw)) {
     return fail(`completedTasks[${index}] must be an object.`);
   }

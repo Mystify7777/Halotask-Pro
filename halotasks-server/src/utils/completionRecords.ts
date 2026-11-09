@@ -380,3 +380,81 @@ export async function revokeCompletion(
 export async function discardJustRecorded(userId: string, completionId: string, taskId: string): Promise<void> {
   await CompletionRecord.deleteOne({ userId, completionId, taskId, status: 'active' });
 }
+
+// -- Migrated records (Issue #47, Phase 2B) ----------------------------------------------------------------------------
+
+export type MigratedCompletionInput = {
+  completionId: string;
+  taskId: string;
+  titleSnapshot: string;
+  estimatedMinutesSnapshot: number;
+};
+
+export type MigratedDayOutcome = 'created' | 'skipped-existing';
+
+/**
+ * Writes ALL the migrated records of one legacy day in ONE MongoDB transaction, or none.
+ *
+ * Why a transaction and not a loop of inserts: the history read (utils/completionHistory.ts) treats a day as canonical as
+ * soon as ANY record has its `localDate`, and the migration skips any day that already has a record. A day left with only
+ * some of its records (a crash between two inserts) would therefore read as that partial set FOR GOOD, silently hiding the
+ * rest of the legacy snapshot. The transition must be legacy-only -> fully canonical, never partial.
+ *
+ * Inside the transaction the day is re-checked: if ANY record (any status, any source) holds this `localDate`, nothing is
+ * written ('skipped-existing'). A concurrent run that wins the race makes this one hit the unique (userId, completionId)
+ * index or a write conflict; MongoDB aborts the loser's whole transaction (withTransaction retries a transient conflict,
+ * which then finds the winner's records), so the outcome is the same: the day is written exactly once.
+ *
+ * It states only what the snapshot proves: the local day. The completion instant and offset are unknown (null) and the
+ * records say so (`source`/`completedAtSource` 'migrated'). Migrated records are outside the single-active-live index.
+ * Transactions need a replica set or sharded cluster; on a standalone server MongoDB refuses, nothing is written, and the
+ * caller reports the day as failed (the CLI also refuses to start an apply there).
+ */
+export async function recordMigratedDay(
+  userId: string,
+  localDate: string,
+  inputs: MigratedCompletionInput[],
+  now: Date = new Date(),
+): Promise<MigratedDayOutcome> {
+  if (inputs.length === 0) return 'skipped-existing'; // nothing to write is not a migration
+
+  const docs = inputs.map((input) => ({
+    userId,
+    completionId: input.completionId,
+    taskId: input.taskId,
+    titleSnapshot: input.titleSnapshot,
+    estimatedMinutesSnapshot: input.estimatedMinutesSnapshot,
+    completedAt: null,
+    utcOffsetMinutes: null,
+    localDate,
+    receivedAt: now,
+    status: 'active' as const,
+    source: 'migrated' as const,
+    completedAtSource: 'migrated' as const,
+  }));
+
+  const session = await CompletionRecord.startSession();
+  try {
+    let outcome: MigratedDayOutcome = 'created';
+    await session.withTransaction(async () => {
+      outcome = 'created';
+      const present = await CompletionRecord.find({ userId, localDate: { $in: [localDate] } })
+        .session(session)
+        .select('completionId')
+        .lean();
+      if (present.length > 0) {
+        outcome = 'skipped-existing';
+        return;
+      }
+      await CompletionRecord.insertMany(docs, { session });
+    });
+    return outcome;
+  } catch (error) {
+    // A concurrent run inserted the same ids first: the day is written, by them.
+    const pattern = (error as { keyPattern?: Record<string, unknown> }).keyPattern;
+    if (isDuplicateKeyError(error) && pattern && 'completionId' in pattern) return 'skipped-existing';
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+}

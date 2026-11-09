@@ -33,6 +33,10 @@ export type CompletionStore = {
     failUpdate?: (filter: Filter, update: Doc) => Error | null;
     /** Awaited at the start of every operation: a seeded scheduler shuffles concurrent requests here. */
     delay?: (op: 'findOne' | 'create' | 'findOneAndUpdate' | 'find') => Promise<void> | void;
+    /** A standalone server: startSession() works but starting a transaction is refused (nothing is written). */
+    standalone?: boolean;
+    /** Return an error to make the COMMIT of a transaction fail (everything done inside it is rolled back). */
+    failCommit?: () => Error | null;
   };
 };
 
@@ -56,10 +60,31 @@ const query = <T>(run: () => Promise<T>) => {
   const q = {
     lean: () => q,
     select: () => q,
+    session: () => q,
     then: (resolve: (value: T) => unknown, reject?: (reason: unknown) => unknown) => run().then(resolve, reject),
   };
   return q;
 };
+
+/** One synchronous block: check the two unique indexes, then insert (the atomic step of a single-document insert). */
+const insertChecked = (store: CompletionStore, input: Doc): Doc => {
+  if (store.docs.some((doc) => String(doc.userId) === String(input.userId) && doc.completionId === input.completionId)) {
+    throw duplicateKeyError({ userId: 1, completionId: 1 });
+  }
+  if (
+    input.status === 'active' &&
+    input.source === 'live' &&
+    store.docs.some(
+      (doc) =>
+        String(doc.userId) === String(input.userId) && doc.taskId === input.taskId && doc.status === 'active' && doc.source === 'live',
+    )
+  ) {
+    throw duplicateKeyError({ userId: 1, taskId: 1 });
+  }
+  const doc = clone(input);
+  store.docs.push(doc);
+  return clone(doc);
+  };
 
 export const completionRecordDouble = (store: CompletionStore) => ({
   findOne: (filter: Filter) =>
@@ -90,23 +115,48 @@ export const completionRecordDouble = (store: CompletionStore) => ({
     const fault = store.hooks.failCreate?.(input);
     if (fault) throw fault;
 
-    // ---- one synchronous block from here: check the unique indexes, then insert ----
-    if (store.docs.some((doc) => String(doc.userId) === String(input.userId) && doc.completionId === input.completionId)) {
-      throw duplicateKeyError({ userId: 1, completionId: 1 });
+    return insertChecked(store, input);
+  },
+
+  /** Mongoose Model.insertMany: ordered, stops at the first failure. Atomic ONLY inside a transaction (session). */
+  insertMany: async (inputs: Doc[], options: { session?: { written?: Doc[] } } = {}) => {
+    store.ops.push('insertMany');
+    const out: Doc[] = [];
+    for (const input of inputs) {
+      await store.hooks.delay?.('create');
+      await store.hooks.beforeCreate?.(input);
+      const fault = store.hooks.failCreate?.(input);
+      if (fault) throw fault;
+      const stored = insertChecked(store, input);
+      options.session?.written?.push(store.docs[store.docs.length - 1]); // what a rollback must take back
+      out.push(stored);
     }
-    if (
-      input.status === 'active' &&
-      input.source === 'live' &&
-      store.docs.some(
-        (doc) =>
-          String(doc.userId) === String(input.userId) && doc.taskId === input.taskId && doc.status === 'active' && doc.source === 'live',
-      )
-    ) {
-      throw duplicateKeyError({ userId: 1, taskId: 1 });
-    }
-    const doc = clone(input);
-    store.docs.push(doc);
-    return clone(doc);
+    return out;
+  },
+
+  /** Model.startSession(): withTransaction applies fn, and rolls EVERYTHING it wrote back if fn (or the commit) throws. */
+  startSession: async () => {
+    // Rollback removes ONLY what this transaction wrote (a concurrent transaction's committed records stay), like a real one.
+    const session = {
+      written: [] as Doc[],
+      withTransaction: async (fn: () => Promise<void>) => {
+        if (store.hooks.standalone) throw Object.assign(new Error('Transaction numbers are only allowed on a replica set member or mongos'), { code: 20 });
+        session.written = [];
+        try {
+          await fn();
+          const commitFault = store.hooks.failCommit?.();
+          if (commitFault) throw commitFault;
+        } catch (error) {
+          for (const doc of session.written) {
+            const at = store.docs.indexOf(doc);
+            if (at >= 0) store.docs.splice(at, 1);
+          }
+          throw error;
+        }
+      },
+      endSession: async () => undefined,
+    };
+    return session;
   },
 
   findOneAndUpdate: (filter: Filter, update: { $set?: Doc }) =>
