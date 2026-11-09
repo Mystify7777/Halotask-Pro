@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2B: migrate legacy DayHistory into migrated CompletionRecords
+
+**2026-11-09 · Backend · completed · Priority: high**
+
+Adds an idempotent migration (utils/completionMigration.ts, CLI `npm run migrate:history`, dry run by default, --apply to write) that writes one `migrated` CompletionRecord per DayHistory snapshot entry (day known, completedAt/offset null, deterministic id from user+date+task), never invents a completion instant, never reconstructs from Task or Growth data, never modifies DayHistory. Because a day with any record is read from records only, a day goes from legacy-only to fully canonical, never partial: every day is written in ONE MongoDB transaction (recordMigratedDay; the CLI refuses --apply without a replica set or mongos), a day with ANY CompletionRecord (including revoked-only) is skipped, a day with an unrepresentable task is skipped whole, only frozen days no legacy client can still write are migrated (derived from the legacy write validator constants; --include-writable-days is an explicit override with a stderr banner), and a day found partly migrated is reported, never silently repaired. Adds 41 Mongo-free tests (failure injected at every position and at commit, transaction double, 12 mutation checks, all caught), CLI tests, a real-MongoDB replica-set suite (not run here), a read-equivalence test through GET /api/history, and documents the contract and limits in docs/context.md. No client change, no change to the completion transition model or the history read path.Ficed a flaky test.
+
 #### Issue #47 phase 2A: history reads from CompletionRecord, DayHistory as fallback
 
 **2026-11-07 · Backend · completed · Priority: high**

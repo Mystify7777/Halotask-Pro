@@ -133,7 +133,10 @@ describe('real MongoDB: concurrency decided by the database', () => {
   });
 
   it('the same event delivered 20 times at once: one record', async () => {
-    const results = await Promise.all(Array.from({ length: 20 }, () => recordCompletion(userId, event(), NOW())));
+    // ONE event delivered 20 times: build it once (event() stamps Date.now(), so 20 separate calls can straddle a millisecond and
+    // become 20 DIFFERENT events with one id, which the service correctly refuses as COMPLETION_ID_REUSED).
+    const sent = event();
+    const results = await Promise.all(Array.from({ length: 20 }, () => recordCompletion(userId, sent, NOW())));
 
     expect(await all()).toHaveLength(1);
     expect(results.every((r) => r.outcome === 'recorded' || r.outcome === 'duplicate')).toBe(true);

@@ -588,7 +588,7 @@ completion transition**, never from a task snapshot (that would rebuild `DayHist
 
 `completedAtSource`: `client` = the instant the user acted, authoritative; `server` = a legacy client sent no event data, so
 `completedAt` is the receipt time and the local day is unknown (`utcOffsetMinutes` and `localDate` are null), a
-**lower-fidelity** record analytics may exclude or qualify; `migrated` = reserved for the later `DayHistory` migration
+**lower-fidelity** record analytics may exclude or qualify; `migrated` = written by the DayHistory migration (Phase 2B)
 (completion instant unknown, `completedAt` null). A `pre('validate')` hook enforces these combinations so no write path can store
 a self-contradicting record.
 
@@ -653,7 +653,7 @@ C1"), it cannot tell a stale request from a current one. A client that sends no 
 `Task.completionId`; an incomplete task has none. **There is no exception for refused events**: a request that carries a completion event the server
 refuses (the id belongs to another event, the time is outside the window, a revoke names another task's completion) is refused as a whole, HTTP 400 with a
 `code`, and changes **nothing**: no task write (not even other fields of the same request), no record, no reward. A request without an event (a legacy client) is never
-refused. Tasks completed before this feature have no pointer and no record until the migration phase; they are outside the invariant.
+refused. Tasks completed before this feature have no pointer and no record; they are outside the invariant. The DayHistory migration (Phase 2B) does NOT change this: it creates history records only, never a pointer, and never reconstructs a record from a Task document.
 Supporting rules: a request revokes only the **exact id** its own commit ended (there is no "revoke whatever is active"); a record only moves
 forward (absent, active, revoked) and is never re-activated, so a duplicate or late retry of an event already decided cannot complete the task again; a record inserted
 after the task moved on is revoked by its own request (ownership re-check); and every request ends with a convergence check for the ids it touched
@@ -722,6 +722,75 @@ at all when every requested day is canonical). It uses the `(userId, localDate, 
 **Known limits (documented, not hidden).** Until the legacy writes are retired, a day can be canonical for tasks completed by an event-sending client and
 legacy-only for the tasks a legacy client completed the same day; the canonical day then shows only the canonical ones (O5: no dedupe). Only the
 last 7 local days are mirrored by the client, and the server read accepts up to 90 days: older days are canonical-only or legacy-only by the same rule.
+
+### Migrating Legacy DayHistory into CompletionRecord (Issue #47, Phase 2B)
+
+`utils/completionMigration.ts` (`migrateDayHistory`) and the CLI `src/scripts/migrateDayHistory.ts` (`npm run build && npm run migrate:history`,
+**dry run by default**; `-- --apply` writes; `--user=<id>`; `--include-writable-days`). It only adds `migrated` records
+(`recordMigratedDay` in `utils/completionRecords.ts`); it never modifies `DayHistory`, never deletes or rewrites a record, and does not touch
+the transition model, the history read code or the client.
+
+**What a migrated record says.** One per snapshot entry: `taskId`, `titleSnapshot`, `estimatedMinutesSnapshot` from the row, `localDate` = the row's
+date, `status: active`, `source: migrated`, `completedAtSource: migrated`, `completedAt: null`, `utcOffsetMinutes: null`, `receivedAt` = the run's
+clock. It does **not** know the time of day, how many transitions happened, or whether the task was completed twice that day, and nothing is
+reconstructed from `Task.completedAt` or the Growth ledger (decision O8). The `completionId` is deterministic: `mig-` + the first 48 hex characters of
+`sha256(userId \n date \n taskId)`: the same entry always gets the same id; the same task on another date, or another user, gets another. The same
+task on two legacy days is two records. Migrated records are outside the single-active-live index, so they never block (and are never blocked by) a
+live completion of the same task.
+
+**The invariant.** Under the Phase 2A read rule a day with *any* record is read from records only, so writing records for a day changes what that day
+reads, and a day must go from **legacy-only to fully canonical, never to partially canonical**:
+
+```
+BEFORE  records of the day = 0, DayHistory authoritative
+AFTER   records of the day = N (N = valid tasks of the snapshot), all deterministic and complete, DayHistory unchanged, records authoritative
+NEVER   0 < records of the day < N
+```
+
+Rules that keep it:
+1. **Atomic per day.** All records of a day are written in **one MongoDB transaction** (`recordMigratedDay`), or none. Inside the transaction the day is
+   re-checked. A failure at any insert, or at commit, rolls the day back; the day keeps reading from `DayHistory` and the next run migrates it whole.
+   Transactions need a **replica set or mongos** (Atlas is one; a local standalone `mongod` is not). On a standalone server the CLI **refuses to
+   `--apply`** (`supportsTransactions(hello)`), and the writer itself would write nothing. A sequence of independent inserts is deliberately not used:
+   with rule 3 a half-written day would be permanent.
+2. **All or nothing at validation.** If any task of a row cannot be represented exactly (the legacy write validator's rules: id, title, minutes; a
+   duplicate task id; a malformed list) the whole day is skipped, reported, and keeps reading from `DayHistory`.
+3. **A day that has ANY CompletionRecord is skipped** (any status, any source; this is exactly what makes a day canonical in the read contract):
+   a revoked-only day is canonical too (the records say nothing stands) and importing the snapshot would bring back what they revoked. Never merged (O5).
+   A record with no `localDate` (server-observed, legacy client) is not a record "of the day": the snapshot is that day's only source.
+4. **Frozen days only.** Legacy clients can still `PUT /api/history/*` for today and the previous 6 local days, and a write to an already-canonical day
+   is ignored. A date is migrated by default only when **no client at any UTC offset** can still write it: strictly before `firstWritableDate(now)`
+   = today at UTC-12 minus 6 days, derived from the same constants as the write validator (a test pins the two together). Recent days stay legacy and
+   are picked up by a later run. `--include-writable-days` lifts this, prints a banner on stderr, and is only safe after legacy history writes are
+   retired (Phase 2C).
+5. **Idempotent.** Ids are deterministic and rule 3 sees a migrated day, so a rerun creates nothing (`rowsAlreadyMigrated`); two runs at once write a
+   day once (the loser's transaction aborts on the unique id or a write conflict, and its retry finds the day). A day found with only *some* of its
+   migrated records cannot be produced by this code; if one exists it is **reported** (`partial-migrated-day`, counted in `rowsFailed`, exit code 1)
+   and left exactly as found, never silently completed or skipped.
+6. **Empty rows create nothing**; the legacy zero row keeps answering. Rows whose stored count/minutes disagree with their list are migrated from the
+   list and reported (`count-mismatch`); the write validator already makes such rows impossible for new data.
+
+**Read equivalence.** After a migration a migrated day reads the same task identities, titles, estimates, `completedCount`, `workDoneMinutes`, day and
+"a record exists" (`updatedAt` non-null) as its snapshot did (tested through `GET /api/history`, in memory and against a real MongoDB; a migration that
+fails halfway changes no day's read). Intentional differences: `updatedAt` is now the migration's `receivedAt`, not the snapshot's time; and the task
+**order** is the read contract's (migrated records after dated ones, `completionId` tiebreak: deterministic but not the snapshot's order). Order is
+**not contractual**: the only consumer is `InsightsPage` listing `entry.completedTasks`, and the client reads and mirrors only the last 7 local days
+(`MAX_DAYS`), which a default migration never touches (frozen days are older). A later view that shows older days in order needs an explicit order field.
+
+**Report** (JSON on stdout; exit code 1 if any row failed): `mode`, `includeWritableDays`, `firstWritableDate`, `rowsRead`, `rowsSkippedWritable`,
+`rowsSkippedInvalid`, `rowsSkippedExistingRecords`, `rowsEmpty`, `rowsAlreadyMigrated`, `rowsToMigrate`, `recordsPlanned`, `recordsCreated`,
+`recordsAlreadyPresent`, `rowsWithCountMismatch`, `rowsFailed`, and the first 100 `issues` (`{userId, date, kind, detail}`; error details are name/code
+only, never message text or values). A dry run counts exactly what an apply would create (including skipping revoked-only days).
+
+**Operational notes / known limits.** (a) Run the dry run first, read the `issues`, then `--apply` against a replica set; rerun after the 7-day window
+has passed to pick up the days that were still writable. (b) Run it before event-sending clients ship (Phase 3): a live record on a not-yet-migrated day
+makes that day canonical and its snapshot ignored (the 2A limit; rule 3 then keeps it). A live record that lands in the instant between the in-transaction
+check and the commit (a late offline completion for an old day, written outside the transaction) would sit beside the migrated ones: a narrow window, not
+closable without changing the live write path. (c) Task documents completed before Issue #47 are not backfilled; they stay outside the Task/record
+invariant. (d) Evidence: `tests/completionMigration.test.ts` (41, Mongo-free, transactions modelled by a strict double; 12 mutation checks, all caught),
+`tests/migrateDayHistory.cli.test.ts`, `tests/completionMigration.realmongo.test.ts` (real indexes and a real one-node replica set: real transaction,
+rollback of a mid-day failure, concurrent runs; typechecked, **not run** where it was written: needs a MongoDB binary). Nothing has been run against
+production-shaped data.
 
 ## AI Task Creation (Issue #22)
 
