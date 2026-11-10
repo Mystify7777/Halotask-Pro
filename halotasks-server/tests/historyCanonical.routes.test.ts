@@ -267,8 +267,71 @@ describe('transitional fallback: canonical first, legacy DayHistory otherwise, p
   });
 });
 
+describe('client transition: legacy writes cannot override a canonical day (Phase 2A)', () => {
+  const legacyPut = (date: string, titles: string[]) =>
+    request(app)
+      .put(date === today() ? '/api/history/today' : `/api/history/${date}`)
+      .set(as(A))
+      .send({
+        date,
+        utcOffsetMinutes: IST,
+        completedCount: titles.length,
+        workDoneMinutes: titles.length * 10,
+        completedTasks: titles.map((title, i) => ({ taskId: `local-${i}`, title, estimatedMinutes: 10 })),
+      });
+
+  it('a legacy PUT with an extra completion succeeds, yet the day keeps reading canonical-only, on every later read (convergence)', async () => {
+    const task = seedTask('Canonical task');
+    await put(String(task._id), completeEvent('c1', new Date(Date.now() - MIN)));
+
+    // The stale client mirror holds the canonical task AND one more completion nobody sent as an event.
+    const res = await legacyPut(today(), ['Canonical task', 'Only in the local mirror']);
+    expect(res.status).toBe(200); // acknowledged: the client will clear its pending flag
+
+    for (let i = 0; i < 3; i += 1) {
+      const entry = entryOn((await history()).body, today());
+      expect(entry.completedTasks.map((t: { title: string }) => t.title)).toEqual(['Canonical task']);
+      expect(entry.completedCount).toBe(1);
+      expect(entry.workDoneMinutes).toBe(30);
+    }
+    // The legacy row was stored (the write path is unchanged) but is never read for a canonical day.
+    expect(legacy.rows.some((r) => r.date === today())).toBe(true);
+  });
+
+  it('a stale non-empty legacy PUT cannot resurrect a day whose canonical completions were all revoked: it still reads zero', async () => {
+    const task = seedTask('Done then undone');
+    const id = String(task._id);
+    await put(id, completeEvent('c1', new Date(Date.now() - 2 * MIN)));
+    await put(id, undoEvent('c1'));
+
+    const res = await legacyPut(today(), ['Done then undone']);
+    expect(res.status).toBe(200);
+
+    const entry = entryOn((await history()).body, today());
+    expect(entry.completedCount).toBe(0);
+    expect(entry.completedTasks).toEqual([]);
+    expect(entry.workDoneMinutes).toBe(0);
+    expect(entry.updatedAt).not.toBeNull();
+  });
+
+  it('the same holds for a backdated day (PUT /api/history/:date) and a legacy-only neighbour day is still written and read normally', async () => {
+    const task = seedTask('Yesterday');
+    const earlier = new Date(Date.now() - DAY);
+    await put(String(task._id), completeEvent('c1', earlier));
+    const canonicalDay = localDateAt(earlier, IST);
+    const neighbour = day(-3);
+
+    expect((await legacyPut(canonicalDay, ['Yesterday', 'Stale extra'])).status).toBe(200);
+    expect((await legacyPut(neighbour, ['Legacy only'])).status).toBe(200);
+
+    const body = (await history()).body;
+    expect(entryOn(body, canonicalDay).completedTasks.map((t: { title: string }) => t.title)).toEqual(['Yesterday']);
+    expect(entryOn(body, neighbour).completedTasks.map((t: { title: string }) => t.title)).toEqual(['Legacy only']);
+  });
+});
+
 describe('response contract (what existing consumers rely on)', () => {
-  it('returns exactly `days` entries, oldest to newest, with the unchanged keys, for canonical, legacy and empty days alike', async () => {
+  it('returns exactly `days` entries, oldest to newest, with the unchanged keys plus `source`, for canonical, legacy and empty days alike', async () => {
     legacy.rows.push(legacyRow(day(-1), ['Legacy']));
     const task = seedTask('Canonical');
     await put(String(task._id), completeEvent('c1', new Date(Date.now() - MIN)));
@@ -279,13 +342,33 @@ describe('response contract (what existing consumers rely on)', () => {
       expect(Object.keys(res.body)).toEqual(['history']);
       expect(res.body.history.map((e: { date: string }) => e.date)).toEqual(Array.from({ length: days }, (_, i) => day(i - (days - 1))));
       for (const entry of res.body.history) {
-        expect(Object.keys(entry).sort()).toEqual(['completedCount', 'completedTasks', 'date', 'updatedAt', 'workDoneMinutes']);
+        expect(Object.keys(entry).sort()).toEqual(['completedCount', 'completedTasks', 'date', 'source', 'updatedAt', 'workDoneMinutes']);
+        expect(['canonical', 'legacy', 'none']).toContain(entry.source);
         for (const t of entry.completedTasks) expect(Object.keys(t).sort()).toEqual(['estimatedMinutes', 'taskId', 'title']);
         expect(typeof entry.completedCount).toBe('number');
         expect(typeof entry.workDoneMinutes).toBe('number');
         expect(entry.updatedAt === null || typeof entry.updatedAt === 'string').toBe(true);
       }
     }
+  });
+
+  it('tells the client which source answered each day: canonical (even all-revoked), legacy (even a stored zero row), none', async () => {
+    const live = seedTask('Live');
+    await put(String(live._id), completeEvent('c1', new Date(Date.now() - 2 * MIN)));
+    const undone = seedTask('Undone');
+    const earlier = new Date(Date.now() - DAY);
+    await put(String(undone._id), completeEvent('c2', earlier));
+    await put(String(undone._id), undoEvent('c2'));
+    legacy.rows.push(legacyRow(day(-3), ['Legacy']), legacyRow(day(-4), []));
+
+    const body = (await history(7)).body;
+    const sourceOn = (date: string) => entryOn(body, date).source;
+
+    expect(sourceOn(today())).toBe('canonical');
+    expect(sourceOn(localDateAt(earlier, IST))).toBe('canonical'); // all revoked: still canonical, reads zero
+    expect(sourceOn(day(-3))).toBe('legacy');
+    expect(sourceOn(day(-4))).toBe('legacy'); // a stored zero row is still a legacy answer
+    expect(sourceOn(day(-5))).toBe('none');
   });
 
   it('keeps the "no record" vs "a record that is zero" distinction: a day with no data has updatedAt null; a canonical day always has one', async () => {

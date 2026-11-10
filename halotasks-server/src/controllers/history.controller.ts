@@ -30,7 +30,14 @@ import {
 // The two sources are never merged, added or deduplicated by task/date: a day is wholly one or the other, so nothing can be
 // counted twice, and a day with canonical data never has its legacy snapshot mixed in. The choice is per day, not per
 // request, so a few new records cannot hide the rest of a week that only the legacy snapshots know about. The response
-// shape is unchanged for every day, whichever source answered it.
+// shape is unchanged for every day, whichever source answered it, plus ONE additive key (Phase 2C): `source` is 'canonical'
+// (answered from CompletionRecords), 'legacy' (a DayHistory snapshot answered) or 'none' (zeros). It exists so a client can
+// tell a day whose history the records own (a legacy PUT for it is acknowledged but never read) from a legacy day; existing
+// clients ignore the key.
+// `updatedAt` of a canonical day is the latest server receipt/revocation time of its records, not a completion time; it only
+// signals "a record exists" (never null for a canonical day). Legacy writes (PUT /api/history/*) are still accepted and stored,
+// but for a canonical day they are not authoritative: they are never read, so a client's unsent local changes to such a day are
+// discarded when it next reconciles, until the client history writes are retired (Phase 2C).
 export const getHistory = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user.id;
@@ -58,6 +65,7 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response, next:
           workDoneMinutes: record.workDoneMinutes,
           completedTasks: record.completedTasks,
           updatedAt: record.updatedAt,
+          source: 'canonical' as const,
         };
       }
       const entry = legacy.get(date);
@@ -67,6 +75,7 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response, next:
         workDoneMinutes: entry?.workDoneMinutes ?? 0,
         completedTasks: entry?.completedTasks ?? [],
         updatedAt: entry?.updatedAt ?? null,
+        source: entry ? ('legacy' as const) : ('none' as const),
       };
     });
 

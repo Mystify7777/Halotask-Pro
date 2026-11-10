@@ -422,6 +422,7 @@ describe('the read contract is preserved: GET /api/history before and after the 
       workDoneMinutes: number;
       completedTasks: { taskId: string; title: string; estimatedMinutes: number }[];
       updatedAt: string | null;
+      source: 'canonical' | 'legacy' | 'none';
     }[];
 
   it('a migration that fails halfway leaves every day reading exactly what it read before (legacy), and the rerun then migrates without a visible change', async () => {
@@ -433,7 +434,7 @@ describe('the read contract is preserved: GET /api/history before and after the 
         { ...row(OLD, [task('a', 'Alpha', 25), task('b', 'Beta', 5), task('c', 'Gamma', 1)]), updatedAt: new Date('2026-11-01T20:00:00Z') },
       );
       const normalise = (entries: Awaited<ReturnType<typeof historyOver>>) =>
-        entries.map((e) => ({ ...e, completedTasks: [...e.completedTasks].sort((x, y) => x.taskId.localeCompare(y.taskId)), updatedAt: e.updatedAt !== null }));
+        entries.map(({ source: _source, ...e }) => ({ ...e, completedTasks: [...e.completedTasks].sort((x, y) => x.taskId.localeCompare(y.taskId)), updatedAt: e.updatedAt !== null })); // `source` is what MAY change: asserted separately
       const before = normalise(await historyOver(today));
 
       let n = 0;
@@ -442,6 +443,7 @@ describe('the read contract is preserved: GET /api/history before and after the 
       expect(failed.rowsFailed).toBe(1);
       expect(realStore.docs).toHaveLength(0);
       expect(normalise(await historyOver(today))).toEqual(before); // never a partial canonical day
+      expect((await historyOver(today)).find((e) => e.date === OLD)?.source).toBe('legacy');
 
       realStore.hooks.failCreate = undefined;
       await realMig.migrateDayHistory(legacy.rows as never, { apply: true, now: new Date() });
@@ -470,9 +472,13 @@ describe('the read contract is preserved: GET /api/history before and after the 
       const after = await historyOver(today);
 
       const normalise = (entries: typeof before) =>
-        entries.map((e) => ({ ...e, completedTasks: [...e.completedTasks].sort((x, y) => x.taskId.localeCompare(y.taskId)), updatedAt: e.updatedAt !== null }));
+        entries.map(({ source: _source, ...e }) => ({ ...e, completedTasks: [...e.completedTasks].sort((x, y) => x.taskId.localeCompare(y.taskId)), updatedAt: e.updatedAt !== null })); // `source` is what MAY change: asserted separately
       expect(normalise(after)).toEqual(normalise(before));
       expect(after.find((e) => e.date === OLD)?.completedCount).toBe(2);
+      // only the answering source changes: migrated days are canonical now, the rest is as it was
+      expect(before.find((e) => e.date === OLD)?.source).toBe('legacy');
+      expect(after.find((e) => e.date === OLD)?.source).toBe('canonical');
+      expect(after.find((e) => e.date === addDays(today, -2))?.source).toBe('legacy');
       // the day is now canonical: the legacy row is no longer consulted for it
       expect(legacy.finds[legacy.finds.length - 1]?.dates).not.toContain(OLD);
       expect(legacy.finds[legacy.finds.length - 1]?.dates).toContain(addDays(today, -2));

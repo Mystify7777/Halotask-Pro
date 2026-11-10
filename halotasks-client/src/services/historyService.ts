@@ -11,8 +11,20 @@ import { getUtcOffsetMinutes, isValidDateKey } from '../utils/localDate';
  */
 export type UpsertOutcome = 'synced' | 'retry' | 'rejected';
 
-/** A server history row. `exists` is false for the zero placeholders the API returns for days with no record. */
-export type ServerHistoryEntry = { entry: HistoryEntry; exists: boolean };
+/**
+ * Which source answered a day (Issue #47, Phase 2C):
+ *  - 'canonical' the server's completion records own the day; a legacy snapshot PUT for it is acknowledged but never read,
+ *  - 'legacy'    a DayHistory snapshot answered (merge-by-id and push apply as before),
+ *  - 'none'      the server knows nothing about the day.
+ */
+export type HistorySource = 'canonical' | 'legacy' | 'none';
+
+/**
+ * A server history row. `exists` is false for the zero placeholders the API returns for days with no record.
+ * `source` is null when the server did not say (an older server, or a value this client does not know): the client then
+ * behaves exactly as it did before the key existed.
+ */
+export type ServerHistoryEntry = { entry: HistoryEntry; exists: boolean; source: HistorySource | null };
 
 const toPayload = (entry: HistoryEntry) => ({
   date: entry.date,
@@ -63,6 +75,7 @@ const parseServerEntry = (raw: unknown): ServerHistoryEntry | null => {
 
   return {
     exists: typeof r.updatedAt === 'string' && r.updatedAt.length > 0,
+    source: r.source === 'canonical' || r.source === 'legacy' || r.source === 'none' ? r.source : null,
     entry: {
       date: r.date,
       completedCount: r.completedCount,

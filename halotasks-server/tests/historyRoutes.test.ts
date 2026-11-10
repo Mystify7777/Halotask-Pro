@@ -126,8 +126,8 @@ describe('GET /api/history — one calendar-date contract', () => {
     const res = await get(ist('2026-09-30', 2));
 
     expect(res.body.history).toEqual([
-      { date: '2026-09-29', completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: '2026-09-29T10:00:00.000Z' },
-      { date: '2026-09-30', completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null },
+      { date: '2026-09-29', completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: '2026-09-29T10:00:00.000Z', source: 'legacy' },
+      { date: '2026-09-30', completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null, source: 'none' },
     ]);
   });
 

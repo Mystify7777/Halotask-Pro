@@ -22,6 +22,7 @@ vi.mock('../services/api', () => ({ apiClient: api }));
 import { useAuthStore } from '../store/authStore';
 import type { Task } from '../types/task';
 import {
+  getUnreconciledCompletions,
   getWeekHistory,
   MAX_COMPLETED_TASKS_PER_DAY,
   mergeDaySnapshots,
@@ -90,6 +91,10 @@ const requests: { method: 'GET' | 'PUT'; url: string; userId: string | null; bod
 let serverOffline = false;
 let rejectWith400 = false;
 let holdPuts: { resolve: () => void }[] | null = null;
+// Days the server owns canonically (Issue #47, Phase 2A): a legacy PUT for one is acknowledged (200) but changes nothing.
+const canonicalDays = new Set<string>();
+// What the fake server says in each row's `source` (Phase 2C): false = an older server that does not send the key.
+let emitSource: boolean | 'garbage' = false;
 
 const rowsFor = (userId: string) => {
   if (!serverRows.has(userId)) serverRows.set(userId, new Map());
@@ -124,6 +129,8 @@ beforeEach(() => {
   serverOffline = false;
   rejectWith400 = false;
   holdPuts = null;
+  canonicalDays.clear();
+  emitSource = false;
   serverSkewMs = 0;
   setZone('UTC');
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -144,7 +151,10 @@ beforeEach(() => {
     const rows = rowsFor(userId ?? 'anon');
     const history = Array.from({ length: days }, (_, i) => {
       const date = addDays(endDate, -(days - 1 - i));
-      return rows.get(date) ?? { date, completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null };
+      const row = rows.get(date) ?? { date, completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null };
+      if (!emitSource) return row;
+      const source = emitSource === 'garbage' ? 'mystery' : canonicalDays.has(date) ? 'canonical' : rows.has(date) ? 'legacy' : 'none';
+      return { ...row, source };
     });
     return { data: { history } };
   });
@@ -161,6 +171,7 @@ beforeEach(() => {
     const todayStr = serverToday(body.utcOffsetMinutes);
     const okDate = isToday ? date === todayStr : date >= addDays(todayStr, -6) && date <= todayStr;
     if (!okDate) throw badRequest(isToday ? 'DATE_NOT_TODAY' : 'DATE_OUT_OF_RANGE');
+    if (canonicalDays.has(date)) return { data: { entry: body } }; // acknowledged, not stored: CompletionRecord owns the day
     // Replace semantics, exactly like the real API (the offset is validated, not stored).
     const { completedCount, workDoneMinutes, completedTasks } = body as Row;
     rowsFor(userId ?? 'anon').set(date, { date, completedCount, workDoneMinutes, completedTasks, updatedAt: new Date().toISOString() });
@@ -225,6 +236,442 @@ describe('server recovery', () => {
 });
 
 // ── Offline-first ───────────────────────────────────────────────────────────
+
+describe('a server that does not say which source answered (Issue #47, Phase 2A behaviour, unchanged)', () => {
+  it('a local snapshot with an extra task is pushed and acknowledged, but the server keeps the canonical day, and the next reconcile converges to it', async () => {
+    login(USER_A);
+    seedServer('user-a', '2026-09-30', [{ id: 'canon' }]);
+    canonicalDays.add('2026-09-30'); // the server answers this day from CompletionRecords and ignores legacy writes for it
+    serverOffline = true;
+    await updateTodaySnapshot([task('canon', '2026-09-30T05:00:00Z', 10), task('extra', '2026-09-30T05:10:00Z', 10)]);
+    await flush();
+
+    serverOffline = false;
+    advance(20_000);
+    await getWeekHistory();
+    await settle();
+
+    // The merged snapshot was pushed and acknowledged (200), yet the server's day is unchanged.
+    expect(puts().length).toBeGreaterThan(0);
+    expect(rowsFor('user-a').get('2026-09-30')?.completedTasks.map((t) => t.taskId)).toEqual(['canon']);
+
+    // The acknowledged local copy yields to the server on the next reconcile: the extra legacy completion is discarded.
+    resetHistoryState();
+    advance(20_000);
+    const week = await getWeekHistory();
+    await settle();
+    expect(today(week).completedTasks.map((t) => t.id)).toEqual(['canon']);
+    expect(today(week).completedCount).toBe(1);
+
+    // And it stays converged: a further reconcile neither resurrects the extra task nor pushes anything new.
+    const before = puts().length;
+    resetHistoryState();
+    advance(20_000);
+    const again = await getWeekHistory();
+    await settle();
+    expect(today(again).completedTasks.map((t) => t.id)).toEqual(['canon']);
+    expect(puts().length).toBe(before);
+  });
+});
+
+// ── Issue #47, Phase 2C: the canonical data layer ───────────────────────────────────────────────────────────────────────
+// A day the server answers from CompletionRecords is `source: 'canonical'`. The client lets it win, never merges legacy data
+// back into it, never pushes a legacy snapshot for it (the server would acknowledge and ignore it), and keeps what THIS
+// device recorded and the canonical day lacks in `unreconciled` instead of dropping it. Consumers still get plain HistoryEntry.
+
+describe('canonical history data layer (Issue #47, Phase 2C)', () => {
+  const D = '2026-09-30';
+  const doneToday = (id: string, est = 10) => task(id, '2026-09-30T05:00:00Z', est);
+  const ids = (e: { completedTasks: { id: string }[] }) => e.completedTasks.map((t) => t.id);
+  const stored = () => JSON.stringify(historyKeys().map((k) => idb.get(k)));
+  const reconcileAgain = async () => {
+    resetHistoryState(); // a new session
+    advance(20_000);
+    const week = await getWeekHistory();
+    await settle();
+    return week;
+  };
+  const makeCanonical = (userId: string, date: string, tasks: { id: string }[]) => {
+    seedServer(userId, date, tasks);
+    canonicalDays.add(date);
+  };
+
+  beforeEach(() => {
+    emitSource = true;
+    login(USER_A);
+  });
+
+  it('canonical server + stale local mirror + unsent local completion: canonical wins, the unsent one is kept aside (not shown, not pushed, not lost), and later reconciles converge', async () => {
+    // 1. this device mirrored the day from the server while it was still a legacy snapshot [canon, stale]
+    seedServer('user-a', D, [{ id: 'canon' }, { id: 'stale' }]);
+    await getWeekHistory();
+    // 2. offline, the user completes a task of their own
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await flush();
+    // 3. meanwhile the server's day became canonical: [canon] only
+    serverOffline = false;
+    makeCanonical('user-a', D, [{ id: 'canon' }]);
+    advance(20_000);
+    resetHistoryState();
+
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(ids(today(week))).toEqual(['canon']); // canonical acknowledged state wins: neither stale nor mine is shown
+    expect(today(week).completedCount).toBe(1);
+    expect(puts()).toHaveLength(0); // a legacy PUT for a canonical day would be acknowledged and then ignored
+    expect(await getUnreconciledCompletions()).toEqual([{ date: D, tasks: [{ id: 'mine', title: 'Task mine', estimatedMinutes: 10 }] }]); // kept, and 'stale' (not this device's) is not
+
+    // the canonical day is resolved, not left pending: it is not retried on every read
+    const entry = (idb.get(historyKeys()[0]) as { date: string; pendingSync?: boolean }[]).find((e) => e.date === D);
+    expect(entry?.pendingSync).toBe(false);
+    const getsBefore = requests.filter((r) => r.method === 'GET').length;
+    advance(20_000);
+    await getWeekHistory();
+    await settle();
+    expect(requests.filter((r) => r.method === 'GET')).toHaveLength(getsBefore);
+
+    // 4. converges: the same state, byte for byte, however often it reconciles
+    const settled = stored();
+    for (let i = 0; i < 3; i += 1) {
+      expect(ids(today(await reconcileAgain()))).toEqual(['canon']);
+      expect(stored()).toBe(settled);
+    }
+    expect(puts()).toHaveLength(0);
+
+    // 5. once the canonical day lists it, nothing is waiting any more
+    makeCanonical('user-a', D, [{ id: 'canon' }, { id: 'mine' }]);
+    const later = await reconcileAgain();
+    expect(ids(today(later)).sort()).toEqual(['canon', 'mine']);
+    expect(await getUnreconciledCompletions()).toEqual([]);
+  });
+
+  it('a later local edit does not discard what is waiting, and un-completing the task does', async () => {
+    makeCanonical('user-a', D, [{ id: 'canon' }]);
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle(); // the offline reconcile started by the update must finish before the server comes back
+    serverOffline = false;
+    advance(20_000);
+    await getWeekHistory();
+    await settle();
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toEqual(['mine']);
+
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine'), doneToday('another')]); // an edit elsewhere in the list
+    await settle();
+    expect(ids(today(await getWeekHistory()))).toEqual(['canon']);
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id).sort()).toEqual(['another', 'mine']);
+
+    await updateTodaySnapshot([doneToday('canon')]); // the user un-completes both
+    await settle();
+    await reconcileAgain();
+    expect(await getUnreconciledCompletions()).toEqual([]);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('what is waiting stays observable across local edits even while the server is unreachable (no reconcile needed)', async () => {
+    makeCanonical('user-a', D, [{ id: 'canon' }]);
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle();
+    serverOffline = false;
+    advance(20_000);
+    await getWeekHistory();
+    await settle();
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toEqual(['mine']);
+
+    serverOffline = true;
+    advance(20_000);
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine'), doneToday('unrelated')]);
+    await settle();
+
+    // 'mine' is still listed although nothing could be reconciled; the new local completion is simply pending
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toContain('mine');
+  });
+
+  describe('acknowledged completions are not "unsent" (review: acknowledged -> remotely revoked)', () => {
+    /** This device completes T online; the canonical day lists it, so the server has acknowledged T canonically. */
+    const completeAndAcknowledge = async (...extra: string[]) => {
+      makeCanonical('user-a', D, [{ id: 'T' }, ...extra.map((id) => ({ id }))]);
+      await updateTodaySnapshot([doneToday('T'), ...extra.map((id) => doneToday(id))]);
+      await settle();
+      expect(ids(today(await getWeekHistory()))).toEqual(['T', ...extra]);
+      expect(await getUnreconciledCompletions()).toEqual([]);
+    };
+
+    it('complete locally -> canonical acknowledgement -> another device revokes T -> reconcile: history stays canonical and empty, T is NOT unreconciled, nothing is pushed, and it is stable', async () => {
+      await completeAndAcknowledge();
+
+      makeCanonical('user-a', D, []); // another device un-completed T: the record is revoked, the day reads zero
+
+      const first = await reconcileAgain();
+      expect(today(first)).toEqual({ date: D, completedCount: 0, workDoneMinutes: 0, completedTasks: [] });
+      expect(await getUnreconciledCompletions()).toEqual([]);
+      expect(puts()).toHaveLength(0);
+
+      const settled = stored();
+      for (let i = 0; i < 4; i += 1) {
+        expect(today(await reconcileAgain()).completedCount).toBe(0);
+        expect(await getUnreconciledCompletions()).toEqual([]);
+        expect(stored()).toBe(settled);
+      }
+      expect(puts()).toHaveLength(0);
+    });
+
+    it('the same holds when this device edits something else in between (its task list still shows T until it syncs): only the genuinely new completion is waiting', async () => {
+      await completeAndAcknowledge();
+      makeCanonical('user-a', D, []);
+
+      await updateTodaySnapshot([doneToday('T'), doneToday('U')]); // T is stale locally; U is a new, unsent completion
+      await settle();
+      await reconcileAgain();
+
+      expect((await getUnreconciledCompletions()).flatMap((e) => e.tasks.map((t) => t.id))).toEqual(['U']);
+      expect(ids(today(await reconcileAgain()))).toEqual([]);
+      expect((await getUnreconciledCompletions()).flatMap((e) => e.tasks.map((t) => t.id))).toEqual(['U']);
+      expect(puts()).toHaveLength(0);
+    });
+
+    it('after the revocation reaches this device, completing T AGAIN is a new completion: it waits (it is not confused with the acknowledged one)', async () => {
+      await completeAndAcknowledge();
+      makeCanonical('user-a', D, []); // revoked remotely
+      await updateTodaySnapshot([]); // the task list syncs: T is no longer completed here
+      await settle();
+      await reconcileAgain();
+      expect(await getUnreconciledCompletions()).toEqual([]);
+
+      await updateTodaySnapshot([doneToday('T')]); // the user completes T again: a new transition
+      await settle();
+      await reconcileAgain();
+
+      expect((await getUnreconciledCompletions()).flatMap((e) => e.tasks.map((t) => t.id))).toEqual(['T']);
+      expect(ids(today(await getWeekHistory()))).toEqual([]);
+      expect(puts()).toHaveLength(0);
+    });
+
+    it('an unsent completion that the canonical day LATER lists is acknowledged by that, so a later revoke does not bring it back', async () => {
+      makeCanonical('user-a', D, [{ id: 'other' }]);
+      serverOffline = true;
+      await updateTodaySnapshot([doneToday('mine')]);
+      await settle();
+      serverOffline = false;
+      await reconcileAgain();
+      expect((await getUnreconciledCompletions()).flatMap((e) => e.tasks.map((t) => t.id))).toEqual(['mine']); // genuinely unsent
+
+      makeCanonical('user-a', D, [{ id: 'other' }, { id: 'mine' }]); // the server now has it
+      await reconcileAgain();
+      expect(await getUnreconciledCompletions()).toEqual([]);
+
+      makeCanonical('user-a', D, [{ id: 'other' }]); // and now it is revoked remotely
+      await reconcileAgain();
+      expect(await getUnreconciledCompletions()).toEqual([]);
+      expect(puts()).toHaveLength(0);
+    });
+
+    it('a completion that was only acknowledged by the LEGACY snapshot and was never listed canonically is still reported (the client cannot tell it from an unsent one)', async () => {
+      emitSource = false; // while the day is legacy the server does not need to say anything
+      await updateTodaySnapshot([doneToday('legacy-acked')]);
+      await settle();
+      expect(puts()).toHaveLength(1); // pushed and acknowledged as a legacy snapshot
+      emitSource = true;
+      makeCanonical('user-a', D, [{ id: 'someone-else' }]); // the day became canonical without it
+
+      await reconcileAgain();
+
+      expect((await getUnreconciledCompletions()).flatMap((e) => e.tasks.map((t) => t.id))).toEqual(['legacy-acked']);
+      expect(puts()).toHaveLength(1); // nothing more was pushed
+    });
+  });
+
+  it('a deleted task stays in a canonical day: this device\'s removal is not applied to the records', async () => {
+    seedServer('user-a', D, [{ id: 'canon' }, { id: 'gone' }]);
+    await getWeekHistory();
+    await updateTodaySnapshot([doneToday('canon'), doneToday('gone')]);
+    await updateTodaySnapshot([doneToday('canon')]); // 'gone' is deleted / un-completed locally: a pending removal
+    await settle();
+    makeCanonical('user-a', D, [{ id: 'canon' }, { id: 'gone' }]);
+    puts().length = 0;
+    requests.length = 0;
+
+    const week = await reconcileAgain();
+
+    expect(ids(today(week)).sort()).toEqual(['canon', 'gone']);
+    expect(puts()).toHaveLength(0);
+    expect(await getUnreconciledCompletions()).toEqual([]);
+    expect(ids(today(await reconcileAgain())).sort()).toEqual(['canon', 'gone']); // and it stays
+  });
+
+  it('complete -> uncomplete -> complete offline reads as ONE completion of the task, never doubled, and other days stay separate', async () => {
+    const yesterday = addDays(D, -1);
+    makeCanonical('user-a', yesterday, [{ id: 'T' }]); // the same task was completed yesterday too (its own, earlier record)
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('T')]);
+    await updateTodaySnapshot([]); // uncompleted
+    await updateTodaySnapshot([doneToday('T')]); // completed again
+    serverOffline = false;
+    makeCanonical('user-a', D, [{ id: 'T' }]);
+    advance(20_000);
+    resetHistoryState();
+
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(ids(today(week))).toEqual(['T']);
+    expect(today(week).completedCount).toBe(1);
+    expect(ids(week[week.length - 2])).toEqual(['T']); // yesterday keeps its own entry
+    expect(puts()).toHaveLength(0);
+    expect(await getUnreconciledCompletions()).toEqual([]);
+  });
+
+  it('a canonical day whose completions were all revoked reads zero: neither a stale mirror nor a pending local copy resurrects it', async () => {
+    seedServer('user-a', D, [{ id: 'a' }, { id: 'b' }]);
+    await getWeekHistory(); // acknowledged legacy mirror [a, b]
+    makeCanonical('user-a', D, []); // every completion revoked: canonical and empty (updatedAt set)
+
+    const week = await reconcileAgain();
+
+    expect(today(week)).toEqual({ date: D, completedCount: 0, workDoneMinutes: 0, completedTasks: [] });
+    expect(puts()).toHaveLength(0);
+    expect(await getUnreconciledCompletions()).toEqual([]); // 'a' and 'b' were mirrored, not this device's own
+
+    // pending local copy of the same day: still zero, kept aside, never pushed
+    await updateTodaySnapshot([doneToday('mine')]);
+    await settle();
+    const again = await reconcileAgain();
+    expect(today(again).completedCount).toBe(0);
+    expect(puts()).toHaveLength(0);
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toEqual(['mine']);
+  });
+
+  it('an offline completion survives until it is acknowledged: kept through failed attempts, then pushed once on a legacy day', async () => {
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('offline-1')]);
+    for (let i = 0; i < 2; i += 1) {
+      expect(ids(today(await getWeekHistory()))).toEqual(['offline-1']); // visible locally while unreachable
+      resetHistoryState();
+      advance(20_000);
+    }
+    expect(puts()).toHaveLength(0);
+
+    serverOffline = false;
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(ids(today(week))).toEqual(['offline-1']);
+    expect(puts()).toHaveLength(1); // a 'none' day is a legacy day: the snapshot is delivered as before
+    expect(rowsFor('user-a').get(D)?.completedTasks.map((t) => t.taskId)).toEqual(['offline-1']);
+  });
+
+  it('an offline completion on a day that turned canonical meanwhile is not lost either: it moves to the unreconciled list', async () => {
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('offline-1')]);
+    await settle();
+    serverOffline = false;
+    makeCanonical('user-a', D, [{ id: 'other-device' }]);
+    advance(20_000);
+    resetHistoryState();
+
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(ids(today(week))).toEqual(['other-device']);
+    expect(puts()).toHaveLength(0);
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toEqual(['offline-1']);
+  });
+
+  it('legacy and empty days are untouched by the source key: pending work is merged and pushed exactly as before', async () => {
+    seedServer('user-a', D, [{ id: 'server-task' }]); // a legacy snapshot
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('local-task')]);
+    serverOffline = false;
+    advance(20_000);
+    resetHistoryState();
+
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(ids(today(week)).sort()).toEqual(['local-task', 'server-task']);
+    expect(puts()).toHaveLength(1);
+    expect(rowsFor('user-a').get(D)?.completedTasks.map((t) => t.taskId).sort()).toEqual(['local-task', 'server-task']);
+    expect(await getUnreconciledCompletions()).toEqual([]);
+  });
+
+  it('two devices: a second device with its own unsent work and a stale mirror does not reintroduce legacy records into a canonical day', async () => {
+    // device 1 already delivered a legacy snapshot; device 2 is a different browser with its own local state
+    seedServer('user-a', D, [{ id: 'from-device-1' }, { id: 'legacy-only' }]);
+    await getWeekHistory(); // device 2 mirrors the legacy day
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('device-2-task')]);
+    await settle();
+    serverOffline = false;
+    makeCanonical('user-a', D, [{ id: 'from-device-1' }]); // the records know only this one
+
+    const week = await reconcileAgain();
+
+    expect(ids(today(week))).toEqual(['from-device-1']); // 'legacy-only' is NOT brought back
+    expect(puts()).toHaveLength(0);
+    expect((await getUnreconciledCompletions())[0].tasks.map((t) => t.id)).toEqual(['device-2-task']);
+    expect(ids(today(await reconcileAgain()))).toEqual(['from-device-1']); // and it stays that way
+  });
+
+  it('keeps the consumer contract: exactly 7 entries of exactly the old shape, with no internal fields, even while completions are waiting', async () => {
+    makeCanonical('user-a', D, [{ id: 'canon' }]);
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle(); // the offline reconcile started by the update must finish before the server comes back
+    serverOffline = false;
+    advance(20_000);
+    resetHistoryState();
+
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(week).toHaveLength(7);
+    for (const entry of week) {
+      expect(Object.keys(entry).sort()).toEqual(['completedCount', 'completedTasks', 'date', 'workDoneMinutes']);
+      for (const t of entry.completedTasks) expect(Object.keys(t).sort()).toEqual(['estimatedMinutes', 'id', 'title']);
+    }
+    expect(today(week)).toEqual({ date: D, completedCount: 1, workDoneMinutes: 10, completedTasks: [{ id: 'canon', title: 'Task canon', estimatedMinutes: 10 }] });
+  });
+
+  it('an unknown `source` value is ignored: the client behaves as it does against a server that does not send the key', async () => {
+    emitSource = 'garbage';
+    canonicalDays.add(D); // the server ignores legacy PUTs for it, but the client was not told
+    seedServer('user-a', D, [{ id: 'canon' }]);
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle(); // the offline reconcile started by the update must finish before the server comes back
+    serverOffline = false;
+    advance(20_000);
+    resetHistoryState();
+
+    await getWeekHistory();
+    await settle();
+
+    expect(puts().length).toBeGreaterThan(0); // legacy behaviour: merged and pushed
+    expect(await getUnreconciledCompletions()).toEqual([]);
+  });
+
+  it('stored unreconciled data is validated when read back (a damaged record cannot break history)', async () => {
+    makeCanonical('user-a', D, [{ id: 'canon' }]);
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle(); // the offline reconcile started by the update must finish before the server comes back
+    serverOffline = false;
+    advance(20_000);
+    resetHistoryState();
+    await getWeekHistory();
+    await settle();
+
+    const key = historyKeys()[0];
+    const entries = idb.get(key) as { date: string; unreconciled?: unknown }[];
+    idb.set(key, entries.map((e) => (e.date === D ? { ...e, unreconciled: [{ id: 5 }, null, 'x', { id: 'ok', title: 't', estimatedMinutes: 1 }] } : e)));
+
+    expect(await getUnreconciledCompletions()).toEqual([{ date: D, tasks: [{ id: 'ok', title: 't', estimatedMinutes: 1 }] }]);
+    expect(ids(today(await getWeekHistory()))).toEqual(['canon']);
+  });
+});
 
 describe('local-only offline history', () => {
   it('records and shows work with no server, and never throws', async () => {

@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2C: client data layer for canonical history
+
+**2026-11-10 · Frontend · completed · Priority: high**
+
+The client history layer now understands days the server answers from CompletionRecords. GET /api/history gains one additive key per entry, `source` ('canonical'|'legacy'|'none'); the client parses it (missing or unknown = old behaviour). For a canonical day, reconcile lets the server win (also over a pending local copy and for an all-revoked zero day), never merges legacy data back, never pushes (a legacy PUT would be acknowledged and ignored), does not apply local removals, and keeps this device's own completions that the canonical day lacks in an internal `unreconciled` list (getUnreconciledCompletions) instead of dropping them. Legacy/none days, the 7-day mirror, snapshot derivation and legacy writes are unchanged, and consumers (Insights, Dashboard, SmartSections) still receive the exact old HistoryEntry shape. Not the read switch and not the retirement of legacy writes. Adds 12 client tests (canonical data layer), service parse tests, server `source` tests, 11 client mutation checks, and documents the contract and limits in docs/context.md. Review fix: a completion the canonical day listed while it stayed continuously completed on this device is acknowledged (canonicalAckIds), so a later remote revoke cannot turn it into an unreconciled entry; the acknowledgement ends when the device stops completing the task, so a re-completion is a new waiting transition (5 regression tests, 18 mutation checks).
+
 #### Issue #47 phase 2B: migrate legacy DayHistory into migrated CompletionRecords
 
 **2026-11-09 · Backend · completed · Priority: high**

@@ -80,6 +80,21 @@ type StoredHistoryEntry = HistoryEntry & {
   ownTaskIds?: string[];
   /** Task ids this device un-completed/deleted since the server last acknowledged; subtracted when merging. */
   removedTaskIds?: string[];
+  /**
+   * Completions THIS device recorded for a day whose history the server owns canonically (CompletionRecords) that the
+   * canonical day does not contain. They are neither shown (the canonical day wins), nor pushed (a legacy PUT for a canonical
+   * day is acknowledged but never read), nor dropped: they stay here until the canonical day lists them, or the device
+   * un-completes/deletes the task. Internal; never part of HistoryEntry.
+   */
+  unreconciled?: CompletedTask[];
+  /**
+   * Own task ids that a CANONICAL answer has listed for this day while they stayed continuously completed on this device
+   * (they leave the set the moment the device stops completing the task). Such a completion has been acknowledged by the
+   * canonical day: if its record is later revoked (another device un-completed the task) that is the server's decision,
+   * not an unsent completion, so it must never be reported as `unreconciled`. A completion the user makes AGAIN after
+   * un-completing is a new transition and is not in this set.
+   */
+  canonicalAckIds?: string[];
 };
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -173,6 +188,13 @@ export const applyDerivedSnapshot = (
     ownTaskIds: [...derivedIds],
   };
   if (removedTaskIds.length > 0) next.removedTaskIds = removedTaskIds;
+  // Local edits never discard what is waiting on a canonical day (only the device's own removal does).
+  const waiting = (previous?.unreconciled ?? []).filter((t) => !removed.has(t.id));
+  if (waiting.length > 0) next.unreconciled = waiting;
+  // An acknowledgement belongs to ONE continuous completion: it is kept only while the device keeps the task completed.
+  const previousOwn = new Set(previous?.ownTaskIds ?? []);
+  const acknowledged = (previous?.canonicalAckIds ?? []).filter((id) => derivedIds.has(id) && previousOwn.has(id));
+  if (acknowledged.length > 0) next.canonicalAckIds = acknowledged;
   return next;
 };
 
@@ -192,6 +214,18 @@ const withLock = <T>(fn: () => Promise<T>): Promise<T> => {
 const stringArray = (value: unknown): string[] | undefined =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : undefined;
 
+const completedTaskArray = (value: unknown): CompletedTask[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const tasks: CompletedTask[] = [];
+  for (const t of value) {
+    if (typeof t !== 'object' || t === null) continue;
+    const task = t as Record<string, unknown>;
+    if (typeof task.id !== 'string' || typeof task.title !== 'string' || typeof task.estimatedMinutes !== 'number' || !Number.isFinite(task.estimatedMinutes)) continue;
+    tasks.push({ id: task.id, title: task.title, estimatedMinutes: task.estimatedMinutes });
+  }
+  return tasks.slice(0, MAX_COMPLETED_TASKS_PER_DAY);
+};
+
 const normalizeStored = (value: unknown): StoredHistoryEntry | null => {
   if (typeof value !== 'object' || value === null) return null;
   const e = value as Record<string, unknown>;
@@ -207,10 +241,15 @@ const normalizeStored = (value: unknown): StoredHistoryEntry | null => {
   const entry = value as StoredHistoryEntry;
   const own = stringArray(e.ownTaskIds);
   const removed = stringArray(e.removedTaskIds);
+  const waiting = completedTaskArray(e.unreconciled);
+  const acknowledged = stringArray(e.canonicalAckIds);
+  const { unreconciled: _raw, canonicalAckIds: _rawAck, ...rest } = entry;
   return {
-    ...entry,
+    ...rest,
+    ...(acknowledged && acknowledged.length > 0 ? { canonicalAckIds: acknowledged.slice(-MAX_COMPLETED_TASKS_PER_DAY) } : {}),
     ...(own ? { ownTaskIds: own } : {}),
     ...(removed ? { removedTaskIds: removed } : {}),
+    ...(waiting && waiting.length > 0 ? { unreconciled: waiting } : {}),
   };
 };
 
@@ -327,11 +366,39 @@ const reconcile = async (userId: string): Promise<boolean> => {
   await withLock(async () => {
     const byDate = new Map((await readLocal(userId)).map((e) => [e.date, e]));
 
-    for (const { entry: serverEntry, exists } of server) {
+    for (const { entry: serverEntry, exists, source } of server) {
       const date = serverEntry.date;
       const local = byDate.get(date);
 
-      if (local?.pendingSync) {
+      if (source === 'canonical') {
+        // 0. The server's completion records own this day: the canonical answer wins, whatever the local copy says
+        //    (acknowledged or pending, even when the canonical day is empty because every completion was revoked).
+        //    Nothing is merged back from the local copy, removals are not applied to it (deleting a task does not erase
+        //    history), and nothing is pushed: a legacy PUT for this day would be acknowledged and then ignored. What THIS
+        //    device recorded and the canonical day lacks is kept aside, not dropped.
+        const canonicalIds = new Set(serverEntry.completedTasks.map((t) => t.id));
+        const own = new Set(local?.ownTaskIds ?? []);
+        const removed = new Set(local?.removedTaskIds ?? []);
+        const acknowledged = new Set(local?.canonicalAckIds ?? []);
+        const candidates = new Map<string, CompletedTask>();
+        for (const t of local?.unreconciled ?? []) candidates.set(t.id, t);
+        for (const t of local?.completedTasks ?? []) if (own.has(t.id)) candidates.set(t.id, t);
+        // "Waiting" means: recorded here and NEVER listed by the canonical day since it was completed. One that the canonical
+        // day did list and later lost was acknowledged and then revoked by the server: not an unsent completion.
+        const unreconciled = [...candidates.values()]
+          .filter((t) => !canonicalIds.has(t.id) && !removed.has(t.id) && !acknowledged.has(t.id))
+          .slice(0, MAX_COMPLETED_TASKS_PER_DAY);
+        const nowAcknowledged = [...new Set([...acknowledged, ...[...canonicalIds].filter((id) => own.has(id))])].slice(-MAX_COMPLETED_TASKS_PER_DAY);
+
+        byDate.set(date, {
+          ...serverEntry,
+          pendingSync: false,
+          rev: local?.rev ?? 0,
+          ownTaskIds: local?.ownTaskIds ?? [],
+          ...(unreconciled.length > 0 ? { unreconciled } : {}),
+          ...(nowAcknowledged.length > 0 ? { canonicalAckIds: nowAcknowledged } : {}),
+        });
+      } else if (local?.pendingSync) {
         // 1. Unacknowledged local changes: merge by task id, never replace the server row.
         const base = exists ? serverEntry : null;
         const merged = mergeDaySnapshots(base, { entry: toPlainEntry(local), removedTaskIds: local.removedTaskIds });
@@ -519,6 +586,24 @@ export const getWeekHistory = async (): Promise<WeekHistory> => {
     return result;
   } catch (err) {
     console.warn('[history] Failed to read history:', err);
+    return [];
+  }
+};
+
+/**
+ * getUnreconciledCompletions — what this device recorded for days the server owns canonically but the canonical day does
+ * not list (oldest first). Nothing in the UI shows it yet; it exists so that this state is observable and testable instead
+ * of silently discarded, and for the read switch to decide what to do with it.
+ */
+export const getUnreconciledCompletions = async (): Promise<{ date: string; tasks: CompletedTask[] }[]> => {
+  try {
+    const userId = getCurrentUserId();
+    if (!userId) return [];
+    return (await readLocal(userId))
+      .filter((e) => (e.unreconciled?.length ?? 0) > 0)
+      .map((e) => ({ date: e.date, tasks: e.unreconciled as CompletedTask[] }));
+  } catch (err) {
+    console.warn('[history] Failed to read unreconciled completions:', err);
     return [];
   }
 };

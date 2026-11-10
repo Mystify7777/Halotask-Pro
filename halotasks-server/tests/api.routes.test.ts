@@ -457,7 +457,7 @@ describe('HaloTasks API routes', () => {
       const history = await request(app).get(`/api/history?days=1&endDate=${day}&utcOffsetMinutes=0`).set(auth(b.token));
       expect(history.status).toBe(200);
       expect(history.body.history).toEqual([
-        { date: day, completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null },
+        { date: day, completedCount: 0, workDoneMinutes: 0, completedTasks: [], updatedAt: null, source: 'none' },
       ]);
 
       const tree = await request(app).get('/api/tree').set(auth(b.token));

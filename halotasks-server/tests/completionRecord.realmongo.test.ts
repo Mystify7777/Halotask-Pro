@@ -468,10 +468,14 @@ describe('real MongoDB: opposing transitions (Issue #47, Phase 1B)', () => {
     const res = await get();
 
     expect(res.status).toBe(200);
-    const byDate = new Map<string, { completedTasks: { title: string }[]; completedCount: number }>(res.body.history.map((e: { date: string }) => [e.date, e]));
+    const byDate = new Map<string, { completedTasks: { title: string }[]; completedCount: number; source: string }>(res.body.history.map((e: { date: string }) => [e.date, e]));
     expect(byDate.get(localDateAt(new Date(Date.now() - MIN), IST))?.completedTasks.map((t) => t.title)).toEqual(['Write report']);
     expect(byDate.get(addDays(today, -2))?.completedTasks.map((t) => t.title)).toEqual(['Legacy older']);
     expect(byDate.get(addDays(today, -1))?.completedCount).toBe(0);
+    // Phase 2C: each day says which source answered it
+    expect(byDate.get(localDateAt(new Date(Date.now() - MIN), IST))?.source).toBe('canonical');
+    expect(byDate.get(addDays(today, -2))?.source).toBe('legacy');
+    expect(byDate.get(addDays(today, -1))?.source).toBe('none');
   });
 
   describe('fault injection: inspect the task, the records and the award state after the failed request AND after the retry', () => {

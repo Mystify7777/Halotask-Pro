@@ -792,6 +792,60 @@ invariant. (d) Evidence: `tests/completionMigration.test.ts` (41, Mongo-free, tr
 rollback of a mid-day failure, concurrent runs; typechecked, **not run** where it was written: needs a MongoDB binary). Nothing has been run against
 production-shaped data.
 
+### Client History Data Layer: Canonical Days (Issue #47, Phase 2C)
+
+Phase 2C teaches the client's history layer (`offline/history.ts`, `services/historyService.ts`) about days the server answers from
+`CompletionRecord`s. It is **not** the read switch and **not** the retirement of legacy writes: the client still derives its snapshot from its
+task list, still mirrors 7 days, and still pushes legacy snapshots for every day that is not canonical. Insights, the Dashboard and
+SmartSections still get exactly the old `WeekHistory` shape (`HistoryEntry`: `date`, `completedCount`, `workDoneMinutes`,
+`completedTasks[{id,title,estimatedMinutes}]`); internal fields never reach them (a test pins the keys, also while completions are waiting).
+
+**Server contract (additive).** Each `GET /api/history` entry carries one new key, `source`: `canonical` (answered from records, even when every
+completion was revoked and the day reads zero), `legacy` (a `DayHistory` snapshot answered, even a stored zero row) or `none` (zeros). Old clients ignore
+it. Without it a client cannot tell a canonical day (a legacy `PUT` for it is acknowledged with 200 and never read) from a legacy day, which is exactly
+how unsent work used to vanish silently. The client treats a missing or unknown `source` as "not said" and behaves exactly as before.
+
+**Reconciliation rule for `source: 'canonical'`** (runs before every other branch, whether the local copy is acknowledged or pending):
+1. The canonical day **wins**: the stored entry becomes the server's, `pendingSync: false`. Nothing from the local copy is merged back, so a stale
+   legacy mirror (another device's legacy-only tasks, or an all-revoked day's old tasks) is **not resurrected**.
+2. **Nothing is pushed** for the day (the server would acknowledge and ignore it).
+3. This device's own removals are **not applied**: deleting or un-completing a task locally does not erase a canonical record (a completion that
+   happened stays history; the real un-complete reaches the server through the task write, which revokes the record).
+4. What THIS device recorded and **the canonical day has never acknowledged** is **kept aside, not dropped**: `StoredHistoryEntry.unreconciled`.
+   It is not shown and not pushed; it is observable through `getUnreconciledCompletions()`; it survives local edits and later reconciles; it leaves the
+   list when the canonical day starts listing the task, or the device un-completes/deletes it. Tasks that only a *mirror* held (other devices' legacy data)
+   are never put there.
+   **Acknowledgement lifecycle (the invariant).** A completion that the canonical day has listed while it stayed continuously completed on this device is
+   *acknowledged* (`canonicalAckIds`). If its record is later revoked (another device un-completed the task, or the server revoked it), the canonical day
+   losing it is the server's decision, **not** an unsent completion: an acknowledged completion can never become `unreconciled` because its record
+   disappeared. The acknowledgement belongs to one continuous completion: it ends as soon as this device stops completing the task (`applyDerivedSnapshot`),
+   so completing the task again is a new transition and is waiting like any other unsent completion. `ownTaskIds` alone ("completed in this device's task
+   list right now", rewritten on every local snapshot) cannot make this distinction, which is why the acknowledgement is tracked separately; `ownTaskIds`
+   and the legacy removal tracking are unchanged.
+5. **Idempotent**: reconciling again, in any number of sessions, rewrites the same stored state byte for byte and issues no push; a canonical day is
+   resolved (not left pending), so it is not retried on every read.
+
+Not changed: days with `source` `legacy`/`none` or absent (merge by task id, push, heal), the 7-day window, the removal tracking, the queue.
+
+**Why `unreconciled` is only kept, not delivered.** There is nothing the client can deliver for it yet: a completion event needs `completedAt` and a
+`completionId` captured at the transition (design section 5.1), which is the later client event-generation work. Until then these are completions the
+task write recorded server-side as server-observed records (no local day, so they belong to no canonical day), and history for that day cannot show
+them. This is the transitional gap of Phase 2A, now visible instead of silent. Only an event-sending client, or a decision in the read switch, can close it.
+
+**What "waiting" can and cannot mean.** The client only knows what canonical answers told it, so `unreconciled` is "recorded on this device and never
+listed by the canonical day since it was completed", not proof that it was never sent. Two cases are indistinguishable from an unsent completion and are
+reported as such: a completion that was only acknowledged by the *legacy* snapshot (a legacy-day push) and was never listed canonically, and a completion that
+another device revoked before this device ever saw it canonical. Both are harmless (nothing is shown or pushed because of them; the list is local and only
+observable), and telling them apart needs the server to expose revoked ids, which is not part of this phase.
+
+**Known limits.** (a) Canonical days appear in the client's 7-day window only once a client sends completion events (or the migration is run with
+`--include-writable-days`); a default migration only touches days older than the window, which the client never reads. So this layer is exercised
+by tests and server fakes, not by production traffic yet. (b) The `unreconciled` list is per device and local; it is not synced. (c) The check that
+drops removed ids inside the reconcile branch is defence in depth: `applyDerivedSnapshot` already drops them first (a mutation there is equivalent).
+(d) Evidence: `src/offline/history.test.ts` (canonical data layer: 17 tests incl. the acknowledged-then-revoked regression set, plus the unchanged legacy suite), `src/services/historyService.test.ts`, server
+`tests/historyCanonical.routes.test.ts` (`source` values), 18 client mutation checks (all killed except equivalent mutants: the removal check inside the canonical reconcile branch, which `applyDerivedSnapshot` makes redundant; and, for the
+acknowledgement set, keeping an id after the task left `ownTaskIds` and recording non-own canonical ids, both cleared by the continuity check at the next derivation).
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

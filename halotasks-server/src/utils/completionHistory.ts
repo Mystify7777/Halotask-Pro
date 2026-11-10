@@ -22,7 +22,12 @@ export type HistoryDay = {
   completedCount: number;
   workDoneMinutes: number;
   completedTasks: { taskId: string; title: string; estimatedMinutes: number }[];
-  /** The latest write that touched the day (a completion or a revocation); never null for a canonical day. */
+  /**
+   * Canonical days: the latest SERVER receipt/revocation timestamp (`receivedAt` / `revokeReceivedAt`) of any record of the day.
+   * It is NOT the completion time (use `completedAt`-derived order for that), not a "last activity" time, and must not be used
+   * for sorting or display. Its one contract is existence: a canonical day, even an all-revoked zero one, is never null, so
+   * clients can tell "a record exists" from "no record" (legacy and empty days keep their own `updatedAt` / null).
+   */
   updatedAt: Date;
 };
 
