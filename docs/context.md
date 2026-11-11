@@ -875,6 +875,81 @@ a device never fetched while canonical cannot be suppressed by the client (the s
 until a later, separately requested phase. Evidence: `src/offline/history.test.ts` (7 new tests, 88 in the file), `tests/historyCanonical.routes.test.ts` (2 new,
 25 in the file); 6 client mutation checks, all killed (the pre-send re-check by a test that simulates another tab).
 
+### Client Completion Event Pipeline (Issue #47, Phase 2E)
+
+Scope: the smallest client path that sends completion events to the server API that already exists. No server change, no second queue, no Growth change, no
+Insights or History UI change, and no legacy write path removed. Before this phase no production client created a `CompletionRecord`, so the 2C/2D client rules
+(`source`, `unreconciled`, `canonicalAckIds`, `canonicalSeen`) were dormant in production; this phase is what wakes them.
+
+**Audit (before any change).**
+1. *Client transition:* `handleToggleTask` (dashboard checkbox), `handleMarkSelectedComplete` (bulk) and `InsightsPage.handleToggleTask` (online-only) all flipped
+   `completed` as a plain field value. A fourth path is implicit: an offline create followed by a completion merged `completed: true` into the pending create.
+2. *Server contract (already complete):* `PUT /api/tasks/:id` and `POST /api/tasks` accept `completionEvent` (`{completionId, completedAt, utcOffsetMinutes}`
+   with `completed: true`, `{completionId?, revokedAt}` with `completed: false`); `POST /api/completion-events` takes orphaned events only
+   (`{type:'complete'|'revoke', completionId, taskId, ...}`) and answers 409 `COMPLETION_TASK_EXISTS` while the task still exists.
+3. *Idempotency:* the key is `(userId, completionId)`. A repeat of the same event is a `duplicate` no-op; a reused id for a different event, an event more than 90
+   days old or more than 5 minutes ahead is a whole-request 400. One task holds one active completion (the loser is stored superseded).
+4. *Queue:* `sync_queue:<userId>`, entries `create | update | delete`. A plain update merges into any earlier update of the same task, so complete -> un-complete
+   -> complete collapsed to one write; a delete dropped queued updates (and create+delete dropped the create), so a real completion was lost with its task.
+5. *Growth:* only the task write awards (idempotent by task id, after arbitration). Online `applyServerGrowth`, offline `previewGrowthForCompletion` then `onGrowth`
+   on replay. The standalone endpoint never awards. Unchanged by this phase.
+6. *Identifier:* none existed on the client (`completionId` appeared nowhere in `halotasks-client/src`). Introduced here.
+7. *Write paths:* the three writers above, the create+complete merge, and the queue replay. Not writers: the edit form, AI creation, subtask toggles, "clear
+   completed" (it deletes; history must survive that).
+
+**Event lifecycle.** One event is created at the moment of the transition (`makeCompletionTransition`, `offline/completionEvents.ts`) from the LATEST state of the
+task, never a stale render object: `completionId` (UUID, fixed from then on), `completedAt = now`, `utcOffsetMinutes` = the device offset AT that instant
+(DST-correct), plus a title and estimate snapshot so a task deleted before delivery still leaves its completion in history. The same event rides the task write
+online, or is stored as a queue entry offline. It is never rebuilt on retry, reload, replay or local-id remap.
+
+**Transport (no second protocol).**
+- *Online:* the existing `PUT /api/tasks/:id` carries `completionEvent`. A `local-*` task is queued even while online (the server has never seen it).
+- *Offline:* a new queue entry type `completion` (`{kind:'complete'|'revoke', completionId?, completedAt?, utcOffsetMinutes?, revokedAt?, title, estimatedMinutes}`).
+  It never merges into another entry and nothing merges into it; a delete of the task drops plain updates but never a completion entry; the same event
+  (kind + completionId) is stored once. Plain updates keep merging with each other exactly as before.
+- *Online failure (review fix):* the event is created BEFORE the request and the request may have reached the server with only the answer lost, so a failed
+  online write must not drop it (a manual retry would mint a NEW id and the server could hold two completions for one action). On a retryable failure (no
+  answer, 5xx, 408, 429, 401: the queue's own rule, shared in `offline/deliveryErrors.ts`) the dashboard checkbox and bulk complete queue the SAME
+  `transition.entry` that was sent and show the task completed and pending; the retry replays that id, so one action stays one record. A permanent 4xx is not
+  queued (it would only be refused again) and is reported as before. Offline behaviour and queue semantics are unchanged.
+- *Replay:* a `completion` entry goes out as `PUT {completed, completionEvent}` to the resolved server id. On a 404 (task gone) or when the task was created and
+  deleted offline, it goes to `POST /api/completion-events`. A 409 `COMPLETION_TASK_EXISTS` keeps it queued. Any other 4xx refusal (bad window, invalid event)
+  discards only that entry; network and 5xx keep the existing retry behaviour. A malformed stored entry is discarded unsent. An entry waiting behind its own
+  create is re-pointed at the server id when a run stops early (`settleSyncQueue`), and while completion entries wait behind an answer, the UI is shown the
+  server task with those pending completions laid over it, so nothing the user did flashes back as undone.
+
+**Completion vs revocation.** Un-completing is a `revoke` event naming the completion the task holds (`Task.completionId`, now on the client type, set locally at
+completion and adopted from the server's answer). A task completed before records existed holds none: its revoke names nothing and the server revokes whatever
+it holds (best effort, as for any legacy client). Complete -> un-complete -> complete is three entries and three server transitions with three ids.
+
+**Acknowledgement (the rule that matters).** Removing a queue entry means *delivered*, nothing more. It never touches `unreconciled`, `canonicalAckIds` or
+`canonicalSeen`. After a run that delivered completions the dashboard only *asks* for a history reconcile (`requestHistoryReconcile`); a completion becomes
+acknowledged only when a canonical history answer lists the task (2C), exactly as before. So: queued or sent but not listed stays `unreconciled`; once listed it
+is acknowledged and the local copy yields to the server; `canonicalSeen` makes the day canonical for the legacy-write boundary (2D), so no legacy PUT follows.
+
+**Writers.** One function (`makeCompletionTransition`) now decides every transition for the dashboard checkbox, bulk "mark complete" (one distinct event per
+task, built from each task's latest state) and the Insights toggle, so the rule exists once. If a completion cannot be queued (storage failure) the task is left
+as it was: an optimistic flip with no event behind it would be a lie.
+
+**Known limitations.**
+(a) `Task.completedAt` on a task write is still the server's receipt time (unchanged); the local day of an offline completion comes from the event.
+(b) Completions made before this phase have no record until the 2F migration cleanup; legacy-only days keep the legacy path.
+(c) An offline completion older than 90 days, or from a device clock more than 5 minutes ahead, is refused by the approved server window (whole-request 400): the
+entry is discarded, the server state wins on the next refresh, and online the toggle shows the server's error. No fallback to sync time (an approved 1B decision).
+(d) The Insights toggle stays online-only (unchanged); it now carries the event.
+(e) A completion acknowledged only by the legacy snapshot is still reported as unreconciled (2C limit, unchanged).
+(f) A revoke that names no completion for a task that is gone cannot be delivered and is discarded.
+(h) *Metadata snapshot asymmetry (verified against the server).* When the task still exists, the event rides the task write and the server snapshots the title and
+estimate at ACCEPTANCE time (`payload.title ?? currentTask.title`, `payload.estimatedMinutes ?? currentTask.estimatedMinutes`). Only an orphaned event (task gone)
+uses the client's snapshot taken at COMPLETION time. The two differ only if the task was edited between the tap and delivery; the record always shows a title
+the task really had. Not changed here (the server contract is approved); the client snapshot exists for the orphan case.
+(i) The Insights toggle is online-only and is not covered by the online-failure queueing: it reverts on failure, so a lost answer there is not retried with the
+same id. Scope was the dashboard checkbox and bulk complete.
+(g) A queue entry written by a pre-2E client (`update` with `completed`) still replays as a legacy write: a server-observed record of lower fidelity.
+Evidence: `src/offline/completionPipeline.test.ts` (37 tests, a fake server behind the real API client, queue, processor, history and the real dashboard hook, including
+a response-lost case where the server stored the event and the client saw a network error), `src/hooks/useDashboardTasks.completion.test.ts` (8); client suite 60
+files / 1243 tests; server suite unchanged (49 files / 2263 tests without the MongoDB suites); 20 mutation checks, all killed.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

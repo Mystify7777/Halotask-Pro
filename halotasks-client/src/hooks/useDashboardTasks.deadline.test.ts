@@ -270,6 +270,10 @@ describe('editing a task', () => {
 
     await act(() => m.result.current.hook.handleToggleTask(task));
 
-    expect(vi.mocked(taskService.updateTask).mock.calls[0][1]).toEqual({ completed: true });
+    // Only the completion and its event (Issue #47): no deadline field rides along.
+    expect(vi.mocked(taskService.updateTask).mock.calls[0][1]).toEqual({
+      completed: true,
+      completionEvent: { completionId: expect.any(String), completedAt: expect.any(String), utcOffsetMinutes: expect.any(Number) },
+    });
   });
 });

@@ -5,6 +5,8 @@ import { useTaskSelection } from './useTaskSelection';
 import { TaskSortOption, useTaskSorting } from './useTaskSorting';
 import { useTagSuggestions } from './useTagSuggestions';
 import { enqueueSyncAction } from '../offline/syncQueue';
+import { enqueueCompletion, makeCompletionTransition, type CompletionTransition } from '../offline/completionEvents';
+import { isPermanentError } from '../offline/deliveryErrors';
 import { taskService } from '../services/taskService';
 import { Priority, Subtask, Task, TaskCreatePayload, TaskUpdatePayload } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
@@ -293,51 +295,91 @@ export function useDashboardTasks({
     }
   };
 
+  /**
+   * Applies a completion transition to the local task copy, right now: `latestTasksRef` is advanced synchronously (a second tap
+   * in the same tick builds on the first instead of repeating it), and the state and cache follow through persistTasks.
+   */
+  const applyLocalCompletion = (taskId: string, patch: Partial<Task>) => {
+    const updatedAt = new Date().toISOString();
+    latestTasksRef.current = latestTasksRef.current.map((item) =>
+      item._id === taskId ? { ...item, ...patch, updatedAt, pendingSync: true } : item,
+    );
+    persistTasks((current) =>
+      current.map((item) => (item._id === taskId ? { ...item, ...patch, updatedAt, pendingSync: true } : item)),
+    );
+  };
+
+  /**
+   * An online completion write failed. The event was created BEFORE the request and the request may have reached the server
+   * (the answer can be the thing that was lost), so the event must not be dropped with the failed call: a manual retry would
+   * make a NEW id and the server could end up with two completions for one user action. When the failure is one that can
+   * still succeed later (no answer, 5xx, 408, 429, an expired session; the queue's own rule, `isPermanentError`), the SAME
+   * entry is queued, never a rebuilt one, and the task shows what the user did, pending. A permanent 4xx (the server judged
+   * the request itself invalid) is not queued: it would only be refused again.
+   * Returns true when the event is now safely queued.
+   */
+  const queueCompletionAfterFailure = async (taskId: string, transition: CompletionTransition, failure: unknown): Promise<boolean> => {
+    if (isPermanentError(failure)) return false;
+    try {
+      await enqueueCompletion(taskId, transition.entry);
+    } catch {
+      return false; // nothing was recorded: the caller reports the original failure
+    }
+    applyLocalCompletion(taskId, transition.localPatch);
+    await syncBridgeRef.current.refreshPendingQueueCount();
+    if (transition.completed) previewGrowthForCompletion(taskId);
+    syncBridgeRef.current.setSyncStatus('offline');
+    return true;
+  };
+
+  /**
+   * Completing or re-opening a task (Issue #47, Phase 2E). ONE completion event is created here, from the LATEST state of the
+   * task (not the object a render captured), and it is the same event whether the write goes out now (it rides the task
+   * write) or waits in the queue (a `completion` entry): its id never changes, so a retry, a reload or a replay cannot make
+   * a second record. A task that has not reached the server yet (a `local-*` id) is queued even while online.
+   */
   const handleToggleTask = async (task: Task) => {
     setStatusError(null);
     setStatusInfo(null);
 
-    const nextCompleted = !task.completed;
+    const latest = latestTasksRef.current.find((item) => item._id === task._id) ?? task;
+    const transition = makeCompletionTransition(latest);
+    const nextCompleted = transition.completed;
 
-    if (!isOnline) {
-      persistTasks((current) =>
-        current.map((item) =>
-          item._id === task._id
-            ? {
-                ...item,
-                completed: nextCompleted,
-                updatedAt: new Date().toISOString(),
-                pendingSync: true,
-              }
-            : item,
-        ),
-      );
-
-      await enqueueSyncAction({
-        type: 'update',
-        taskId: task._id,
-        payload: { completed: nextCompleted },
-      });
+    if (!isOnline || task._id.startsWith('local-')) {
+      try {
+        await enqueueCompletion(task._id, transition.entry);
+      } catch {
+        // Nothing was recorded, so the task is left as it was: an optimistic flip with no event behind it would be a lie.
+        setStatusError('Could not queue the change — storage unavailable. Please try again.');
+        return;
+      }
+      applyLocalCompletion(task._id, transition.localPatch);
       await syncBridgeRef.current.refreshPendingQueueCount();
 
-      if (nextCompleted && !task.completed) {
+      if (nextCompleted && !latest.completed) {
         previewGrowthForCompletion(task._id);
       }
 
       syncBridgeRef.current.setSyncStatus('offline');
-      setStatusInfo(nextCompleted && !task.completed ? 'Task updated offline. Pending sync. +10 XP' : 'Task updated offline. Pending sync.');
+      setStatusInfo(nextCompleted && !latest.completed ? 'Task updated offline. Pending sync. +10 XP' : 'Task updated offline. Pending sync.');
       return;
     }
 
     try {
       setActiveActionTaskId(task._id);
-      const response = await taskService.updateTask(task._id, { completed: nextCompleted });
+      const response = await taskService.updateTask(task._id, { completed: nextCompleted, completionEvent: transition.event });
+      latestTasksRef.current = latestTasksRef.current.map((item) => (item._id === task._id ? keepReminderIdentity(response.task, item) : item));
       persistTasks((current) => current.map((item) => (item._id === task._id ? keepReminderIdentity(response.task, item) : item)));
 
       applyServerGrowth(response.growth);
 
       setStatusInfo(response.growth?.awarded ? 'Task completion updated. +10 XP' : 'Task completion updated.');
     } catch (requestError) {
+      if (await queueCompletionAfterFailure(task._id, transition, requestError)) {
+        setStatusInfo('Could not reach the server. Saved on this device and will sync. Pending sync.');
+        return;
+      }
       const axiosError = requestError as AxiosError<{ message?: string }>;
       setStatusError(axiosError.response?.data?.message ?? 'Unable to update task');
     } finally {
@@ -594,63 +636,62 @@ export function useDashboardTasks({
       return;
     }
 
+    // One completion event per task, from the latest state of each (a task completed meanwhile is skipped, never completed twice).
+    const transitions = incompleteTasks
+      .map((task) => latestTasksRef.current.find((item) => item._id === task._id) ?? task)
+      .filter((task) => !task.completed)
+      .map((task) => ({ task, transition: makeCompletionTransition(task) }));
+
     if (!isOnline) {
-      const incompleteIds = incompleteTasks.map((task) => task._id);
-
-      persistTasks((current) =>
-        current.map((task) =>
-          incompleteIds.includes(task._id)
-            ? {
-                ...task,
-                completed: true,
-                updatedAt: new Date().toISOString(),
-                pendingSync: true,
-              }
-            : task,
-        ),
-      );
-
-      await Promise.all(
-        incompleteIds.map((taskId) =>
-          enqueueSyncAction({
-            type: 'update',
-            taskId,
-            payload: { completed: true },
-          }),
-        ),
-      );
+      const queued: string[] = [];
+      for (const { task, transition } of transitions) {
+        try {
+          await enqueueCompletion(task._id, transition.entry);
+          applyLocalCompletion(task._id, transition.localPatch);
+          queued.push(task._id);
+        } catch {
+          // This one was not recorded, so it is left as it was; the others are unaffected.
+        }
+      }
       await syncBridgeRef.current.refreshPendingQueueCount();
 
-      incompleteIds.forEach((taskId) => {
+      queued.forEach((taskId) => {
         previewGrowthForCompletion(taskId);
       });
 
       clearSelection();
       syncBridgeRef.current.setSyncStatus('offline');
-      setStatusInfo(`Marked ${incompleteIds.length} task${incompleteIds.length === 1 ? '' : 's'} complete offline. +${incompleteIds.length * 10} XP`);
+      if (queued.length < transitions.length) {
+        setStatusError(`Could not queue ${transitions.length - queued.length} change${transitions.length - queued.length === 1 ? '' : 's'} — storage unavailable.`);
+      }
+      setStatusInfo(`Marked ${queued.length} task${queued.length === 1 ? '' : 's'} complete offline. +${queued.length * 10} XP`);
       return;
     }
 
     try {
       setBulkActionLoading(true);
       const results = await Promise.allSettled(
-        incompleteTasks.map((task) => taskService.updateTask(task._id, { completed: true })),
+        transitions.map(({ task, transition }) => taskService.updateTask(task._id, { completed: true, completionEvent: transition.event })),
       );
 
       const updatedTasks: Task[] = [];
       const growths: GrowthResult[] = [];
       const failedIds: string[] = [];
+      const queuedIds: string[] = [];
 
-      results.forEach((result, index) => {
-        const sourceTask = incompleteTasks[index];
+      // Sequential on purpose: each failed write is queued in order, from the SAME transition that was sent.
+      for (const [index, result] of results.entries()) {
+        const { task: sourceTask, transition } = transitions[index];
 
         if (result.status === 'fulfilled') {
           updatedTasks.push(result.value.task);
           if (result.value.growth) growths.push(result.value.growth);
+        } else if (await queueCompletionAfterFailure(sourceTask._id, transition, result.reason)) {
+          queuedIds.push(sourceTask._id);
         } else {
           failedIds.push(sourceTask._id);
         }
-      });
+      }
 
       if (updatedTasks.length > 0) {
         const updatedById = new Map(updatedTasks.map((task) => [task._id, task]));
@@ -671,10 +712,13 @@ export function useDashboardTasks({
         clearSelection();
       }
 
-      if (updatedTasks.length > 0) {
+      if (updatedTasks.length > 0 || queuedIds.length > 0) {
         const awardedXp = growths.reduce((sum, growth) => sum + growth.xpGained, 0);
+        const marked = updatedTasks.length + queuedIds.length;
         setStatusInfo(
-          `Marked ${updatedTasks.length} task${updatedTasks.length === 1 ? '' : 's'} complete.${awardedXp > 0 ? ` +${awardedXp} XP` : ''}`,
+          `Marked ${marked} task${marked === 1 ? '' : 's'} complete.${awardedXp > 0 ? ` +${awardedXp} XP` : ''}${
+            queuedIds.length > 0 ? ` ${queuedIds.length} saved on this device and will sync.` : ''
+          }`,
         );
       }
 

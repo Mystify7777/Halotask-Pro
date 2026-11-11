@@ -17,6 +17,31 @@
   ],
   "entries": [
     {
+      "date": "2026-11-11",
+      "category": "Frontend",
+      "title": "Issue #47 phase 2E: client completion-event pipeline",
+      "description": "The client now sends completion events to the existing canonical server API. Completing or re-opening a task creates ONE event at the moment of the transition (completionId, completedAt, device UTC offset at that instant, plus a title/estimate snapshot) from the task's latest state. Online it rides the existing task write; offline it is stored as a new `completion` entry in the existing sync queue, which never merges with other entries, survives a delete of its task, and is stored once per event. Replay sends it on the task write, or to POST /api/completion-events when the task is gone, keeps it queued on a 409, and discards only a refused or malformed entry. Delivery is not acknowledgement: unreconciled, canonicalAckIds and canonicalSeen change only when a canonical history answer lists the task (Phase 2C/2D unchanged); after delivery the dashboard only asks for a history reconcile. A failed online completion write (no answer, 5xx, 408, 429, 401) queues the SAME event that was sent, so a lost response cannot become two completion ids; a permanent 4xx is not queued. Dashboard checkbox, bulk complete and the Insights toggle share one transition function. No server change, no Growth change, no legacy write path removed. 45 new tests (client suite 1243, server unchanged 2263), 20 mutation checks, all killed.",
+      "files": [
+        "halotasks-client/src/offline/completionEvents.ts",
+        "halotasks-client/src/services/completionService.ts",
+        "halotasks-client/src/offline/deliveryErrors.ts",
+        "halotasks-client/src/offline/syncQueue.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/offline/history.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/pages/InsightsPage.tsx",
+        "halotasks-client/src/types/task.ts",
+        "halotasks-client/src/offline/completionPipeline.test.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.completion.test.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.deadline.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-11-10",
       "category": "Frontend",
       "title": "Issue #47 phase 2D: no legacy history writes for canonical days; recovery proven",
@@ -1512,5 +1537,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-10T13:30:00.000Z"
+  "lastUpdated": "2026-11-11T13:00:00.000Z"
 }

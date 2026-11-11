@@ -1,7 +1,16 @@
 import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
 
-export type SyncQueueActionType = 'create' | 'update' | 'delete';
+/**
+ * `completion` (Issue #47, Phase 2E) is one completion event: the user completed or re-opened a task. It is its own entry
+ * type because a completion is an EVENT, not a field value: the plain-update rule ("the last write wins") would turn
+ * complete, un-complete, complete into one write and the server would never see the transitions. Rules, all below:
+ *  - a completion entry is never merged into another entry, and nothing merges into it;
+ *  - a delete of the task drops only plain updates, never a completion entry (the completion really happened and the
+ *    history must keep it even if the task is gone before delivery);
+ *  - queuing the same event twice (same kind, same completionId) stores it once.
+ */
+export type SyncQueueActionType = 'create' | 'update' | 'delete' | 'completion';
 
 type QueuePayload = Record<string, unknown>;
 
@@ -88,6 +97,13 @@ export type SettledEntry =
   /** Permanently refused by the server: dropped, never retried (the pre-existing rule for 4xx answers). */
   | { outcome: 'discarded' };
 
+/** Identity of a completion entry for de-duplication: `kind:completionId`. null when it names no completion (an id-less revoke). */
+const completionKeyOf = (entry: { payload?: QueuePayload }): string | null => {
+  const kind = entry.payload?.kind;
+  const id = entry.payload?.completionId;
+  return typeof kind === 'string' && typeof id === 'string' ? `${kind}:${id}` : null;
+};
+
 const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /** The fields of `current` that `sent` did not carry (or carried with another value). */
@@ -115,6 +131,13 @@ export const settleSyncQueue = (
   ownerId: string,
   settled: Map<string, SettledEntry>,
   sentCreates: Map<string, string>,
+  /**
+   * local id -> server id of the creates this run sent. A completion entry still waiting (queued while its create was in flight,
+   * or not reached because the run stopped) names the task by its local id, and that id means nothing to the next run, which
+   * has no record of the remap: it is rewritten to the server id here. Only completion entries are rewritten; every other kind
+   * is merged into its create or handled above, as before.
+   */
+  idMap: Map<string, string> = new Map(),
 ): Promise<SyncQueueRecord[]> =>
   withQueueLock(async () => {
     const current = await getSyncQueue(ownerId);
@@ -124,7 +147,8 @@ export const settleSyncQueue = (
     for (const entry of current) {
       const result = settled.get(entry.id);
       if (!result) {
-        next.push(entry);
+        const remapped = entry.type === 'completion' && entry.taskId ? idMap.get(entry.taskId) : undefined;
+        next.push(remapped ? { ...entry, taskId: remapped } : entry);
         continue;
       }
       if (result.outcome === 'discarded') continue;
@@ -168,6 +192,17 @@ export const enqueueSyncAction = (
       id: getId(),
       createdAt: Date.now(),
     };
+
+    if (nextAction.type === 'completion') {
+      // Idempotent enqueue: the same event (kind + completionId) is stored once, wherever it already is in the queue.
+      const key = completionKeyOf(nextAction);
+      if (key !== null && queue.some((item) => item.type === 'completion' && completionKeyOf(item) === key)) {
+        return queue;
+      }
+      const nextQueue = [...queue, nextAction];
+      await setSyncQueue(nextQueue, ownerId);
+      return nextQueue;
+    }
 
     if (nextAction.type === 'update' && nextAction.taskId) {
       const createIndex = queue.findIndex((item) => item.type === 'create' && item.taskId === nextAction.taskId);

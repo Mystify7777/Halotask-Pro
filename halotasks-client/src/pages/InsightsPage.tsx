@@ -4,6 +4,7 @@ import InsightModal from '../components/dashboard/InsightModal';
 import { deriveTreeStatus } from '../growth/treeLogic';
 import { applyServerGrowth, initTreeStorage, TreeIdentityError } from '../growth/treeStorage';
 import { getWeekHistory, type HistoryEntry, type WeekHistory } from '../offline/history';
+import { makeCompletionTransition } from '../offline/completionEvents';
 import { getCachedTasks } from '../offline/cache';
 import { taskService } from '../services/taskService';
 import type { TreeState } from '../growth/treeTypes';
@@ -392,12 +393,23 @@ export default function InsightsPage() {
     };
   }, []);
 
+  // The same completion transition as the dashboard checkbox (Issue #47): the event is made from the task as it is now and
+  // rides the write, so this page records a completion exactly like every other writer. It is still online-only.
   const handleToggleTask = useCallback(async (task: Task) => {
-    const updated = { ...task, completed: !task.completed };
+    const transition = makeCompletionTransition(task);
+    const updated = { ...task, ...transition.localPatch };
     setTasks((prev) => prev.map((current) => (current._id === task._id ? updated : current)));
 
     try {
-      const response = await taskService.updateTask(task._id, { completed: updated.completed });
+      const response = await taskService.updateTask(task._id, { completed: transition.completed, completionEvent: transition.event });
+      // Adopt the pointer the server holds, so the next toggle names the completion this one made.
+      setTasks((prev) =>
+        prev.map((current) =>
+          current._id === task._id
+            ? { ...current, completionId: response.task.completionId ?? current.completionId, completedAt: response.task.completedAt ?? current.completedAt }
+            : current,
+        ),
+      );
       if (response.growth) {
         // The server awarded (or reconciled) this completion: show its tree, not a local guess.
         try {

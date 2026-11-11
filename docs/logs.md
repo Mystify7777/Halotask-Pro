@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2E: client completion-event pipeline
+
+**2026-11-11 · Frontend · completed · Priority: high**
+
+The client now sends completion events to the existing canonical server API. Completing or re-opening a task creates ONE event at the moment of the transition (completionId, completedAt, device UTC offset at that instant, plus a title/estimate snapshot) from the task's latest state. Online it rides the existing task write; offline it is stored as a new `completion` entry in the existing sync queue, which never merges with other entries, survives a delete of its task, and is stored once per event. Replay sends it on the task write, or to POST /api/completion-events when the task is gone, keeps it queued on a 409, and discards only a refused or malformed entry. Delivery is not acknowledgement: unreconciled, canonicalAckIds and canonicalSeen change only when a canonical history answer lists the task (Phase 2C/2D unchanged); after delivery the dashboard only asks for a history reconcile. A failed online completion write (no answer, 5xx, 408, 429, 401) queues the SAME event that was sent, so a lost response cannot become two completion ids; a permanent 4xx is not queued. Dashboard checkbox, bulk complete and the Insights toggle share one transition function. No server change, no Growth change, no legacy write path removed. 45 new tests (client suite 1243, server unchanged 2263), 20 mutation checks, all killed.
+
 #### Issue #47 phase 2D: no legacy history writes for canonical days; recovery proven
 
 **2026-11-10 · Frontend · completed · Priority: high**

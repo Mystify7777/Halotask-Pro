@@ -25,7 +25,7 @@ import { useDashboardSync } from '../hooks/useDashboardSync';
 import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
 import { registerSW } from '../hooks/usePushSubscription';
-import { getWeekHistory, type HistoryEntry } from '../offline/history';
+import { getWeekHistory, requestHistoryReconcile, type HistoryEntry } from '../offline/history';
 import { useNetworkStatus } from '../offline/network';
 import type { Task } from '../types/task';
 
@@ -188,6 +188,7 @@ export default function DashboardPage() {
     setStatusInfo,
     setTasks: tasksHook.setTasks,
     applyServerGrowth,
+    onCompletionsDelivered: () => void requestHistoryReconcile(),
   });
 
   syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;

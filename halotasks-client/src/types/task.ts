@@ -34,6 +34,12 @@ export type Task = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
+  /**
+   * The completion this task holds while `completed` is true (and the one it held last while it is false). Written by the
+   * server in the same write as `completed` (Issue #47); the client sets it when the user completes the task, so a later
+   * un-complete can name exactly the completion it ends. Absent or null for a task completed before completion records existed.
+   */
+  completionId?: string | null;
   pendingSync?: boolean;
   /**
    * Client-only. The local id the task was created under while offline. It is kept after the server assigns the real
@@ -63,9 +69,20 @@ export type TaskCreatePayload = {
   estimatedMinutes?: number;
 };
 
+/**
+ * The completion event a task write carries (Issue #47). Its kind follows `completed`, exactly as the server reads it:
+ * `completed: true` carries a completion, `completed: false` a revocation. Same shape as the server contract
+ * (halotasks-server/src/utils/completionValidators.ts), not a second protocol.
+ */
+export type CompleteEventPayload = { completionId: string; completedAt: string; utcOffsetMinutes: number };
+export type RevokeEventPayload = { completionId?: string; revokedAt: string };
+export type TaskCompletionEventPayload = CompleteEventPayload | RevokeEventPayload;
+
 /** `null` clears an optional field on the server (an absent key leaves it unchanged). */
 export type TaskUpdatePayload = Omit<Partial<TaskCreatePayload>, 'dueDate' | 'dueTime' | 'startTime'> & {
   completed?: boolean;
+  /** Present only with `completed`; see TaskCompletionEventPayload. */
+  completionEvent?: TaskCompletionEventPayload;
   dueDate?: string | null;
   dueTime?: string | null;
   startTime?: string | null;

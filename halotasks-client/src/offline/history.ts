@@ -570,6 +570,16 @@ export const updateTodaySnapshot = async (tasks: Task[]): Promise<void> => {
 };
 
 /**
+ * Asks for a pull → merge → push of the history, now (Issue #47, Phase 2E: after completion events were delivered, so the
+ * canonical answer for their day is read). It changes no local state itself; nothing is marked acknowledged here.
+ */
+export const requestHistoryReconcile = async (): Promise<void> => {
+  const userId = getCurrentUserId();
+  if (!userId) return;
+  await requestSync(userId);
+};
+
+/**
  * getWeekHistory — returns exactly 7 entries (oldest first) for the current user.
  * Days with no data get empty placeholders so the UI always shows a full week.
  * On the first read of a session it reconciles with the server (waiting at most a few

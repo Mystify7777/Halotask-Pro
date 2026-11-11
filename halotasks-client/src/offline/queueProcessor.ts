@@ -1,8 +1,11 @@
 import { captureSession, isSameSession, isSessionChangedError } from '../services/api';
 import { taskService } from '../services/taskService';
-import { TaskCreatePayload, TaskUpdatePayload, Task } from '../types/task';
+import { TaskCreatePayload, TaskUpdatePayload, Task, TaskCompletionEventPayload } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
-import { getSyncQueue, settleSyncQueue, SettledEntry } from './syncQueue';
+import { completionService, type StandaloneEventBody } from '../services/completionService';
+import { httpStatusOf, isPermanentError } from './deliveryErrors';
+import { parseCompletionEntry, type CompletionEntryPayload } from './completionEvents';
+import { getSyncQueue, settleSyncQueue, SettledEntry, type SyncQueueRecord } from './syncQueue';
 
 /**
  * The queue merges later edits into earlier entries ({...old, ...new}), so a merged payload can in principle hold a due
@@ -46,6 +49,11 @@ const isDueDateConflict = (error: unknown, payload: TaskUpdatePayload): boolean 
  * that the due time was not kept. If this request itself fails, the original entry is kept or handled like any other
  * failure; nothing is retried in a loop.
  */
+const toTaskEvent = (event: CompletionEntryPayload): TaskCompletionEventPayload =>
+  event.kind === 'complete'
+    ? { completionId: event.completionId as string, completedAt: event.completedAt as string, utcOffsetMinutes: event.utcOffsetMinutes as number }
+    : { ...(event.completionId ? { completionId: event.completionId } : {}), revokedAt: event.revokedAt as string };
+
 const withoutDueTime = (payload: TaskUpdatePayload): TaskUpdatePayload => ({ ...payload, dueTime: null });
 
 type ProcessSyncQueueParams = {
@@ -62,6 +70,12 @@ type ProcessSyncQueueParams = {
    * edit was applied (and passed to onTaskUpdated). Optional so callers that show no messages can omit it.
    */
   onDueTimeConflict?: (taskId: string, dueTime: string) => void;
+  /**
+   * Called once at the end of a run in which at least one completion event was delivered (Issue #47, Phase 2E). Delivery
+   * means the server stored (or already had) the event; it is NOT the canonical acknowledgement, which only a canonical
+   * history answer gives. The caller uses this to ask for a history reconcile. Optional.
+   */
+  onCompletionsDelivered?: () => void;
 };
 
 export type ProcessSyncQueueResult = {
@@ -69,19 +83,6 @@ export type ProcessSyncQueueResult = {
   failed: number;
   remaining: number;
 };
-
-function httpStatusOf(error: unknown): number | null {
-  const status =
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof (error as { response?: unknown }).response === 'object' &&
-    (error as { response: { status?: unknown } }).response !== null
-      ? (error as { response: { status?: number } }).response?.status
-      : null;
-
-  return typeof status === 'number' ? status : null;
-}
 
 /**
  * 401 means the session is not accepted right now (expired, or revoked by a password reset) — a
@@ -93,19 +94,53 @@ function isAuthError(error: unknown): boolean {
 }
 
 /**
- * Returns true for HTTP status codes that are permanent client errors.
- * Retrying these entries will not succeed, so they should be discarded.
- * (401 is deliberately not one of them — see isAuthError.)
+ * A server answer describes the task as the server has it NOW. When completion events for the same task are still waiting
+ * behind it, the user has already gone further (completed it, or re-opened it), and the local copy shows that. So the task
+ * adopted into the UI is the server's, with those waiting events laid over its completion fields: nothing the user did is
+ * shown as undone while it is still on its way.
  */
-function isPermanentError(error: unknown): boolean {
-  const status = httpStatusOf(error);
-
-  if (status === null || status === 401) {
-    return false;
+const withPendingCompletions = (serverTask: Task, waiting: SyncQueueRecord[]): Task => {
+  let task = serverTask;
+  for (const item of waiting) {
+    const event = parseCompletionEntry(item.payload);
+    if (!event) continue;
+    task =
+      event.kind === 'complete'
+        ? { ...task, completed: true, completedAt: event.completedAt, completionId: event.completionId }
+        : { ...task, completed: false, completedAt: null };
   }
+  return task;
+};
 
-  return status >= 400 && status < 500 && status !== 408 && status !== 429;
-}
+/** `code` of a 4xx answer body, or null. Only the code is ever consulted, never the message. */
+const errorCodeOf = (error: unknown): string | null => {
+  const body = (error as { response?: { data?: unknown } })?.response?.data;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+};
+
+/**
+ * The server's code for "this task still exists, so the event belongs on the task write" (POST /api/completion-events).
+ * Must match halotasks-server COMPLETION_TASK_EXISTS.
+ */
+export const COMPLETION_TASK_EXISTS = 'COMPLETION_TASK_EXISTS';
+
+const standaloneBodyOf = (taskId: string, event: CompletionEntryPayload): StandaloneEventBody | null => {
+  if (event.kind === 'complete') {
+    return {
+      type: 'complete',
+      completionId: event.completionId as string,
+      taskId,
+      title: event.title,
+      estimatedMinutes: event.estimatedMinutes,
+      completedAt: event.completedAt as string,
+      utcOffsetMinutes: event.utcOffsetMinutes as number,
+    };
+  }
+  // A revoke can only be delivered by the id it ends: with none, there is nothing the server could look up.
+  return event.completionId ? { type: 'revoke', completionId: event.completionId, taskId, revokedAt: event.revokedAt as string } : null;
+};
 
 const runSyncQueue = async ({
   onTaskCreated,
@@ -113,6 +148,7 @@ const runSyncQueue = async ({
   onTaskDeleted,
   onGrowth,
   onDueTimeConflict,
+  onCompletionsDelivered,
 }: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
   // A queue may only be worked by its owner, with the owner's credential. Bind BOTH now — the account
   // and the token it is signed in with — and use them for everything below:
@@ -148,6 +184,7 @@ const runSyncQueue = async ({
   const settled = new Map<string, SettledEntry>();
   const sentCreates = new Map<string, string>(); // create entry id -> server id, to notice a delete made while it was in flight
   let processed = 0;
+  let deliveredCompletions = 0;
 
   for (const [index, entry] of queue.entries()) {
     // Early exit only (saves building a request that would be refused). The API client's check at send
@@ -166,7 +203,8 @@ const runSyncQueue = async ({
           idMap.set(localTaskId, response.task._id);
           // The request went out as the owner and is done. But if another account is on screen now, do
           // not feed the owner's result into that account's UI state and task cache.
-          if (stillSignedIn()) onTaskCreated(localTaskId, response.task);
+          const waiting = queue.slice(index + 1).filter((item) => item.type === 'completion' && item.taskId === localTaskId);
+          if (stillSignedIn()) onTaskCreated(localTaskId, withPendingCompletions(response.task, waiting));
         }
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
@@ -199,10 +237,86 @@ const runSyncQueue = async ({
           response = await taskService.updateTask(resolvedTaskId, withoutDueTime(payload), { session });
         }
         settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
-        if (stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+        // A completion waiting behind this edit means the local copy is ahead of this answer: it is not adopted (the answer to
+        // that completion will be).
+        const completionWaits = queue.slice(index + 1).some((item) => item.type === 'completion' && item.taskId === sourceTaskId);
+        if (!completionWaits && stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
         if (conflictedDueTime !== null && stillSignedIn()) onDueTimeConflict?.(resolvedTaskId, conflictedDueTime);
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
+        processed += 1;
+        continue;
+      }
+
+      if (entry.type === 'completion') {
+        const sourceTaskId = entry.taskId;
+        const event = parseCompletionEntry(entry.payload);
+        if (!sourceTaskId || !event) {
+          // Nothing to send it to, or not a well-formed event (storage damage): never sent, never retried.
+          console.warn('[syncQueue] Discarding malformed completion entry:', entry.id);
+          settled.set(entry.id, { outcome: 'discarded' });
+          processed += 1;
+          continue;
+        }
+
+        let resolvedTaskId = idMap.get(sourceTaskId) ?? sourceTaskId;
+        if (resolvedTaskId.startsWith('local-')) {
+          const createEntry = queue.find((item) => item.type === 'create' && item.taskId === sourceTaskId);
+          if (createEntry) {
+            if (settled.get(createEntry.id)?.outcome === 'discarded') {
+              // The task was refused for good, so it never existed on the server: there is no completion to record.
+              settled.set(entry.id, { outcome: 'discarded' });
+              processed += 1;
+              continue;
+            }
+            continue; // its create has not synced: this stays queued, in order, right behind it
+          }
+          // No create is queued for it any more: the task was created and deleted offline. The completion still happened,
+          // so it is delivered on its own, under the id it was made with (the server stores it exactly as received).
+        }
+
+        // Does a LATER entry of the same task follow (a re-open after this completion)? Then this answer is a step, not the
+        // final state, and must not overwrite what the user sees: the local task already shows where the user ended up.
+        const laterForTask = queue.slice(index + 1).some((item) => item.taskId === sourceTaskId && item.type !== 'delete');
+
+        let delivered = false;
+        if (!resolvedTaskId.startsWith('local-')) {
+          try {
+            const response = await taskService.updateTask(
+              resolvedTaskId,
+              { completed: event.kind === 'complete', completionEvent: toTaskEvent(event) },
+              { session },
+            );
+            delivered = true;
+            settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
+            if (!laterForTask && stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+            if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
+          } catch (error) {
+            // 404: the task is gone from the server (deleted by another device, or after this entry was queued). The event
+            // is still real: deliver it standalone. Every other failure takes the normal path below.
+            if (httpStatusOf(error) !== 404) throw error;
+          }
+        }
+
+        if (!delivered) {
+          const body = standaloneBodyOf(resolvedTaskId, event);
+          if (!body) {
+            console.warn('[syncQueue] Discarding a revoke that names no completion for a task that is gone:', entry.id);
+            settled.set(entry.id, { outcome: 'discarded' });
+            processed += 1;
+            continue;
+          }
+          try {
+            await completionService.postEvent(body, { session });
+          } catch (error) {
+            // The task turned out to exist after all: the event belongs on the task write, so it stays queued for the next run.
+            if (httpStatusOf(error) === 409 && errorCodeOf(error) === COMPLETION_TASK_EXISTS) continue;
+            throw error;
+          }
+          settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: null });
+        }
+
+        deliveredCompletions += 1;
         processed += 1;
         continue;
       }
@@ -255,7 +369,8 @@ const runSyncQueue = async ({
     }
   }
 
-  const remaining = (await settleSyncQueue(ownerId, settled, sentCreates)).length;
+  const remaining = (await settleSyncQueue(ownerId, settled, sentCreates, idMap)).length;
+  if (deliveredCompletions > 0 && stillSignedIn()) onCompletionsDelivered?.();
 
   return {
     processed,

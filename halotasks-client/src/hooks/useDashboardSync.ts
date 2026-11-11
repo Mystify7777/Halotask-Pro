@@ -25,6 +25,12 @@ type UseDashboardSyncArgs = {
   setTasks: (tasks: Task[]) => void;
   /** Adopt the Growth Tree the server returned for a replayed completion (Issue #24). */
   applyServerGrowth?: (growth: GrowthResult | undefined) => void;
+  /**
+   * Completion events reached the server (Issue #47, Phase 2E). The caller asks for a history reconcile so the day they belong
+   * to is read back as the server's answer. This only asks: whether a completion counts as acknowledged is decided by what the
+   * canonical answer lists (Phase 2C), never by the delivery itself.
+   */
+  onCompletionsDelivered?: () => void;
 };
 
 export function useDashboardSync({
@@ -35,6 +41,7 @@ export function useDashboardSync({
   setStatusInfo,
   setTasks,
   applyServerGrowth,
+  onCompletionsDelivered,
 }: UseDashboardSyncArgs) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
@@ -81,6 +88,7 @@ export function useDashboardSync({
         persistTasks((current) => current.filter((task) => task._id !== taskId));
       },
       onGrowth: (growth) => applyServerGrowth?.(growth),
+      onCompletionsDelivered: () => onCompletionsDelivered?.(),
       onDueTimeConflict: () =>
         setStatusInfo('A due time was not saved because the task’s due date was removed elsewhere. Your other changes were kept.'),
     });
