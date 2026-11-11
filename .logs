@@ -19,6 +19,26 @@
     {
       "date": "2026-11-10",
       "category": "Frontend",
+      "title": "Issue #47 phase 2D: no legacy history writes for canonical days; recovery proven",
+      "description": "The client now remembers that a day was answered canonically (internal canonicalSeen) and never writes it through the legacy PUT path: not when a later answer lacks `source` (older server), and not when another tab resolved the day while a push was already chosen (the stored day is re-checked right before sending). Non-canonical days and all other behaviour are unchanged; no completion-event pipeline, no read switch, no server change, and no write path removed. Device recovery is proven: after deleting the task and clearing local storage, a new session rebuilds the day from the server alone (client test), and a fresh server session reads identical history with no task document (server route test). 9 new tests, 6 mutation checks all killed.",
+      "files": [
+        "halotasks-client/src/offline/history.ts",
+        "halotasks-client/src/services/historyService.ts",
+        "halotasks-client/src/offline/history.test.ts",
+        "halotasks-client/src/services/historyService.test.ts",
+        "halotasks-server/src/controllers/history.controller.ts",
+        "halotasks-server/tests/historyCanonical.routes.test.ts",
+        "halotasks-server/tests/historyRoutes.test.ts",
+        "halotasks-server/tests/completionMigration.test.ts",
+        "halotasks-server/tests/completionRecord.realmongo.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-10",
+      "category": "Frontend",
       "title": "Issue #47 phase 2C: client data layer for canonical history",
       "description": "The client history layer now understands days the server answers from CompletionRecords. GET /api/history gains one additive key per entry, `source` ('canonical'|'legacy'|'none'); the client parses it (missing or unknown = old behaviour). For a canonical day, reconcile lets the server win (also over a pending local copy and for an all-revoked zero day), never merges legacy data back, never pushes (a legacy PUT would be acknowledged and ignored), does not apply local removals, and keeps this device's own completions that the canonical day lacks in an internal `unreconciled` list (getUnreconciledCompletions) instead of dropping them. Legacy/none days, the 7-day mirror, snapshot derivation and legacy writes are unchanged, and consumers (Insights, Dashboard, SmartSections) still receive the exact old HistoryEntry shape. Not the read switch and not the retirement of legacy writes. Adds 12 client tests (canonical data layer), service parse tests, server `source` tests, 11 client mutation checks, and documents the contract and limits in docs/context.md. Review fix: a completion the canonical day listed while it stayed continuously completed on this device is acknowledged (canonicalAckIds), so a later remote revoke cannot turn it into an unreconciled entry; the acknowledgement ends when the device stops completing the task, so a re-completion is a new waiting transition (5 regression tests, 18 mutation checks).",
       "files": [
@@ -1492,5 +1512,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-10T08:30:00.000Z"
+  "lastUpdated": "2026-11-10T13:30:00.000Z"
 }

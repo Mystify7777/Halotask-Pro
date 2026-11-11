@@ -19,6 +19,7 @@ vi.mock('./db', () => ({
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('../services/api', () => ({ apiClient: api }));
 
+import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
 import type { Task } from '../types/task';
 import {
@@ -1519,5 +1520,149 @@ describe('strict today: a device clock a few seconds off the server near local m
 
     expect(week[week.length - 1].completedTasks.map((t) => t.id).sort()).toEqual(['t1', 't2']);
     expect(rowsFor('user-a').size).toBe(0);
+  });
+});
+
+// ── Phase 2D: no legacy writes for canonical days; recovery without task documents ─────────────────────────────
+
+describe('legacy write boundary (Issue #47, Phase 2D)', () => {
+  const D = '2026-09-30';
+  const doneToday = (id: string, est = 10) => task(id, '2026-09-30T05:00:00Z', est);
+  const ids = (e: { completedTasks: { id: string }[] }) => e.completedTasks.map((t) => t.id);
+  const reconcileAgain = async () => {
+    resetHistoryState(); // a new session
+    advance(20_000);
+    const week = await getWeekHistory();
+    await settle();
+    return week;
+  };
+  const makeCanonical = (date: string, tasks: { id: string; title?: string }[]) => {
+    seedServer('user-a', date, tasks);
+    canonicalDays.add(date);
+  };
+  const storedDay = () => (idb.get(historyKeys()[0]) as { date: string; pendingSync?: boolean; canonicalSeen?: unknown }[]).find((e) => e.date === D);
+
+  beforeEach(() => {
+    emitSource = true;
+    login(USER_A);
+  });
+
+  it('control: a day that is not canonical is still written through the legacy path (compatibility is unchanged)', async () => {
+    await updateTodaySnapshot([doneToday('a')]);
+    await settle();
+    expect(puts().map((r) => r.url)).toEqual(['/api/history/today']);
+    await reconcileAgain();
+    expect(puts()).toHaveLength(1); // acknowledged once, not re-sent
+  });
+
+  it('a local edit to a canonical day is never pushed, and what the canonical day lacks is kept aside', async () => {
+    makeCanonical(D, [{ id: 'canon' }]);
+    await getWeekHistory();
+    await settle();
+    expect(storedDay()?.canonicalSeen).toBe(true);
+
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle();
+    const week = await reconcileAgain();
+
+    expect(puts()).toHaveLength(0);
+    expect(ids(today(week))).toEqual(['canon']);
+    expect(await getUnreconciledCompletions()).toEqual([{ date: D, tasks: [{ id: 'mine', title: 'Task mine', estimatedMinutes: 10 }] }]);
+  });
+
+  it('once a day was seen canonical, an answer that does not say its source (older server) cannot make the client write it through the legacy path', async () => {
+    makeCanonical(D, [{ id: 'canon' }]);
+    await getWeekHistory();
+    await settle();
+
+    emitSource = false; // the server now answers the same day without `source`: it reads like a legacy snapshot
+    await updateTodaySnapshot([doneToday('canon'), doneToday('mine')]);
+    await settle();
+    await reconcileAgain();
+    await reconcileAgain();
+
+    expect(puts()).toHaveLength(0);
+    expect(storedDay()?.pendingSync).toBe(false); // resolved, not retried on every read
+
+    emitSource = true; // the canonical answer is back: it wins again, nothing was lost
+    const week = await reconcileAgain();
+    expect(ids(today(week))).toEqual(['canon']);
+    expect(await getUnreconciledCompletions()).toEqual([{ date: D, tasks: [{ id: 'mine', title: 'Task mine', estimatedMinutes: 10 }] }]);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a malformed persisted marker is ignored: it does not suppress a legacy write', async () => {
+    await updateTodaySnapshot([doneToday('a')]);
+    await settle();
+    const key = historyKeys()[0];
+    const rows = idb.get(key) as Record<string, unknown>[];
+    idb.set(key, rows.map((r) => (r.date === D ? { ...r, canonicalSeen: 'yes', pendingSync: true, rev: 9 } : r)));
+    seedServer('user-a', D, []); // legacy row exists but lacks the task: the local one must be pushed
+    const before = puts().length;
+
+    await reconcileAgain();
+
+    expect(puts().length).toBeGreaterThan(before);
+  });
+
+  it('offline completion -> reconnect -> canonical acknowledgement: shown once, nothing waiting, no legacy write, stable afterwards', async () => {
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('x')]);
+    await settle();
+    expect(puts().length).toBeLessThanOrEqual(1);
+    const putsOffline = puts().length;
+
+    serverOffline = false;
+    makeCanonical(D, [{ id: 'x' }]); // the completion reached the server as a CompletionRecord
+    const week = await reconcileAgain();
+
+    expect(ids(today(week))).toEqual(['x']);
+    expect(today(week).completedCount).toBe(1);
+    expect(await getUnreconciledCompletions()).toEqual([]);
+    expect(puts()).toHaveLength(putsOffline); // nothing was sent on reconnect
+    const settled = JSON.stringify(idb.get(historyKeys()[0]));
+    for (let i = 0; i < 3; i += 1) await reconcileAgain();
+    expect(JSON.stringify(idb.get(historyKeys()[0]))).toBe(settled);
+  });
+
+  it('a push already chosen is dropped when another tab resolved the day canonically in the meantime', async () => {
+    serverOffline = true;
+    await updateTodaySnapshot([doneToday('mine')]); // pending local change, server unreachable
+    await settle();
+    serverOffline = false;
+    seedServer('user-a', D, [{ id: 'other' }]); // a legacy row: the reconcile will decide to push 'mine'
+
+    // Another tab shares this IndexedDB and records "seen canonical" right after this tab's reconcile wrote its state.
+    const originalSet = vi.mocked(offlineDb.set).getMockImplementation()!;
+    let armed = true;
+    vi.mocked(offlineDb.set).mockImplementation(async (key: string, value: unknown) => {
+      const injected = armed && Array.isArray(value) ? value.map((e: { date: string }) => (e.date === D ? { ...e, canonicalSeen: true } : e)) : value;
+      armed = false;
+      await originalSet(key, injected);
+    });
+    try {
+      await reconcileAgain();
+    } finally {
+      vi.mocked(offlineDb.set).mockImplementation(originalSet);
+    }
+
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('device recovery: after deleting the task and wiping local storage, a new session rebuilds the day from the server alone, without any task document', async () => {
+    makeCanonical(D, [{ id: 'gone', title: 'Deleted task' }]);
+    await getWeekHistory();
+    await updateTodaySnapshot([]); // the task was deleted on this device
+    await settle();
+
+    idb.clear(); // another session / cleared IndexedDB
+    requests.length = 0;
+    resetHistoryState();
+    login(USER_A);
+    const week = await getWeekHistory();
+    await settle();
+
+    expect(today(week)).toEqual({ date: D, completedCount: 1, workDoneMinutes: 10, completedTasks: [{ id: 'gone', title: 'Deleted task', estimatedMinutes: 10 }] });
+    expect(requests.every((r) => r.method === 'GET' && r.url === '/api/history')).toBe(true); // no task lookup, no write
   });
 });

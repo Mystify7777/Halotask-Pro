@@ -846,6 +846,35 @@ drops removed ids inside the reconcile branch is defence in depth: `applyDerived
 `tests/historyCanonical.routes.test.ts` (`source` values), 18 client mutation checks (all killed except equivalent mutants: the removal check inside the canonical reconcile branch, which `applyDerivedSnapshot` makes redundant; and, for the
 acknowledgement set, keeping an id after the task left `ownTaskIds` and recording non-own canonical ids, both cleared by the continuity check at the next derivation).
 
+### Legacy Write Boundary and Device Recovery (Issue #47, Phase 2D)
+
+Scope: stop the client from writing legacy `DayHistory` for days the server owns canonically, and prove recovery without task documents. It adds no
+completion-event sending (no event pipeline, queue or task-write change), no read-path switch, no server change, and does not remove any legacy write path.
+
+**Audit (client).** The only legacy write path is `pushEntry` in `offline/history.ts` (`historyService.upsertToday` / `upsertForDate`). It is reached only
+from `reconcile`: branch 1 (unacknowledged local copy merged with a non-canonical server row) and branch 3 (heal: the server has nothing for a day this device
+recorded). `historyService` has no other caller; `getWeekHistory()` is read by DashboardPage and InsightsPage only. Verdict: **keep** both branches for days
+that are not canonical (compatibility with legacy-only history and older servers); **stop** them for canonical days; **remove** nothing yet.
+
+**Rules.**
+1. The canonical branch (Phase 2C) already pushed nothing. A day is now remembered as canonical (`StoredHistoryEntry.canonicalSeen`, internal): records are
+   revoked, never deleted, so a day with CompletionRecords stays canonical.
+2. A non-canonical answer (an older server, a stripped or missing `source`) for a day already seen canonical is not authoritative: the client keeps its view,
+   pushes nothing and clears `pendingSync` (no retry loop). When the canonical answer returns it wins again and nothing was lost (`unreconciled` unchanged).
+3. `pushEntry` re-reads the stored day immediately before sending and drops the push when the day was resolved canonically meanwhile (another tab shares the
+   same IndexedDB).
+4. Days that were never canonical behave exactly as before, including offline completion -> reconnect -> legacy push; `canonicalSeen` is validated on read
+   (only `true` counts) and survives local edits.
+
+**Device recovery.** A new session with empty IndexedDB rebuilds a canonical day from `GET /api/history` alone, with no task lookup and no write; a deleted
+task stays because its record carries its own title and estimate. Server tests delete the task, read from a fresh token and compare bodies; unrelated
+accounts see nothing.
+
+**Known limits.** (a) Until an event-sending client exists, production days are still legacy, so the suppression is dormant there. (b) A canonical day that
+a device never fetched while canonical cannot be suppressed by the client (the server still ignores the PUT, as in 2A). (c) The legacy write path itself stays
+until a later, separately requested phase. Evidence: `src/offline/history.test.ts` (7 new tests, 88 in the file), `tests/historyCanonical.routes.test.ts` (2 new,
+25 in the file); 6 client mutation checks, all killed (the pre-send re-check by a test that simulates another tab).
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

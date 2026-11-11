@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2D: no legacy history writes for canonical days; recovery proven
+
+**2026-11-10 · Frontend · completed · Priority: high**
+
+The client now remembers that a day was answered canonically (internal canonicalSeen) and never writes it through the legacy PUT path: not when a later answer lacks `source` (older server), and not when another tab resolved the day while a push was already chosen (the stored day is re-checked right before sending). Non-canonical days and all other behaviour are unchanged; no completion-event pipeline, no read switch, no server change, and no write path removed. Device recovery is proven: after deleting the task and clearing local storage, a new session rebuilds the day from the server alone (client test), and a fresh server session reads identical history with no task document (server route test). 9 new tests, 6 mutation checks all killed.
+
 #### Issue #47 phase 2C: client data layer for canonical history
 
 **2026-11-10 · Frontend · completed · Priority: high**

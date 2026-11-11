@@ -330,6 +330,47 @@ describe('client transition: legacy writes cannot override a canonical day (Phas
   });
 });
 
+describe('device recovery and the migration boundary (Phase 2D)', () => {
+  it('after the task is deleted, a brand-new session (fresh token, no local state) reads the same history, from CompletionRecords alone', async () => {
+    const task = seedTask('Write report');
+    await put(String(task._id), completeEvent('c1', new Date(Date.now() - MIN)));
+    await request(app).delete(`/api/tasks/${task._id}`).set(as(A));
+    expect(tasks.get(String(task._id))).toBeUndefined(); // no task document exists any more
+
+    const first = await history();
+    const freshSession = await request(app)
+      .get(`/api/history?days=7&endDate=${today()}&utcOffsetMinutes=${IST}`)
+      .set({ Authorization: `Bearer ${jwt.sign({ userId: A, email: 'again@x.test', name: 'again', jti: 'another-device' }, SECRET)}` });
+
+    expect(freshSession.status).toBe(200);
+    expect(freshSession.body).toEqual(first.body);
+    const entry = entryOn(freshSession.body, today());
+    expect(entry.source).toBe('canonical');
+    expect(entry.completedTasks).toEqual([{ taskId: String(task._id), title: 'Write report', estimatedMinutes: 30 }]);
+    expect(legacy.rows).toHaveLength(0); // nothing legacy was involved
+    expect(entryOn((await history(7, B)).body, today()).completedTasks).toEqual([]); // and another account sees none of it
+  });
+
+  it('legacy-only days stay readable next to a canonical day, a legacy write cannot alter the canonical one, and repeated reads are identical', async () => {
+    const old = day(-3);
+    legacy.rows.push(legacyRow(old, ['Old legacy task']));
+    const task = seedTask('Canonical task');
+    await put(String(task._id), completeEvent('c1', new Date(Date.now() - MIN)));
+    const before = (await history()).body;
+    expect(entryOn(before, old)).toMatchObject({ source: 'legacy', completedCount: 1 });
+    expect(entryOn(before, today())).toMatchObject({ source: 'canonical', completedCount: 1 });
+
+    const res = await request(app)
+      .put('/api/history/today')
+      .set(as(A))
+      .send({ date: today(), utcOffsetMinutes: IST, completedCount: 2, workDoneMinutes: 20, completedTasks: [
+        { taskId: 'x1', title: 'Rogue one', estimatedMinutes: 10 }, { taskId: 'x2', title: 'Rogue two', estimatedMinutes: 10 } ] });
+    expect(res.status).toBe(200);
+
+    for (let i = 0; i < 3; i += 1) expect((await history()).body).toEqual(before);
+  });
+});
+
 describe('response contract (what existing consumers rely on)', () => {
   it('returns exactly `days` entries, oldest to newest, with the unchanged keys plus `source`, for canonical, legacy and empty days alike', async () => {
     legacy.rows.push(legacyRow(day(-1), ['Legacy']));

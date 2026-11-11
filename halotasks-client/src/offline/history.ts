@@ -95,6 +95,12 @@ type StoredHistoryEntry = HistoryEntry & {
    * un-completing is a new transition and is not in this set.
    */
   canonicalAckIds?: string[];
+  /**
+   * A canonical answer has been seen for this day (Issue #47, Phase 2D). A day with CompletionRecords stays canonical (records are
+   * revoked, never deleted), so from then on this device never sends a legacy write for it and never lets a non-canonical
+   * answer (older server, missing `source`) overwrite it. Internal; never part of HistoryEntry.
+   */
+  canonicalSeen?: true;
 };
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -195,6 +201,7 @@ export const applyDerivedSnapshot = (
   const previousOwn = new Set(previous?.ownTaskIds ?? []);
   const acknowledged = (previous?.canonicalAckIds ?? []).filter((id) => derivedIds.has(id) && previousOwn.has(id));
   if (acknowledged.length > 0) next.canonicalAckIds = acknowledged;
+  if (previous?.canonicalSeen) next.canonicalSeen = true;
   return next;
 };
 
@@ -243,9 +250,10 @@ const normalizeStored = (value: unknown): StoredHistoryEntry | null => {
   const removed = stringArray(e.removedTaskIds);
   const waiting = completedTaskArray(e.unreconciled);
   const acknowledged = stringArray(e.canonicalAckIds);
-  const { unreconciled: _raw, canonicalAckIds: _rawAck, ...rest } = entry;
+  const { unreconciled: _raw, canonicalAckIds: _rawAck, canonicalSeen: _rawSeen, ...rest } = entry;
   return {
     ...rest,
+    ...(_rawSeen === true ? { canonicalSeen: true as const } : {}),
     ...(acknowledged && acknowledged.length > 0 ? { canonicalAckIds: acknowledged.slice(-MAX_COMPLETED_TASKS_PER_DAY) } : {}),
     ...(own ? { ownTaskIds: own } : {}),
     ...(removed ? { removedTaskIds: removed } : {}),
@@ -335,6 +343,11 @@ const pushEntry = async (userId: string, entry: StoredHistoryEntry): Promise<voi
   // Requests carry whatever token is current, so never send user A's snapshot after a switch to B.
   if (getCurrentUserId() !== userId) return;
 
+  // Phase 2D: a day the server owns canonically is never written through the legacy path. The entry was chosen for pushing
+  // before this call, so re-check the stored copy: a reconcile may have resolved the day canonically in the meantime.
+  const stored = (await readLocal(userId)).find((e) => e.date === entry.date);
+  if (stored?.canonicalSeen) return;
+
   const plain = toPlainEntry(entry);
   const outcome: UpsertOutcome =
     entry.date === toLocalDateKey(new Date())
@@ -370,7 +383,11 @@ const reconcile = async (userId: string): Promise<boolean> => {
       const date = serverEntry.date;
       const local = byDate.get(date);
 
-      if (source === 'canonical') {
+      if (source !== 'canonical' && local?.canonicalSeen) {
+        // A day that was canonical stays canonical (records are revoked, never deleted). A non-canonical answer for it (an
+        // older server, a missing `source`) is not authoritative: keep the canonical view, push nothing, and stop retrying.
+        byDate.set(date, { ...local, pendingSync: false });
+      } else if (source === 'canonical') {
         // 0. The server's completion records own this day: the canonical answer wins, whatever the local copy says
         //    (acknowledged or pending, even when the canonical day is empty because every completion was revoked).
         //    Nothing is merged back from the local copy, removals are not applied to it (deleting a task does not erase
@@ -395,6 +412,7 @@ const reconcile = async (userId: string): Promise<boolean> => {
           pendingSync: false,
           rev: local?.rev ?? 0,
           ownTaskIds: local?.ownTaskIds ?? [],
+          canonicalSeen: true,
           ...(unreconciled.length > 0 ? { unreconciled } : {}),
           ...(nowAcknowledged.length > 0 ? { canonicalAckIds: nowAcknowledged } : {}),
         });
