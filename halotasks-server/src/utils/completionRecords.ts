@@ -458,3 +458,78 @@ export async function recordMigratedDay(
     await session.endSession();
   }
 }
+
+// -- Mixed-day repair (Issue #47, Phase 2F) ------------------------------------------------------------------------------
+
+/**
+ * Imports the legacy tasks of ONE day that no record covers yet, for a day that ALREADY has records (a "mixed" day: legacy
+ * snapshot plus records written by 2E clients). All of them in ONE transaction, or none.
+ *
+ * Why this exists: a day is canonical as soon as ANY record has its `localDate`, so once a 2E client completed one task on a
+ * day that legacy clients had also written, the rest of that day's snapshot was hidden for good and the 2B migration (which
+ * skipped any day with a record) could not bring it back. This repairs the day per task instead.
+ *
+ * "Covered" means: a record of the SAME task on this `localDate`, whatever its status (active, revoked, superseded) and
+ * whatever its source. Canonical records win: an existing record is never changed, and a task the records say was revoked is
+ * never brought back by the snapshot. A record that carries no local day (server-observed, legacy client) belongs to no day
+ * and covers nothing. Only tasks no record covers are inserted, with the SAME deterministic ids as a pure migration, so a
+ * rerun finds them covered and writes nothing; a concurrent run that inserts the same ids first makes this one hit the unique
+ * (userId, completionId) index, and its whole transaction is aborted (the day was repaired by them: `created: 0`).
+ *
+ * The read inside the transaction is what counts: the caller's first look only plans. A record that appeared in between
+ * covers its task here, so nothing is added beside it. (A live record that lands for an uncovered task AFTER this commit is
+ * a separate, narrow window, documented in docs/context.md.) It states only what the snapshot proves: the day; the
+ * completion instant and offset stay null and the records say `migrated`.
+ */
+export async function recordMissingMigratedCompletions(
+  userId: string,
+  localDate: string,
+  inputs: MigratedCompletionInput[],
+  now: Date = new Date(),
+): Promise<{ created: number }> {
+  if (inputs.length === 0) return { created: 0 };
+
+  const session = await CompletionRecord.startSession();
+  try {
+    let created = 0;
+    await session.withTransaction(async () => {
+      created = 0; // withTransaction may run this function again after a transient conflict
+      const present = (await CompletionRecord.find({ userId, localDate: { $in: [localDate] } })
+        .session(session)
+        .select('completionId taskId')
+        .lean()) as unknown as { completionId: string; taskId: string }[];
+      const coveredTasks = new Set(present.map((record) => record.taskId));
+      const takenIds = new Set(present.map((record) => record.completionId));
+
+      const missing = inputs.filter((input) => !coveredTasks.has(input.taskId) && !takenIds.has(input.completionId));
+      if (missing.length === 0) return;
+
+      await CompletionRecord.insertMany(
+        missing.map((input) => ({
+          userId,
+          completionId: input.completionId,
+          taskId: input.taskId,
+          titleSnapshot: input.titleSnapshot,
+          estimatedMinutesSnapshot: input.estimatedMinutesSnapshot,
+          completedAt: null,
+          utcOffsetMinutes: null,
+          localDate,
+          receivedAt: now,
+          status: 'active' as const,
+          source: 'migrated' as const,
+          completedAtSource: 'migrated' as const,
+        })),
+        { session },
+      );
+      created = missing.length;
+    });
+    return { created };
+  } catch (error) {
+    // A concurrent run inserted the same ids first: the day was repaired, by them.
+    const pattern = (error as { keyPattern?: Record<string, unknown> }).keyPattern;
+    if (isDuplicateKeyError(error) && pattern && 'completionId' in pattern) return { created: 0 };
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+}

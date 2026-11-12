@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #47 phase 2F: mixed-day legacy completion repair
+
+**2026-11-12 · Backend · completed · Priority: high**
+
+The 2B migration used to skip any day that already had a CompletionRecord. After a 2E client completed one task on a day whose legacy snapshot held more, the day turned canonical and the other legacy tasks were never imported. The migration now repairs such a mixed day per task: a legacy task is covered when a record of the same task holds that local day in any status (canonical wins, revoked stays revoked); every uncovered task is imported as a migrated record with the same deterministic id a pure migration uses, in one transaction that re-reads the day, so reruns, concurrent runs and failures cannot duplicate or half-write. Runtime reads, legacy endpoints, DayHistory and the client are unchanged. Report gains rowsMixedToRepair, rowsMixedAlreadyCovered and recordsCoveredByCanonical. Server suite 49 files / 2282 tests without the MongoDB suites; 23 mutation checks, all killed.
+
 #### Issue #47 phase 2E: client completion-event pipeline
 
 **2026-11-11 · Frontend · completed · Priority: high**

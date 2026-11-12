@@ -720,7 +720,7 @@ at all when every requested day is canonical). It uses the `(userId, localDate, 
 | `updateTodaySnapshot` / `PUT /api/history/*` | legacy writes | unchanged; still the fallback source until the migration and client phases |
 
 **Known limits (documented, not hidden).** Until the legacy writes are retired, a day can be canonical for tasks completed by an event-sending client and
-legacy-only for the tasks a legacy client completed the same day; the canonical day then shows only the canonical ones (O5: no dedupe). Only the
+legacy-only for the tasks a legacy client completed the same day; the canonical day then shows only the canonical ones (O5: no dedupe) until the Phase 2F migration repair imports the legacy-only tasks. Only the
 last 7 local days are mirrored by the client, and the server read accepts up to 90 days: older days are canonical-only or legacy-only by the same rule.
 
 ### Migrating Legacy DayHistory into CompletionRecord (Issue #47, Phase 2B)
@@ -755,9 +755,9 @@ Rules that keep it:
    with rule 3 a half-written day would be permanent.
 2. **All or nothing at validation.** If any task of a row cannot be represented exactly (the legacy write validator's rules: id, title, minutes; a
    duplicate task id; a malformed list) the whole day is skipped, reported, and keeps reading from `DayHistory`.
-3. **A day that has ANY CompletionRecord is skipped** (any status, any source; this is exactly what makes a day canonical in the read contract):
-   a revoked-only day is canonical too (the records say nothing stands) and importing the snapshot would bring back what they revoked. Never merged (O5).
-   A record with no `localDate` (server-observed, legacy client) is not a record "of the day": the snapshot is that day's only source.
+3. **A day that has records is repaired PER TASK (Phase 2F; before 2F it was skipped wholesale)**: see "Mixed-day repair" below. A day whose records are
+   ALL migrated keeps the 2B rule (complete: nothing; some of this snapshot's: `partial-migrated-day`; unrelated migrated records: left alone).
+   A record with no `localDate` (server-observed, legacy client) is not a record "of the day" and covers nothing.
 4. **Frozen days only.** Legacy clients can still `PUT /api/history/*` for today and the previous 6 local days, and a write to an already-canonical day
    is ignored. A date is migrated by default only when **no client at any UTC offset** can still write it: strictly before `firstWritableDate(now)`
    = today at UTC-12 minus 6 days, derived from the same constants as the write validator (a test pins the two together). Recent days stay legacy and
@@ -778,7 +778,7 @@ fails halfway changes no day's read). Intentional differences: `updatedAt` is no
 (`MAX_DAYS`), which a default migration never touches (frozen days are older). A later view that shows older days in order needs an explicit order field.
 
 **Report** (JSON on stdout; exit code 1 if any row failed): `mode`, `includeWritableDays`, `firstWritableDate`, `rowsRead`, `rowsSkippedWritable`,
-`rowsSkippedInvalid`, `rowsSkippedExistingRecords`, `rowsEmpty`, `rowsAlreadyMigrated`, `rowsToMigrate`, `recordsPlanned`, `recordsCreated`,
+`rowsSkippedInvalid`, `rowsSkippedExistingRecords`, `rowsMixedToRepair`, `rowsMixedAlreadyCovered`, `recordsCoveredByCanonical`, `rowsEmpty`, `rowsAlreadyMigrated`, `rowsToMigrate`, `recordsPlanned`, `recordsCreated`,
 `recordsAlreadyPresent`, `rowsWithCountMismatch`, `rowsFailed`, and the first 100 `issues` (`{userId, date, kind, detail}`; error details are name/code
 only, never message text or values). A dry run counts exactly what an apply would create (including skipping revoked-only days).
 
@@ -949,6 +949,32 @@ same id. Scope was the dashboard checkbox and bulk complete.
 Evidence: `src/offline/completionPipeline.test.ts` (37 tests, a fake server behind the real API client, queue, processor, history and the real dashboard hook, including
 a response-lost case where the server stored the event and the client saw a network error), `src/hooks/useDashboardTasks.completion.test.ts` (8); client suite 60
 files / 1243 tests; server suite unchanged (49 files / 2263 tests without the MongoDB suites); 20 mutation checks, all killed.
+
+### Mixed-Day Legacy Completion Repair (Issue #47, Phase 2F)
+
+**The gap.** A day is canonical as soon as ANY record has its `localDate` (Phase 2A). When a 2E client completed task A on a day whose legacy snapshot also
+held B, the day turned canonical, the snapshot stopped being read, and the 2B migration (which skipped any day with a record) never imported B: B vanished
+from history. 2F closes that gap in the migration only.
+
+**Rule (per task, migration only).** For each legacy task of a frozen day that already has records from a live or server-dated source: a task is *covered*
+when a record of the same `taskId` holds that `localDate`, in ANY status (active, revoked, superseded) and from ANY source. Covered tasks are left alone
+(canonical wins; nothing is rewritten; a revoked completion is not resurrected). Uncovered tasks are imported as `migrated` records with the same
+deterministic id as a pure migration (`mig-` + sha256(userId, date, taskId)), `completedAt: null`, the snapshot's title and estimate, and are written
+in ONE transaction that re-reads the day first (`recordMissingMigratedCompletions`): all or none, so a rerun, a concurrent run or a failure cannot leave a
+partial repair. A rerun finds the imports covered and writes nothing. Only the frozen-day rule, the account and the day bound the repair.
+
+**Unchanged.** Reads: a canonical day is still never merged with its snapshot (O5) and an all-revoked day still reads zero; the repair only adds records.
+No legacy row is modified or deleted; legacy endpoints, `DayHistory`, the client legacy-write path and the completion-event protocol are untouched.
+
+**Visible effect.** After the repair a mixed day reads A (canonical, unchanged) and B (migrated). A day whose legacy task was revoked canonically still
+reads without it. The report adds `rowsMixedToRepair`, `rowsMixedAlreadyCovered` and `recordsCoveredByCanonical` (`rowsSkippedExistingRecords` now counts only
+all-migrated days that are not this snapshot's); a dry run reports exactly what an apply would import.
+
+**Known limits.** (a) A legacy task whose completion was re-done canonically under a DIFFERENT task id is not recognised as the same completion. (b) A task
+completed canonically and legacy-completed on the same day by a client that never sent the event is covered by the canonical record: that is the intended
+"canonical wins". (c) A live record that lands between the in-transaction check and the commit is the same narrow 2B window. (d) A day that is still writable is
+skipped until it freezes; run the migration after the 7-day window. (e) A pure day that turns mixed during a run is left alone by that run and repaired by the next.
+Evidence: `tests/completionMigration.test.ts` (60 tests) and the real-MongoDB suite (typechecked here, run in CI); 23 mutation checks, all killed.
 
 ## AI Task Creation (Issue #22)
 

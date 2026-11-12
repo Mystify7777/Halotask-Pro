@@ -239,48 +239,56 @@ describe('days that must not be migrated', () => {
     userId: A, completionId: 'seed-1', taskId: 'x', status: 'active', source: 'live', completedAtSource: 'client', localDate: OLD, completedAt: new Date('2026-11-01T05:00:00Z'), ...over,
   });
 
-  it('ANY CompletionRecord of the day makes it canonical, so the day is skipped: an ACTIVE live record', async () => {
-    store.docs.push(seededRecord({}));
-    const report = await run([row(OLD, [task('t1'), task('t2')])]);
-    expect(report.rowsSkippedExistingRecords).toBe(1);
-    expect(store.docs).toHaveLength(1);
+  it('a day that has a live record is no longer skipped wholesale: the task that record covers is left alone, the others are repaired (Phase 2F)', async () => {
+    store.docs.push(seededRecord({ taskId: 'a' }));
+    const report = await run([row(OLD, [task('a'), task('t2')])]);
+    expect(report.rowsSkippedExistingRecords).toBe(0);
+    expect(report.rowsMixedToRepair).toBe(1);
+    expect(report.recordsCoveredByCanonical).toBe(1);
+    expect(store.docs.map((d) => d.taskId).sort()).toEqual(['a', 't2']);
   });
 
-  it('... a REVOKED-ONLY day (the canonical answer is "nothing stands"; the snapshot must not bring it back): A,B in DayHistory, revoked A in records -> no B record', async () => {
+  it('... a REVOKED record still COVERS its task: the snapshot must not bring a revoked completion back (only the OTHER task is imported)', async () => {
     store.docs.push(seededRecord({ taskId: 'a', status: 'revoked', revokedReason: 'uncompleted', revokeReceivedAt: new Date() }));
     const report = await run([row(OLD, [task('a'), task('b')])]);
-    expect(report.rowsSkippedExistingRecords).toBe(1);
-    expect(report.recordsCreated).toBe(0);
-    expect(store.docs).toHaveLength(1);
-    expect(store.docs.some((d) => d.taskId === 'b')).toBe(false);
+    expect(report.recordsCreated).toBe(1);
+    expect(report.recordsCoveredByCanonical).toBe(1);
+    expect(store.docs.some((d) => d.taskId === 'a' && d.source === 'migrated')).toBe(false);
+    expect(store.docs.find((d) => d.taskId === 'b')).toMatchObject({ source: 'migrated', status: 'active' });
   });
 
-  it('... and a DRY RUN says the same as an apply for such a day: skipped, nothing planned', async () => {
+  it('... a day whose every legacy task is covered (even by revoked records) creates nothing and says so, apply or dry run', async () => {
     store.docs.push(seededRecord({ taskId: 'a', status: 'revoked', revokedReason: 'uncompleted', revokeReceivedAt: new Date() }));
-    const dry = await mig.migrateDayHistory([row(OLD, [task('a'), task('b')])] as never, { now: NOW });
-    expect(dry.rowsSkippedExistingRecords).toBe(1);
-    expect(dry.rowsToMigrate).toBe(0);
-    expect(dry.recordsPlanned).toBe(0);
-  });
-
-  it('... several existing records (mixed statuses) skip the day, and none is changed', async () => {
-    store.docs.push(
-      seededRecord({ completionId: 's1', taskId: 'a' }),
-      seededRecord({ completionId: 's2', taskId: 'b', status: 'revoked', revokedReason: 'superseded', revokeReceivedAt: new Date() }),
-      seededRecord({ completionId: 's3', taskId: 'c' }),
-    );
+    const rows = [row(OLD, [task('a')])];
     const before = structuredClone(store.docs);
-    const report = await run([row(OLD, [task('a'), task('b'), task('c'), task('d')])]);
-    expect(report.rowsSkippedExistingRecords).toBe(1);
+    const dry = await mig.migrateDayHistory(rows as never, { now: NOW });
+    const applied = await run(rows);
+    for (const report of [dry, applied]) {
+      expect(report.rowsMixedAlreadyCovered).toBe(1);
+      expect(report.rowsMixedToRepair).toBe(0);
+      expect(report.recordsPlanned).toBe(0);
+      expect(report.recordsCreated).toBe(0);
+    }
     expect(store.docs).toEqual(before);
   });
 
-  it('... a migrated record written by something else for a different set of tasks also skips the day', async () => {
+  it('... a DRY RUN of a mixed day plans exactly the missing tasks and writes nothing', async () => {
+    store.docs.push(seededRecord({ taskId: 'a' }));
+    const before = structuredClone(store.docs);
+    const dry = await mig.migrateDayHistory([row(OLD, [task('a'), task('b'), task('c')])] as never, { now: NOW });
+    expect(dry.rowsMixedToRepair).toBe(1);
+    expect(dry.recordsPlanned).toBe(2);
+    expect(dry.recordsCreated).toBe(0);
+    expect(store.docs).toEqual(before);
+  });
+
+  it('... a migrated record written by something else for a different set of tasks still skips the day (all-migrated days keep the 2B rule)', async () => {
     store.docs.push(seededRecord({ completionId: 'mig-other', taskId: 'zzz', source: 'migrated', completedAtSource: 'migrated', completedAt: null }));
     const report = await run([row(OLD, [task('a')])]);
     expect(report.rowsSkippedExistingRecords).toBe(1);
     expect(store.docs).toHaveLength(1);
   });
+
 
   it('the day is re-checked INSIDE the transaction: a record that appears after the first look but before the write stops the day (nothing is added beside it)', async () => {
     let finds = 0;
@@ -485,5 +493,255 @@ describe('the read contract is preserved: GET /api/history before and after the 
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('Phase 2F: a day whose canonical records were all REVOKED still reads canonical-zero (never legacy), and the repair imports only the task nothing covers', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-20T12:00:00Z'));
+    try {
+      const today = getToday(IST);
+      legacy.rows.push({ ...row(OLD, [task('a', 'Alpha', 25)]), updatedAt: new Date('2026-11-01T20:00:00Z') });
+      realStore.docs.push({
+        userId: A, completionId: 'rev-a', taskId: 'a', titleSnapshot: 'Alpha', estimatedMinutesSnapshot: 25, status: 'revoked', source: 'live',
+        completedAtSource: 'client', localDate: OLD, completedAt: new Date('2026-11-01T05:00:00Z'), utcOffsetMinutes: IST, revokedReason: 'uncompleted', revokeReceivedAt: new Date(),
+      });
+
+      const before = (await historyOver(today)).find((e) => e.date === OLD)!;
+      expect(before.source).toBe('canonical'); // the any-record rule: revoked records still make the day canonical
+      expect(before.completedCount).toBe(0); // ... and nothing stands: no fall back to the snapshot
+
+      const report = await realMig.migrateDayHistory(legacy.rows as never, { apply: true, now: new Date() });
+      expect(report.recordsCreated).toBe(0); // the only legacy task is covered by the revoked record
+      const after = (await historyOver(today)).find((e) => e.date === OLD)!;
+      expect(after.source).toBe('canonical');
+      expect(after.completedCount).toBe(0);
+      expect(after.completedTasks).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Phase 2F: a MIXED day (live record for A, legacy A and B) reads only A before the repair and A + B after it, with A\'s record untouched', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-20T12:00:00Z'));
+    try {
+      const today = getToday(IST);
+      legacy.rows.push({ ...row(OLD, [task('a', 'Alpha', 25), task('b', 'Beta', 5)]), updatedAt: new Date('2026-11-01T20:00:00Z') });
+      realStore.docs.push({
+        userId: A, completionId: 'live-a', taskId: 'a', titleSnapshot: 'Alpha (client)', estimatedMinutesSnapshot: 25, status: 'active', source: 'live',
+        completedAtSource: 'client', localDate: OLD, completedAt: new Date('2026-11-01T05:00:00Z'), utcOffsetMinutes: IST,
+      });
+      const liveBefore = structuredClone(realStore.docs[0]);
+
+      const before = (await historyOver(today)).find((e) => e.date === OLD)!;
+      expect(before.completedTasks.map((t) => t.taskId)).toEqual(['a']); // the gap Phase 2F closes: B is hidden
+
+      await realMig.migrateDayHistory(legacy.rows as never, { apply: true, now: new Date() });
+      const after = (await historyOver(today)).find((e) => e.date === OLD)!;
+      expect(after.completedTasks.map((t) => t.taskId).sort()).toEqual(['a', 'b']);
+      expect(after.completedCount).toBe(2);
+      expect(realStore.docs.find((d) => d.completionId === 'live-a')).toEqual(liveBefore);
+      expect(legacy.rows).toHaveLength(1); // DayHistory is never modified
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+
+describe('Phase 2F: mixed-day repair (per task)', () => {
+  const live = (over: Record<string, unknown> = {}) => ({
+    userId: A, completionId: 'live-a', taskId: 'a', titleSnapshot: 'Alpha', estimatedMinutesSnapshot: 10, status: 'active', source: 'live',
+    completedAtSource: 'client', localDate: OLD, completedAt: new Date('2026-11-01T05:00:00Z'), utcOffsetMinutes: IST, ...over,
+  });
+
+  it('a pure legacy day behaves exactly as before: every task imported, reported as a plain migrated day', async () => {
+    const report = await run([row(OLD, [task('a'), task('b')])]);
+    expect(report.recordsCreated).toBe(2);
+    expect(report.rowsToMigrate).toBe(1);
+    expect(report.rowsMixedToRepair).toBe(0);
+    expect(report.recordsCoveredByCanonical).toBe(0);
+  });
+
+  it('MIXED: A has a canonical record, B is legacy-only: A is preserved byte for byte and B is imported as a migrated record', async () => {
+    store.docs.push(live());
+    const aBefore = structuredClone(store.docs[0]);
+    const report = await run([row(OLD, [task('a', 'Alpha', 10), task('b', 'Beta', 7)])]);
+
+    expect(report.rowsMixedToRepair).toBe(1);
+    expect(report.recordsCreated).toBe(1);
+    expect(store.docs).toHaveLength(2);
+    expect(store.docs[0]).toEqual(aBefore);
+    expect(store.docs[1]).toMatchObject({
+      userId: A, taskId: 'b', titleSnapshot: 'Beta', estimatedMinutesSnapshot: 7, localDate: OLD, completedAt: null, utcOffsetMinutes: null,
+      status: 'active', source: 'migrated', completedAtSource: 'migrated', completionId: mig.migratedCompletionId(A, OLD, 'b'),
+    });
+  });
+
+  it('ALREADY IMPORTED: running the repair twice creates one record for B, and the second run changes nothing', async () => {
+    store.docs.push(live());
+    const rows = [row(OLD, [task('a'), task('b')])];
+    const first = await run(rows);
+    const afterFirst = structuredClone(store.docs);
+    const second = await run(rows);
+
+    expect(first.recordsCreated).toBe(1);
+    expect(second.recordsCreated).toBe(0);
+    expect(second.rowsMixedAlreadyCovered).toBe(1);
+    expect(second.rowsMixedToRepair).toBe(0);
+    expect(store.docs.filter((d) => d.taskId === 'b')).toHaveLength(1);
+    expect(store.docs).toEqual(afterFirst);
+  });
+
+  it('CONFLICT: canonical and legacy describe the same task differently: canonical wins, nothing is overwritten and no second record appears', async () => {
+    store.docs.push(live({ titleSnapshot: 'Edited title', estimatedMinutesSnapshot: 99 }));
+    const before = structuredClone(store.docs);
+    const report = await run([row(OLD, [task('a', 'Old legacy title', 5)])]);
+    expect(report.recordsCreated).toBe(0);
+    expect(report.recordsCoveredByCanonical).toBe(1);
+    expect(store.docs).toEqual(before);
+  });
+
+  it('MANY: every legacy task no record covers is imported, the covered ones (active and revoked) are not', async () => {
+    store.docs.push(
+      live({ completionId: 'l-a', taskId: 'a' }),
+      live({ completionId: 'l-c', taskId: 'c', status: 'revoked', revokedReason: 'superseded', revokeReceivedAt: new Date() }),
+    );
+    const report = await run([row(OLD, ['a', 'b', 'c', 'd', 'e'].map((id) => task(id)))]);
+    expect(report.recordsCreated).toBe(3);
+    expect(report.recordsCoveredByCanonical).toBe(2);
+    expect(store.docs.filter((d) => d.source === 'migrated').map((d) => d.taskId).sort()).toEqual(['b', 'd', 'e']);
+  });
+
+  it('DELETED TASK: the repair never reads the task collection, so a completion of a task that no longer exists is imported from the snapshot alone', async () => {
+    store.docs.push(live());
+    await run([row(OLD, [task('a'), task('long-gone-task', 'Deleted since', 12)])]);
+    expect(store.docs.find((d) => d.taskId === 'long-gone-task')).toMatchObject({ titleSnapshot: 'Deleted since', estimatedMinutesSnapshot: 12, source: 'migrated', status: 'active' });
+  });
+
+  it('DETERMINISTIC ID: the imported id is the same one a pure migration uses, across runs, stores and processes of the same input', async () => {
+    store.docs.push(live());
+    await run([row(OLD, [task('a'), task('b')])]);
+    const id = store.docs.find((d) => d.taskId === 'b')!.completionId;
+    expect(id).toBe(mig.migratedCompletionId(A, OLD, 'b'));
+
+    const other = createCompletionStore();
+    removeCompletionRecordMock();
+    installCompletionRecordMock(other);
+    vi.resetModules();
+    const mig2 = await import('../src/utils/completionMigration.js');
+    await mig2.migrateDayHistory([row(OLD, [task('b')])] as never, { apply: true, now: new Date('2030-01-01T00:00:00Z') }); // a different "now" must not matter
+    expect(other.docs[0].completionId).toBe(id);
+  });
+
+  it('a record already holding the deterministic id of an uncovered task (under another task id) is not inserted over: the rest of the day is still repaired', async () => {
+    store.docs.push(live(), live({ completionId: mig.migratedCompletionId(A, OLD, 'b'), taskId: 'odd', source: 'migrated', completedAtSource: 'migrated', completedAt: null }));
+    const report = await run([row(OLD, [task('a'), task('b'), task('c')])]);
+    expect(report.rowsFailed).toBe(0);
+    expect(store.docs.filter((d) => d.taskId === 'c' && d.source === 'migrated')).toHaveLength(1);
+    expect(store.docs.filter((d) => d.completionId === mig.migratedCompletionId(A, OLD, 'b'))).toHaveLength(1);
+  });
+
+  it('a record with no local day (server-observed) covers nothing: the legacy task is still imported', async () => {
+    store.docs.push(live({ completionId: 'srv', taskId: 'a', localDate: null, completedAtSource: 'server' }), live({ completionId: 'l-b', taskId: 'b' }));
+    const report = await run([row(OLD, [task('a'), task('b')])]);
+    expect(report.recordsCreated).toBe(1);
+    expect(store.docs.find((d) => d.source === 'migrated')?.taskId).toBe('a');
+  });
+
+  it('a covering record of the same task on ANOTHER day, or of another account, does not cover this day', async () => {
+    store.docs.push(live({ completionId: 'l1', localDate: OLDER }), live({ completionId: 'l2', userId: B }), live({ completionId: 'l3', taskId: 'z' }));
+    const report = await run([row(OLD, [task('a'), task('z')])]);
+    expect(report.recordsCreated).toBe(1); // only 'a' is missing: 'z' is covered on OLD by l3
+    expect(store.docs.find((d) => d.source === 'migrated')?.taskId).toBe('a');
+  });
+
+  it('does not touch other days or tasks: a frozen day with no records is imported whole, and unrelated canonical records are unchanged', async () => {
+    store.docs.push(live(), live({ completionId: 'unrelated', taskId: 'q', localDate: '2026-09-01' }));
+    const before = structuredClone(store.docs);
+    await run([row(OLD, [task('a'), task('b')]), row(OLDER, [task('c')])]);
+    expect(store.docs.slice(0, 2)).toEqual(before);
+    expect(store.docs.filter((d) => d.localDate === OLDER)).toHaveLength(1);
+    expect(store.docs.filter((d) => d.localDate === '2026-09-01')).toHaveLength(1);
+  });
+
+  it('a writable mixed day is still skipped (the frozen-day rule applies before any repair)', async () => {
+    const recent = addDays(getToday(IST, NOW), -1);
+    store.docs.push(live({ localDate: recent }));
+    const report = await run([row(recent, [task('a'), task('b')])]);
+    expect(report.rowsSkippedWritable).toBe(1);
+    expect(report.recordsCreated).toBe(0);
+  });
+
+  it('ATOMIC: when one import of a mixed day fails, none of that day\'s imports stay, the canonical record is untouched, and the rerun repairs the day', async () => {
+    store.docs.push(live());
+    const aBefore = structuredClone(store.docs);
+    const rows = [row(OLD, ['a', 'b', 'c', 'd'].map((id) => task(id)))];
+    for (let failAt = 1; failAt <= 3; failAt += 1) {
+      let n = 0;
+      store.hooks.failCreate = () => (++n === failAt ? new Error('boom') : null);
+      const report = await run(rows);
+      expect(report.rowsFailed).toBe(1);
+      expect(report.recordsCreated).toBe(0);
+      expect(store.docs).toEqual(aBefore);
+    }
+    store.hooks.failCommit = () => Object.assign(new Error('commit failed'), { code: 'ECONNRESET' });
+    store.hooks.failCreate = undefined;
+    expect((await run(rows)).rowsFailed).toBe(1);
+    expect(store.docs).toEqual(aBefore);
+
+    store.hooks.failCommit = undefined;
+    const ok = await run(rows);
+    expect(ok.recordsCreated).toBe(3);
+    expect(store.docs.filter((d) => d.source === 'migrated')).toHaveLength(3);
+  });
+
+  it('a standalone server (no transactions) repairs nothing and reports the mixed day as failed', async () => {
+    store.docs.push(live());
+    store.hooks.standalone = true;
+    const report = await run([row(OLD, [task('a'), task('b')])]);
+    expect(report.rowsFailed).toBe(1);
+    expect(store.docs).toHaveLength(1);
+  });
+
+  it('RE-CHECKED inside the transaction: a record that covers B appears after the first look, so B is not imported (and not reported as an error)', async () => {
+    store.docs.push(live());
+    let finds = 0;
+    store.hooks.delay = (op) => {
+      if (op !== 'find') return;
+      finds += 1;
+      if (finds === 2) store.docs.push(live({ completionId: 'late-b', taskId: 'b', completedAt: new Date('2026-11-01T06:00:00Z') }));
+    };
+    const report = await run([row(OLD, [task('a'), task('b'), task('c')])]);
+    expect(report.rowsFailed).toBe(0);
+    expect(report.recordsCreated).toBe(1);
+    expect(report.recordsAlreadyPresent).toBe(1);
+    expect(store.docs.filter((d) => d.taskId === 'b')).toHaveLength(1);
+    expect(store.docs.find((d) => d.completionId === 'late-b')).toBeDefined();
+  });
+
+  it('two repairs at the same time leave one record per missing task (unique id; the loser sees "present")', async () => {
+    store.docs.push(live());
+    const rows = [row(OLD, [task('a'), task('b'), task('c')])];
+    const [r1, r2] = await Promise.all([run(rows), run(rows)]);
+    expect(store.docs.filter((d) => d.source === 'migrated')).toHaveLength(2);
+    expect(r1.recordsCreated + r2.recordsCreated).toBe(2);
+    expect(r1.rowsFailed + r2.rowsFailed).toBe(0);
+  });
+
+  it('a pure day that turns mixed after the first look is left alone by that run, and the next run repairs it', async () => {
+    let finds = 0;
+    store.hooks.delay = (op) => {
+      if (op !== 'find') return;
+      finds += 1;
+      if (finds === 2) store.docs.push(live({ completionId: 'late', taskId: 'a' }));
+    };
+    const rows = [row(OLD, [task('a'), task('b')])];
+    const first = await run(rows);
+    expect(first.recordsCreated).toBe(0);
+    store.hooks.delay = undefined;
+    const second = await run(rows);
+    expect(second.recordsCreated).toBe(1);
+    expect(store.docs.find((d) => d.source === 'migrated')?.taskId).toBe('b');
   });
 });

@@ -107,7 +107,7 @@ describe('real MongoDB: migrating DayHistory', () => {
     expect((await rawRecords()).filter((d) => d.taskId === 'shared-task')).toHaveLength(3);
   });
 
-  it('leaves a day that has ANY record alone (active live, or revoked-only), never modifies DayHistory, and skips writable days', async () => {
+  it('repairs a day that has records PER TASK (Phase 2F): covered tasks (active or revoked) are untouched, uncovered ones are imported, DayHistory is never modified, writable days are skipped', async () => {
     const owner = await account('m4');
     const today = getToday(IST);
     const REVOKED_DAY = addDays(getToday(IST), -50);
@@ -124,10 +124,35 @@ describe('real MongoDB: migrating DayHistory', () => {
 
     const report = await migrateDayHistory(cursorOf(), { apply: true });
 
-    expect(report.rowsSkippedExistingRecords).toBe(2);
+    expect(report.rowsSkippedExistingRecords).toBe(0);
+    expect(report.rowsMixedToRepair).toBe(2);
+    expect(report.recordsCoveredByCanonical).toBe(1); // 'a' on REVOKED_DAY (revoked records still cover their task)
     expect(report.rowsSkippedWritable).toBe(1);
-    expect((await rawRecords()).map((d) => d.completionId).sort()).toEqual(['live-old', 'rev-1']); // no B record
+    const ids = (await rawRecords()).map((d) => d.completionId).sort();
+    expect(ids).toEqual(['live-old', 'rev-1', migratedCompletionId(owner.id, OLD, 'x'), migratedCompletionId(owner.id, REVOKED_DAY, 'b')].sort());
     expect(JSON.stringify(await DayHistory.find({}).sort({ date: 1 }).lean())).toBe(legacyBefore);
+
+    const again = await migrateDayHistory(cursorOf(), { apply: true }); // idempotent against the real unique index
+    expect(again.recordsCreated).toBe(0);
+    expect(await rawRecords()).toHaveLength(4);
+  });
+
+  it('ATOMIC (real transaction): a failing import in a MIXED day rolls back the whole repair and leaves the canonical record alone', async () => {
+    const owner = await account('m4b');
+    await legacyDay(owner.id, OLD, ['a', 'b', 'c'].map((taskId) => ({ taskId, title: taskId, estimatedMinutes: 5 })));
+    await CompletionRecord.create({
+      userId: owner.id, completionId: 'live-a', taskId: 'a', titleSnapshot: 'a', estimatedMinutesSnapshot: 5, completedAt: new Date(`${OLD}T05:00:00Z`),
+      utcOffsetMinutes: 0, localDate: OLD, receivedAt: new Date(), status: 'active', source: 'live', completedAtSource: 'client',
+    });
+    // the id of c's import is taken by a record of ANOTHER day: b is inserted, then c violates the unique index and aborts the transaction
+    await CompletionRecord.create({
+      userId: owner.id, completionId: migratedCompletionId(owner.id, OLD, 'c'), taskId: 'c', titleSnapshot: 'c', estimatedMinutesSnapshot: 5,
+      completedAt: null, utcOffsetMinutes: null, localDate: addDays(OLD, -20), receivedAt: new Date(), status: 'active', source: 'migrated', completedAtSource: 'migrated',
+    });
+
+    await migrateDayHistory(cursorOf(), { apply: true });
+
+    expect((await rawRecords()).filter((d) => d.localDate === OLD).map((d) => d.completionId)).toEqual(['live-a']);
   });
 
   it('ATOMIC (real transaction): when a write in the MIDDLE of a day fails, the records already inserted by that transaction are rolled back, so no partial day exists', async () => {

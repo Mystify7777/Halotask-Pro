@@ -17,6 +17,24 @@
   ],
   "entries": [
     {
+      "date": "2026-11-12",
+      "category": "Backend",
+      "title": "Issue #47 phase 2F: mixed-day legacy completion repair",
+      "description": "The 2B migration used to skip any day that already had a CompletionRecord. After a 2E client completed one task on a day whose legacy snapshot held more, the day turned canonical and the other legacy tasks were never imported. The migration now repairs such a mixed day per task: a legacy task is covered when a record of the same task holds that local day in any status (canonical wins, revoked stays revoked); every uncovered task is imported as a migrated record with the same deterministic id a pure migration uses, in one transaction that re-reads the day, so reruns, concurrent runs and failures cannot duplicate or half-write. Runtime reads, legacy endpoints, DayHistory and the client are unchanged. Report gains rowsMixedToRepair, rowsMixedAlreadyCovered and recordsCoveredByCanonical. Server suite 49 files / 2282 tests without the MongoDB suites; 23 mutation checks, all killed.",
+      "files": [
+        "halotasks-server/src/utils/completionRecords.ts",
+        "halotasks-server/src/utils/completionMigration.ts",
+        "halotasks-server/src/scripts/migrateDayHistory.ts",
+        "halotasks-server/tests/completionMigration.test.ts",
+        "halotasks-server/tests/completionMigration.realmongo.test.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-11-11",
       "category": "Frontend",
       "title": "Issue #47 phase 2E: client completion-event pipeline",
@@ -1537,5 +1555,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-11T13:00:00.000Z"
+  "lastUpdated": "2026-11-12T12:00:00.000Z"
 }

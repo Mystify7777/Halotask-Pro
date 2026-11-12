@@ -11,7 +11,8 @@ import { migrateDayHistory, supportsTransactions, type MigrationOptions } from '
 //   ... -- --user=<userId>                                         one account only
 //   ... -- --include-writable-days                                 ALSO the last 7 local days. Only after legacy history
 //                                                                  writes are retired: see utils/completionMigration.ts.
-// Safe to rerun at any time: records have deterministic ids, a day that has any record is never touched, DayHistory is never modified.
+// Safe to rerun at any time: records have deterministic ids, existing records are never changed, DayHistory is never modified. A day that
+// already has records (written by 2E clients) is repaired per task: only legacy tasks no record covers are imported (Phase 2F).
 // --apply needs a replica set or mongos (every day is written in one transaction, so a day is never left partly migrated).
 
 export type CliArgs = Pick<MigrationOptions, 'apply' | 'includeWritableDays'> & { userId?: string };

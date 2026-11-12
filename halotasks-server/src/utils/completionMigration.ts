@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import CompletionRecord from '../models/CompletionRecord.model';
 import { addDays, getToday, isValidCalendarDate, MIN_UTC_OFFSET_MINUTES } from './calendarDate';
-import { recordMigratedDay } from './completionRecords';
+import { recordMigratedDay, recordMissingMigratedCompletions } from './completionRecords';
 import { HISTORY_RETENTION_DAYS, parseCompletedTask, type CompletedTaskInput } from './historyValidators';
 
 // -- Migrating legacy DayHistory into CompletionRecord (Issue #47, Phase 2B) -----------------------------------------------
@@ -21,9 +21,20 @@ import { HISTORY_RETENTION_DAYS, parseCompletedTask, type CompletedTaskInput } f
 //      days (PUT /api/history/*). A write that arrives after the day became canonical would be ignored. A date is frozen
 //      when no client, at any UTC offset, can still write it. `includeWritableDays` lifts this and is only safe after the
 //      legacy writes are retired.
-//   3. A day that already has ANY record (any status, any source) with that local day is left alone, exactly as the read
-//      contract defines "canonical": a revoked-only day is canonical too, and importing the snapshot into it could bring back
-//      what the records say no longer stands. Merging would also need the heuristic dedupe that O5 forbids.
+//   3. A day that already has records is not skipped wholesale any more (Phase 2F), because the read contract made it canonical
+//      the moment a 2E client wrote its first record, which hid every legacy task of that day nobody had recorded: a MIXED
+//      day. It is repaired PER TASK, and only here, never at read time (a canonical day is still never merged with its
+//      snapshot when it is read: O5):
+//        - a legacy task is COVERED when a record of the same task holds that local day, in ANY status (active, revoked,
+//          superseded) and from ANY source. Covered tasks are left alone: canonical records win, are never rewritten, and a
+//          task the records say was revoked is never brought back by the snapshot;
+//        - a legacy task no record covers is imported as a `migrated` record with the SAME deterministic id a pure migration
+//          would use, so a rerun finds it covered and writes nothing;
+//        - the day's missing records are written in one transaction, all or none (rule 4), re-reading the day inside it;
+//        - a day whose records are ALL migrated keeps the 2B behaviour (complete: nothing to do; some of this snapshot's: a
+//          reported partial day, never repaired here; unrelated migrated records: left alone). A mixed day needs a record
+//          from a live or server-dated source.
+//      A record with no local day (server-observed, legacy client) belongs to no day and covers nothing.
 //   4. A day is written ATOMICALLY: every record of the day in one MongoDB transaction (recordMigratedDay), so a day goes from
 //      legacy-only to fully canonical and is never left with some of its records. This is not optional: rule 3 would make a
 //      partial day permanent. Transactions need a replica set; on a standalone server an apply writes nothing (the CLI
@@ -70,8 +81,17 @@ export type MigrationReport = {
   rowsRead: number;
   rowsSkippedWritable: number;
   rowsSkippedInvalid: number;
-  /** Days that already have any CompletionRecord (live, revoked, server-observed with that day, or migrated by someone else). */
+  /**
+   * Days left alone because their records are all migrated and are not this snapshot's (see rule 3), or because a concurrent
+   * run wrote the day first. A day with live records is no longer skipped: it is counted in the mixed-day fields below.
+   */
   rowsSkippedExistingRecords: number;
+  /** Mixed days (records from a live or server-dated source) with at least one legacy task no record covers: repaired (apply) or to repair (dry run). */
+  rowsMixedToRepair: number;
+  /** Mixed days where every legacy task is already covered by a record (nothing to import; includes a day repaired by an earlier run). */
+  rowsMixedAlreadyCovered: number;
+  /** Legacy tasks left alone on mixed days because a record of that task already holds the day (canonical wins). */
+  recordsCoveredByCanonical: number;
   rowsEmpty: number;
   rowsAlreadyMigrated: number;
   /** Rows that have (dry run) or had (apply) records to create. */
@@ -108,6 +128,9 @@ const emptyReport = (options: MigrationOptions, now: Date): MigrationReport => (
   rowsSkippedWritable: 0,
   rowsSkippedInvalid: 0,
   rowsSkippedExistingRecords: 0,
+  rowsMixedToRepair: 0,
+  rowsMixedAlreadyCovered: 0,
+  recordsCoveredByCanonical: 0,
   rowsEmpty: 0,
   rowsAlreadyMigrated: 0,
   rowsToMigrate: 0,
@@ -190,24 +213,57 @@ export async function migrateDayHistory(
       }
 
       const existing = (await CompletionRecord.find({ userId, localDate: { $in: [date] } })
-        .select('completionId source')
-        .lean()) as unknown as { completionId: string; source: string }[];
+        .select('completionId taskId source')
+        .lean()) as unknown as { completionId: string; taskId: string; source: string }[];
 
       if (existing.length > 0) {
-        // The day is canonical already (any record, any status): never merged with the snapshot (O5).
-        const expected = new Set(tasks.map((task) => migratedCompletionId(userId, date, task.taskId)));
         const migratedOnly = existing.every((record) => record.source === 'migrated');
-        const complete = migratedOnly && existing.length === expected.size && existing.every((record) => expected.has(record.completionId));
-        if (complete) {
-          report.rowsAlreadyMigrated += 1;
-          report.recordsAlreadyPresent += expected.size;
-        } else if (migratedOnly && existing.some((record) => expected.has(record.completionId))) {
-          // Some of this snapshot's migrated records, but not all of them: a partial day. Reported, never repaired here.
-          report.rowsFailed += 1;
-          issue(userId, date, 'partial-migrated-day', `${existing.length} migrated record(s), snapshot has ${expected.size}`);
-        } else {
-          report.rowsSkippedExistingRecords += 1;
+
+        if (migratedOnly) {
+          // 2B behaviour, unchanged: only a day written by this migration (or something that looks like it) lands here.
+          const expected = new Set(tasks.map((task) => migratedCompletionId(userId, date, task.taskId)));
+          const complete = existing.length === expected.size && existing.every((record) => expected.has(record.completionId));
+          if (complete) {
+            report.rowsAlreadyMigrated += 1;
+            report.recordsAlreadyPresent += expected.size;
+          } else if (existing.some((record) => expected.has(record.completionId))) {
+            // Some of this snapshot's migrated records, but not all of them: a partial day. Reported, never repaired here.
+            report.rowsFailed += 1;
+            issue(userId, date, 'partial-migrated-day', `${existing.length} migrated record(s), snapshot has ${expected.size}`);
+          } else {
+            report.rowsSkippedExistingRecords += 1;
+          }
+          continue;
         }
+
+        // A MIXED day: repair per task (rule 3). Covered = a record of that task holds this day, in any status.
+        const covered = new Set(existing.map((record) => record.taskId));
+        const missing = tasks.filter((task) => !covered.has(task.taskId));
+        report.recordsCoveredByCanonical += tasks.length - missing.length;
+        if (missing.length === 0) {
+          report.rowsMixedAlreadyCovered += 1;
+          continue;
+        }
+
+        report.rowsMixedToRepair += 1;
+        report.recordsPlanned += missing.length;
+        if (!apply) continue;
+
+        const { created } = await recordMissingMigratedCompletions(
+          userId,
+          date,
+          missing.map((task) => ({
+            completionId: migratedCompletionId(userId, date, task.taskId),
+            taskId: task.taskId,
+            titleSnapshot: task.title,
+            estimatedMinutesSnapshot: task.estimatedMinutes,
+          })),
+          now,
+        );
+        report.recordsCreated += created;
+        // Fewer than planned means the day changed under us (a concurrent run, or a record that now covers a task): the
+        // transaction re-read the day and wrote only what was still missing. Nothing to report as an error.
+        report.recordsAlreadyPresent += missing.length - created;
         continue;
       }
 
