@@ -986,6 +986,32 @@ Filters, Summary, Completed and a task card's Details share one control, `compon
 - **Unchanged.** Filter semantics and selections (the selects stay mounted), the available filters, the layout and the open/closed state owned by the dashboard.
 - **Evidence.** `components/shared/DisclosureToggle.test.tsx` (9 tests); rendered at 320 px and 900 px with no horizontal overflow.
 
+### Server-Unavailable Launch Decision (Issue #49, phase 49A)
+
+**Status.** Phase 49A only: pure logic and its tests (`src/launch/launchState.ts`, `src/launch/probeBackoff.ts`, and a stricter `isSessionTokenValid` plus `getTokenUserId` in `utils/authSession.ts`). Nothing is wired into routes or UI yet (49B: one shared readiness hook, the pacing below, and the session-scoped verdict; 49C: routes, status line, waiting room; 49D: copy and accessibility).
+
+**Security boundary.** `trusted` is deliberately weaker than server authentication. It does not bypass server authorization: protected server operations still require the server to validate the session (signature, revocation, token version), and a 401 ends the session. Offline, the client intentionally permits access to locally cached data for a locally trusted session, because that data already exists on the device. The client cannot verify a JWT signature or a server-side revocation offline, so a session revoked elsewhere stays usable on this device until its next authenticated request returns 401, bounded by the 7-day token expiry. Nothing in the decision reaches `normal-online` without the server's own answer.
+
+**"Previously authenticated" (the trust rule).** Locally trusted means ALL of: a token that decodes, whose `exp` is a finite number in the future (a string, array or other coerced `exp` is not accepted; this tightened the existing check, which compared `exp > now` without a type check), AND a stored account whose `id` equals the token's string `userId`. Credentials that fail a check are `unverified` with a reason (`expired-or-malformed`, `no-stored-user`, `identity-mismatch`); no token is `none`. At startup the auth store already drops an expired or malformed token, so a cold start with one reads as `none` (the known-user path leads to `/login`, which carries the #12 warm-up); `unverified` is what a session looks like when it expires, loses its account record or mismatches while the app is open.
+
+**The decision** (`deriveLaunchState({ session, server, verdict })`, pure, deterministic):
+
+| session \ server | checking | ready | unavailable |
+|---|---|---|---|
+| trusted | `checking-server`, app | `revalidating` (verdict unknown) or `normal-online` (verdict valid), app | `offline-capable`, app |
+| unverified | `checking-server`, hold | `auth-flow`, login | `waiting-room` |
+| none | `auth-flow`, login | `auth-flow`, login | `auth-flow`, login |
+
+A server-confirmed `invalid` verdict is `auth-flow` in every case. `access: 'app'` only ever goes to a locally trusted session the server has not rejected. The unavailable cause (`browser-offline`, `waking`, `timeout`, `unhealthy`) is kept, and every `BackendFailureReason` is mapped explicitly (a new reason fails to compile instead of being reported as a timeout), so the UI never mixes "no network" with "server down".
+
+**`checking-server` has two meanings.** A trusted session keeps the app mounted (`access: 'app'`, at most a quiet readiness indication); an untrusted session holds (`access: 'hold'`, nothing protected, nothing alarming). Callers must branch on `access`, never on `state === 'checking-server'` alone.
+
+**The verdict is session-scoped.** It is set only from a real authenticated answer (a success, or a 401 for the current session), never from a health probe, and it belongs to one session: stored as a `ScopedVerdict` keyed by the token, read with `verdictFor(scoped, currentKey)` and written with `recordVerdict(current, response, currentKey)`. So user B never inherits user A's rejection, nothing survives sign-out, a late answer for A cannot change B, and a rejection is final for its session. 49B must store the verdict this way and test it through the real provider.
+
+**Probe pacing** (`probeDelayMs`): 2 s growing 1.6x per unanswered probe to a 15 s cap, +-20% jitter, 1 s floor (unreachable with the current constants, kept as a guard; a broken random source cannot produce NaN). Pacing only; readiness is still decided by a real `ok` probe (`useBackendReadiness`, `probeBackendHealth`), and probes stay sequential.
+
+**Evidence.** `launch/launchState.test.ts` (an exhaustive check over all 90 input combinations, pathological-token cases, scoped-verdict cases) and `launch/probeBackoff.test.ts`: 76 tests; 27 mutation checks, all killed except equivalents (the unreachable 1 s floor; the null-key guards in `verdictFor`/`recordVerdict`, which a string-vs-null comparison already covers). Real findings fixed: a NaN random source made the delay NaN, and `isSessionTokenValid` coerced a string or array `exp`.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

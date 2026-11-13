@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #49 phase 49A: launch decision and probe pacing (pure logic)
+
+**2026-11-13 · Frontend · in progress · Priority: high**
+
+Phase 49A of the server-unavailable launch work: the launch decision as pure, side-effect-free functions, with no UI change. classifySession says what 'previously authenticated' means without the server: a decodable token with a numeric, finite, unexpired exp AND a stored account whose id is the token's userId (trusted); credentials that fail a check are unverified with a reason; no token is none. deriveLaunchState combines that with the server status (the existing readiness phases, every failure reason mapped explicitly, with the cause kept: browser offline, waking, timeout, unhealthy) and what the server has said about the session (unknown, valid, invalid) into one of six states (checking-server, revalidating, normal-online, offline-capable, waiting-room, auth-flow) and what may be shown (app, hold, waiting-room, login). 'checking-server' has two meanings told apart by access: a trusted session keeps the app mounted, an untrusted one holds with nothing protected. The server's verdict is scoped to one session (ScopedVerdict, verdictFor, recordVerdict): a rejection of user A is never inherited by user B, nothing survives sign-out, a late answer for A cannot change B, and a rejection is final for its session. probeDelayMs paces readiness probes (2 s growing 1.6x to a 15 s cap, +-20% jitter, 1 s floor). A review of the first version also found a real weakness in the existing isSessionTokenValid: it compared exp > now without a type check, so a string or one-element array exp was coerced and could read as unexpired; exp must now be a finite number (legitimate tokens are unaffected). 'trusted' does not bypass server authorization: it only allows data already on the device while offline. Nothing is wired in yet (49B hoists the single readiness hook and stores the scoped verdict, 49C wires routes and UI). 76 new tests, including an exhaustive check over all 90 input combinations and pathological-token cases; 27 mutation checks, all killed or equivalent. Client suite 63 files / 1329 tests.
+
 #### Issue #11: one clear look for every show/hide control
 
 **2026-11-13 · Frontend · completed · Priority: medium**

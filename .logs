@@ -19,6 +19,24 @@
     {
       "date": "2026-11-13",
       "category": "Frontend",
+      "title": "Issue #49 phase 49A: launch decision and probe pacing (pure logic)",
+      "description": "Phase 49A of the server-unavailable launch work: the launch decision as pure, side-effect-free functions, with no UI change. classifySession says what 'previously authenticated' means without the server: a decodable token with a numeric, finite, unexpired exp AND a stored account whose id is the token's userId (trusted); credentials that fail a check are unverified with a reason; no token is none. deriveLaunchState combines that with the server status (the existing readiness phases, every failure reason mapped explicitly, with the cause kept: browser offline, waking, timeout, unhealthy) and what the server has said about the session (unknown, valid, invalid) into one of six states (checking-server, revalidating, normal-online, offline-capable, waiting-room, auth-flow) and what may be shown (app, hold, waiting-room, login). 'checking-server' has two meanings told apart by access: a trusted session keeps the app mounted, an untrusted one holds with nothing protected. The server's verdict is scoped to one session (ScopedVerdict, verdictFor, recordVerdict): a rejection of user A is never inherited by user B, nothing survives sign-out, a late answer for A cannot change B, and a rejection is final for its session. probeDelayMs paces readiness probes (2 s growing 1.6x to a 15 s cap, +-20% jitter, 1 s floor). A review of the first version also found a real weakness in the existing isSessionTokenValid: it compared exp > now without a type check, so a string or one-element array exp was coerced and could read as unexpired; exp must now be a finite number (legitimate tokens are unaffected). 'trusted' does not bypass server authorization: it only allows data already on the device while offline. Nothing is wired in yet (49B hoists the single readiness hook and stores the scoped verdict, 49C wires routes and UI). 76 new tests, including an exhaustive check over all 90 input combinations and pathological-token cases; 27 mutation checks, all killed or equivalent. Client suite 63 files / 1329 tests.",
+      "files": [
+        "halotasks-client/src/launch/launchState.ts",
+        "halotasks-client/src/launch/launchState.test.ts",
+        "halotasks-client/src/launch/probeBackoff.ts",
+        "halotasks-client/src/launch/probeBackoff.test.ts",
+        "halotasks-client/src/utils/authSession.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ],
+      "priority": "high",
+      "status": "in-progress"
+    },
+    {
+      "date": "2026-11-13",
+      "category": "Frontend",
       "title": "Issue #11: one clear look for every show/hide control",
       "description": "The Filters and Summary buttons were borderless ghost buttons whose state was a ▲/▼ glyph inside the label, while Details and Completed used ▸/▾ with the opposite meaning, so the four show/hide controls looked and read differently and the toolbar ones were easy to miss. They now share one DisclosureToggle control: a bordered pill (Filters, Summary), a full-width bar with a count (Completed) and a quiet inline control (Details), each with a CSS chevron that points right when collapsed and down when expanded, and a label that never changes with state (Details used to switch to 'Hide details' and its accessible name to 'Show/Hide subtasks and description for ...'; it is now 'Details' and 'Details for \"<title>\"'), plus primary-colour emphasis when expanded that suits each variant, so state is never colour alone (the chevron turns and aria-expanded says it). The chevron is hidden from assistive technology and the accessible name no longer contains a glyph; state is announced through aria-expanded, aria-controls is only set while the region exists, and an active filter shows a dot plus 'Filters are active' text for screen readers. A real keyboard bug is fixed on the way: the collapsed filter and sync panels were clipped but their controls stayed in the tab order, they are now inert while collapsed. Filter selections, filtering logic, the open/closed state each caller owns and the layout are unchanged; reduced motion is respected. Client suite 61 files / 1253 tests.",
       "files": [
@@ -1575,5 +1593,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-13T02:35:00.000Z"
+  "lastUpdated": "2026-11-13T02:45:00.000Z"
 }
