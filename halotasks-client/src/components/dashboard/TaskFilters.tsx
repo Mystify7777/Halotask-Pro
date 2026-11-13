@@ -1,6 +1,7 @@
 import { Priority } from '../../types/task';
 import { FilterMode } from '../../hooks/useTaskFilters';
 import { TASK_SORT_OPTIONS, TaskSortOption } from '../../hooks/useTaskSorting';
+import DisclosureToggle from '../shared/DisclosureToggle';
 
 type TaskFiltersProps = {
   search: string;
@@ -76,29 +77,22 @@ export default function TaskFilters({
         </div>
 
         <div className="filter-segment-actions">
-          <button
-            type="button"
-            className={`ghost-btn btn-sm filter-toggle-btn${hasActiveFilters ? ' filter-toggle-btn--active' : ''}`}
-            onClick={() => onFiltersExpandedChange(!filtersExpanded)}
-            aria-expanded={filtersExpanded}
-            aria-controls="filter-advanced-panel"
-          >
-            {filtersExpanded ? '▲ Filters' : '▼ Filters'}
-            {hasActiveFilters && !filtersExpanded && (
-              <span className="filter-active-dot" aria-label="Active filters" />
-            )}
-          </button>
+          <DisclosureToggle
+            label="Filters"
+            expanded={filtersExpanded}
+            onToggle={() => onFiltersExpandedChange(!filtersExpanded)}
+            controls="filter-advanced-panel"
+            attention={hasActiveFilters ? 'Filters are active' : undefined}
+          />
 
           {onSummaryExpandedChange && (
-            <button
-              type="button"
-              className="ghost-btn btn-sm filter-toggle-btn"
-              onClick={() => onSummaryExpandedChange(!summaryExpanded)}
-              aria-expanded={summaryExpanded}
-              aria-controls="summary-panel"
-            >
-              {summaryExpanded ? '▲ Summary' : '▼ Summary'}
-            </button>
+            <DisclosureToggle
+              label="Summary"
+              expanded={summaryExpanded}
+              onToggle={() => onSummaryExpandedChange(!summaryExpanded)}
+              // The panel is only in the page while it is open.
+              controls={summaryExpanded ? 'summary-panel' : undefined}
+            />
           )}
 
           {onAddTask && (
@@ -119,6 +113,8 @@ export default function TaskFilters({
         id="filter-advanced-panel"
         className={`filter-advanced${filtersExpanded ? ' filter-advanced--open' : ''}`}
         aria-hidden={!filtersExpanded}
+        // A collapsed panel is clipped, not removed: inert keeps its controls out of the tab order and the accessibility tree.
+        inert={!filtersExpanded}
       >
         <div className="filter-advanced-inner">
           <div className="filter-row-selects">

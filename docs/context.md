@@ -976,6 +976,16 @@ completed canonically and legacy-completed on the same day by a client that neve
 skipped until it freezes; run the migration after the 7-day window. (e) A pure day that turns mixed during a run is left alone by that run and repaired by the next.
 Evidence: `tests/completionMigration.test.ts` (60 tests) and the real-MongoDB suite (typechecked here, run in CI); 23 mutation checks, all killed.
 
+### Show/hide controls (Issue #11)
+
+Filters, Summary, Completed and a task card's Details share one control, `components/shared/DisclosureToggle.tsx` (variants `toolbar`, `row`, `inline`), styled by `.disclosure-*` in `styles/app.css`. It changes how the control looks and is announced, not what it does: each caller still owns its open state and its region.
+
+- **Look.** The chevron is drawn in CSS: right when collapsed, down when expanded. Expanded uses primary-colour emphasis that suits the variant (toolbar: filled and outlined; row: outlined; inline: text colour); the chevron turn and `aria-expanded` are the cues that do not depend on colour. Toolbar controls are bordered (36 px on a fine pointer, 44 px on touch); Details stays quiet inside a card.
+- **Accessibility.** The visible text names the thing and never changes with state (a task card's is "Details", named `Details for "<title>"`); the state is announced once, through `aria-expanded`. The chevron is `aria-hidden`. `aria-controls` is set only while the region is in the DOM (Summary, Completed, Details). An active filter shows a dot and the text "Filters are active" for screen readers (it is shown while expanded too).
+- **Keyboard fix.** The collapsed filter panel and sync row are clipped, not removed; they are now `inert` while collapsed, which keeps their controls out of the tab order and the accessibility tree.
+- **Unchanged.** Filter semantics and selections (the selects stay mounted), the available filters, the layout and the open/closed state owned by the dashboard.
+- **Evidence.** `components/shared/DisclosureToggle.test.tsx` (9 tests); rendered at 320 px and 900 px with no horizontal overflow.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

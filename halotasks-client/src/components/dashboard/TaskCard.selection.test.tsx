@@ -163,9 +163,9 @@ describe('expanded details move the actions into a bottom row', () => {
     const root = container.firstElementChild as HTMLElement;
     expect(root.className).not.toMatch(/cardExpanded/);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /subtasks and description/ }));
+    await user.click(screen.getByRole('button', { name: /^Details for/ }));
     expect(root.className).toMatch(/cardExpanded/);
-    await user.click(screen.getByRole('button', { name: /subtasks and description/ }));
+    await user.click(screen.getByRole('button', { name: /^Details for/ }));
     expect(root.className).not.toMatch(/cardExpanded/);
   });
 

@@ -61,7 +61,7 @@ describe('click to reveal the full title', () => {
 
   it('the details region is still labelled by the title', () => {
     mount();
-    const toggle = screen.getByRole('button', { name: /subtasks and description for "Plan trip"/ });
+    const toggle = screen.getByRole('button', { name: /Details for "Plan trip"/ });
     return userEvent.setup().click(toggle).then(() => {
       expect(screen.getByRole('region', { name: 'Plan trip' })).toBeInTheDocument();
     });
@@ -80,7 +80,7 @@ describe('other controls do not toggle the title and keep their own handlers', (
     expect(h.onToggleSelect).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('checkbox', { name: /Mark "Plan trip" as complete/ }));
     expect(h.onToggleTask).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: /subtasks and description for "Plan trip"/ }));
+    await user.click(screen.getByRole('button', { name: /Details for "Plan trip"/ }));
     await user.click(screen.getByRole('button', { name: 'Filter by tag: work' }));
     expect(h.onToggleTagFilter).toHaveBeenCalledTimes(1);
     expect(titleButton()).toHaveAttribute('aria-expanded', 'false');
@@ -89,7 +89,7 @@ describe('other controls do not toggle the title and keep their own handlers', (
   it('a subtask checkbox and the region body do not toggle it', async () => {
     const h = mount();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /subtasks and description for "Plan trip"/ }));
+    await user.click(screen.getByRole('button', { name: /Details for "Plan trip"/ }));
     await user.click(screen.getByRole('checkbox', { name: /step a/ }));
     expect(h.onToggleSubtask).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('region', { name: 'Plan trip' }));

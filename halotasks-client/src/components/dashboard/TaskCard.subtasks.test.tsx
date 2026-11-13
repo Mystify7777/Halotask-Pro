@@ -30,12 +30,12 @@ const mount = (task: Task, props: Partial<React.ComponentProps<typeof TaskCard>>
 };
 
 const rich = () => makeTask({ _id: 't1', title: 'Plan trip', description: 'line one\n  line two', subtasks: [sub('a', { completed: true }), sub('b'), sub('c')] });
-const disclosure = () => screen.getByRole('button', { name: /subtasks and description for "Plan trip"/ });
+const disclosure = () => screen.getByRole('button', { name: /Details for "Plan trip"/ });
 
 describe('a task without a description or subtasks renders as before', () => {
   it('has no disclosure, no progress, no region', () => {
     mount(makeTask({ title: 'Plain' }));
-    expect(screen.queryByRole('button', { name: /subtasks and description/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Details for/ })).toBeNull();
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.queryByRole('region')).toBeNull();
   });
@@ -50,7 +50,7 @@ describe('a task without a description or subtasks renders as before', () => {
 
   it('a blank (whitespace) description does not create a disclosure', () => {
     mount(makeTask({ description: '   \n ' }));
-    expect(screen.queryByRole('button', { name: /subtasks and description/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Details for/ })).toBeNull();
   });
 });
 
@@ -79,7 +79,7 @@ describe('progress and disclosure', () => {
 
     await user.click(disclosure());
 
-    const button = screen.getByRole('button', { name: /Hide subtasks and description for "Plan trip"/ });
+    const button = screen.getByRole('button', { name: /Details for "Plan trip"/ });
     expect(button).toHaveAttribute('aria-expanded', 'true');
     const region = screen.getByRole('region', { name: 'Plan trip' });
     expect(button).toHaveAttribute('aria-controls', region.id);
@@ -87,6 +87,23 @@ describe('progress and disclosure', () => {
 
     await user.click(button);
     expect(screen.queryByRole('region')).toBeNull();
+  });
+
+  it('keeps the Details label and accessible name stable while expanded: only aria-expanded changes (Issue #11)', async () => {
+    const user = userEvent.setup();
+    mount(rich());
+    const toggle = disclosure();
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveTextContent('Details');
+    expect(toggle).toHaveAccessibleName('Details for "Plan trip"');
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveTextContent('Details');
+    expect(toggle).not.toHaveTextContent(/hide/i);
+    expect(toggle).toHaveAccessibleName('Details for "Plan trip"');
   });
 
   it('does not point aria-controls at an element that is not rendered (collapsed)', () => {
@@ -118,7 +135,7 @@ describe('progress and disclosure', () => {
     const user = userEvent.setup();
     mount(makeTask({ title: 'D', description: 'just notes' }));
     expect(screen.queryByRole('progressbar')).toBeNull();
-    await user.click(screen.getByRole('button', { name: /subtasks and description for "D"/ }));
+    await user.click(screen.getByRole('button', { name: /Details for "D"/ }));
     expect(screen.getByText('just notes')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /step/ })).toBeNull();
   });

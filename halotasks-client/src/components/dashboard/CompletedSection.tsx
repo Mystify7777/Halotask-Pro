@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Task } from '../../types/task';
+import DisclosureToggle from '../shared/DisclosureToggle';
 
 type CompletedSectionProps = {
   tasks: Task[];
@@ -18,19 +19,15 @@ export default function CompletedSection({
 
   return (
     <div className="completed-section">
-      <button
-        type="button"
-        className="completed-section-toggle"
-        onClick={() => setIsExpanded((v) => !v)}
-        aria-expanded={isExpanded}
-        aria-controls="completed-section-list"
-      >
-        <span className="completed-section-chevron" aria-hidden="true">
-          {isExpanded ? '▾' : '▸'}
-        </span>
-        <span>Completed</span>
-        <span className="completed-section-count">{tasks.length}</span>
-      </button>
+      <DisclosureToggle
+        variant="row"
+        label="Completed"
+        expanded={isExpanded}
+        onToggle={() => setIsExpanded((v) => !v)}
+        controls={isExpanded ? 'completed-section-list' : undefined}
+        ariaLabel={`Completed, ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}
+        badge={tasks.length}
+      />
 
       {isExpanded && (
         <ul

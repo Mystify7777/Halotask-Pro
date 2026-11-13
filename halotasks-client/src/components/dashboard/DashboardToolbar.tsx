@@ -30,7 +30,7 @@ export default function DashboardToolbar({
         </div>
       )}
 
-      <div className={`toolbar-meta-wrap${isFiltersExpanded ? ' toolbar-meta-wrap--open' : ''}`} aria-hidden={!isFiltersExpanded}>
+      <div className={`toolbar-meta-wrap${isFiltersExpanded ? ' toolbar-meta-wrap--open' : ''}`} aria-hidden={!isFiltersExpanded} inert={!isFiltersExpanded}>
         <div className="toolbar-meta-inner">
           <div className="toolbar-meta">
             {syncArea}

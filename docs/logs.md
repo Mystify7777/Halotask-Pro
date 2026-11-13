@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #11: one clear look for every show/hide control
+
+**2026-11-13 · Frontend · completed · Priority: medium**
+
+The Filters and Summary buttons were borderless ghost buttons whose state was a ▲/▼ glyph inside the label, while Details and Completed used ▸/▾ with the opposite meaning, so the four show/hide controls looked and read differently and the toolbar ones were easy to miss. They now share one DisclosureToggle control: a bordered pill (Filters, Summary), a full-width bar with a count (Completed) and a quiet inline control (Details), each with a CSS chevron that points right when collapsed and down when expanded, and a label that never changes with state (Details used to switch to 'Hide details' and its accessible name to 'Show/Hide subtasks and description for ...'; it is now 'Details' and 'Details for "<title>"'), plus primary-colour emphasis when expanded that suits each variant, so state is never colour alone (the chevron turns and aria-expanded says it). The chevron is hidden from assistive technology and the accessible name no longer contains a glyph; state is announced through aria-expanded, aria-controls is only set while the region exists, and an active filter shows a dot plus 'Filters are active' text for screen readers. A real keyboard bug is fixed on the way: the collapsed filter and sync panels were clipped but their controls stayed in the tab order, they are now inert while collapsed. Filter selections, filtering logic, the open/closed state each caller owns and the layout are unchanged; reduced motion is respected. Client suite 61 files / 1253 tests.
+
 #### Issue #47 phase 2F: mixed-day legacy completion repair
 
 **2026-11-12 · Backend · completed · Priority: high**

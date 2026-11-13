@@ -5,6 +5,7 @@ import { formatDueLabel, formatStartLabel } from '../../utils/deadline';
 import { getSubtasks, subtaskProgress } from '../../utils/subtasks';
 import { normalizeTag } from '../../utils/tagHelpers';
 import styles from './TaskCard.module.css';
+import DisclosureToggle from '../shared/DisclosureToggle';
 
 type TaskCardProps = {
   task:               Task;
@@ -218,18 +219,16 @@ export default function TaskCard({
         </div>
 
         {hasDetails && (
-          <button
-            type="button"
-            className={styles.disclosure}
-            aria-expanded={expanded}
+          <DisclosureToggle
+            variant="inline"
+            label="Details"
+            expanded={expanded}
+            onToggle={() => setExpanded((current) => !current)}
             // The region is only rendered while open, so only then is there an element for aria-controls to point at.
-            aria-controls={expanded ? detailsId : undefined}
-            aria-label={`${expanded ? 'Hide' : 'Show'} subtasks and description for "${task.title}"`}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-            <span aria-hidden="true">{expanded ? 'Hide details' : 'Details'}</span>
-          </button>
+            controls={expanded ? detailsId : undefined}
+            // Stable, like the visible label: the state is announced by aria-expanded, never by changing the name.
+            ariaLabel={`Details for "${task.title}"`}
+          />
         )}
 
         {hasDetails && expanded && (
