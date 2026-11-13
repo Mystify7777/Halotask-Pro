@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useBackendReadiness, type BackendFailureReason } from '../hooks/useBackendReadiness';
+import { useOptionalLaunch, type SharedReadiness } from '../launch/launchContext';
 import ColdStartOverlay from './dashboard/ColdStartOverlay';
 
 const FAILURE_COPY: Record<BackendFailureReason, string> = {
@@ -21,7 +22,17 @@ const FAILURE_COPY: Record<BackendFailureReason, string> = {
  *    a normal wait. It does not block the form and offers another check.
  */
 export default function BackendWarmup() {
-  const { phase, reason, retry } = useBackendReadiness();
+  // Inside the app there is ONE readiness probe (Issue #49, LaunchProvider); this shows its answer instead of starting a
+  // second one. Rendered on its own (no provider), it keeps its own probe exactly as before.
+  const shared = useOptionalLaunch();
+  return shared ? <WarmupView {...shared.readiness} /> : <WarmupWithOwnProbe />;
+}
+
+function WarmupWithOwnProbe() {
+  return <WarmupView {...useBackendReadiness()} />;
+}
+
+function WarmupView({ phase, reason, retry }: SharedReadiness) {
   const [overlayOpen, setOverlayOpen] = useState(false);
 
   useEffect(() => {

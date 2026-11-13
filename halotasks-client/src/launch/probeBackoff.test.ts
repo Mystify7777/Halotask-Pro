@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { BACKOFF_BASE_MS, BACKOFF_CAP_MS, BACKOFF_FLOOR_MS, BACKOFF_JITTER, probeDelayMs } from './probeBackoff';
+import {
+  BACKGROUND_BASE_MS,
+  BACKOFF_BASE_MS,
+  BACKOFF_CAP_MS,
+  BACKOFF_FLOOR_MS,
+  BACKOFF_JITTER,
+  backgroundProbeDelayMs,
+  probeDelayMs,
+} from './probeBackoff';
 
 // Issue #49, phase 49A: probe pacing is a pure function, so "bounded" and "no storm" are checked directly.
 
@@ -57,5 +65,22 @@ describe('probeDelayMs', () => {
       elapsed += probeDelayMs(probes, lowest) + 10_000; // each probe may itself take up to its 10 s timeout
     }
     expect(probes).toBeLessThan(60);
+  });
+});
+
+describe('backgroundProbeDelayMs: the slow re-check after the wait has ended in error', () => {
+  it('is about 30 s, within +-20%', () => {
+    expect(backgroundProbeDelayMs(() => 0.5)).toBe(BACKGROUND_BASE_MS);
+    expect(backgroundProbeDelayMs(() => 0)).toBe(Math.round(BACKGROUND_BASE_MS * 0.8));
+    expect(backgroundProbeDelayMs(() => 0.999999)).toBeLessThanOrEqual(Math.round(BACKGROUND_BASE_MS * 1.2));
+  });
+
+  it('survives a broken random source', () => {
+    for (const bad of [NaN, Infinity, -Infinity, -5, 7]) {
+      const d = backgroundProbeDelayMs(() => bad);
+      expect(Number.isFinite(d)).toBe(true);
+      expect(d).toBeGreaterThanOrEqual(BACKGROUND_BASE_MS * 0.8);
+      expect(d).toBeLessThanOrEqual(BACKGROUND_BASE_MS * 1.2);
+    }
   });
 });

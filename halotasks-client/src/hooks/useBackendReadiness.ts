@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeBackendHealth } from '../services/healthService';
 
 /**
@@ -33,9 +33,27 @@ export const MAX_UNHEALTHY = 3;
 
 type State = { phase: BackendReadinessPhase; reason: BackendFailureReason | null };
 
+/**
+ * How probes are paced (Issue #49). The default, `FIXED_PACING`, is exactly the Issue #12 behaviour: a fixed gap, and the
+ * hook stops once the wait ends in 'error' (the sign-in pages offer a manual "Check again").
+ * The app-wide launch provider passes its own pacing: a growing gap with jitter, and a slow background re-check after
+ * 'error' so a server that comes back is noticed without a click. Probes stay sequential either way (one in flight).
+ */
+export type ReadinessPacing = {
+  /** Gap before the next probe, given how many probes in a row have gone without a healthy answer (1 = after the first). */
+  nextDelayMs: (unanswered: number) => number;
+  /** After the wait has ended in 'error', keep checking at this gap instead of stopping. null: stop (the default). */
+  backgroundDelayMs: (() => number) | null;
+};
+
+export const FIXED_PACING: ReadinessPacing = { nextDelayMs: () => RETRY_DELAY_MS, backgroundDelayMs: null };
+
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 
-export function useBackendReadiness(): State & { retry: () => void } {
+export function useBackendReadiness(pacing: ReadinessPacing = FIXED_PACING): State & { retry: () => void } {
+  // Read through a ref so a new object identity never restarts the probing; only the current pace matters.
+  const pacingRef = useRef(pacing);
+  pacingRef.current = pacing;
   const [state, setState] = useState<State>({ phase: 'checking', reason: null });
   const [runId, setRunId] = useState(0);
   const [online, setOnline] = useState(isOnline);
@@ -63,12 +81,16 @@ export function useBackendReadiness(): State & { retry: () => void } {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const markWaking = () => setState((current) => (current.phase === 'checking' ? { phase: 'waking', reason: null } : current));
+    const markError = (reason: BackendFailureReason) =>
+      setState((current) => (current.phase === 'error' && current.reason === reason ? current : { phase: 'error', reason }));
 
     setState({ phase: 'checking', reason: null });
     // Only decides when the warm-up UI appears. It never decides that the backend is ready or has failed.
     slowTimer = setTimeout(markWaking, SLOW_PROBE_MS);
 
     void (async () => {
+      let unanswered = 0;
+      let failed = false; // the wait has ended in 'error'; only a background pacing keeps probing from here
       for (;;) {
         const result = await probeBackendHealth(controller.signal);
         if (controller.signal.aborted) return;
@@ -79,23 +101,34 @@ export function useBackendReadiness(): State & { retry: () => void } {
           return;
         }
 
-        unhealthyStreak = result === 'unhealthy' ? unhealthyStreak + 1 : 0;
-        if (unhealthyStreak >= MAX_UNHEALTHY) {
-          clearTimeout(slowTimer);
-          setState({ phase: 'error', reason: 'unhealthy' });
-          return;
+        unanswered += 1;
+
+        if (failed) {
+          // Background re-check: stay in 'error' (never back to "waking"), keep the cause current.
+          markError(result === 'unhealthy' ? 'unhealthy' : 'timeout');
+        } else {
+          unhealthyStreak = result === 'unhealthy' ? unhealthyStreak + 1 : 0;
+          let failure: BackendFailureReason | null = null;
+          if (unhealthyStreak >= MAX_UNHEALTHY) {
+            failure = 'unhealthy';
+          } else {
+            markWaking();
+            if (Date.now() - startedAt >= WAKE_BUDGET_MS) failure = 'timeout';
+          }
+
+          if (failure) {
+            clearTimeout(slowTimer);
+            markError(failure);
+            failed = true;
+          }
         }
 
-        markWaking();
-
-        if (Date.now() - startedAt >= WAKE_BUDGET_MS) {
-          clearTimeout(slowTimer);
-          setState({ phase: 'error', reason: 'timeout' });
-          return;
-        }
+        const { nextDelayMs, backgroundDelayMs } = pacingRef.current;
+        if (failed && !backgroundDelayMs) return;
+        const gap = failed && backgroundDelayMs ? backgroundDelayMs() : nextDelayMs(unanswered);
 
         await new Promise<void>((resolve) => {
-          retryTimer = setTimeout(resolve, RETRY_DELAY_MS);
+          retryTimer = setTimeout(resolve, gap);
         });
         if (controller.signal.aborted) return;
       }

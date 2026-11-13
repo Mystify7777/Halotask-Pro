@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #49 phase 49B: launch provider, one shared probe, session-scoped verdict
+
+**2026-11-13 · Frontend · in progress · Priority: high**
+
+Phase 49B of the server-unavailable launch work: the React lifecycle that feeds the launch decision, with no visible UI change. A single LaunchProvider above the routes owns ONE readiness probe (the existing useBackendReadiness, now taking an optional pacing; the default is the Issue #12 behaviour unchanged), the session-scoped verdict and the decision. The probe uses the growing, jittered gaps of probeDelayMs and, after the wait ends in error, a slow background re-check (about 30 s) so a server that comes back is noticed without a click; the phase stays error in the background and probes never overlap. BackendWarmup shows the provider's answer instead of starting a second probe (and keeps its own when rendered alone). The API client reports what the server said about a session: a success for a request that carried a bearer token is valid, a 401 is invalid; sign-in, registration, password reset and token-less calls never report. The provider stores it only through recordVerdict and reads it through verdictFor, in memory, dropping it whenever the session instance changes, so a rejection of user A is never inherited by user B, a late answer for A cannot change B, and signing in again with the same token starts unknown. A trusted session is re-classified at its token's own expiry. Known limits left for 49C: a server that goes down after being ready is not noticed yet, and every page load probes once. 31 new tests through the real provider, hook, auth store and API interceptors; 14 mutation checks (13 killed, 1 equivalent). Client suite 65 files / 1360 tests.
+
 #### Issue #49 phase 49A: launch decision and probe pacing (pure logic)
 
 **2026-11-13 · Frontend · in progress · Priority: high**

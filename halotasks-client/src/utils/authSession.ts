@@ -46,6 +46,16 @@ export const getTokenUserId = (token: string | null): string | null => {
   return typeof userId === 'string' && userId.length > 0 ? userId : null;
 };
 
+/** When the token's own `exp` says it stops being valid, in epoch milliseconds; null when it has no usable `exp`. */
+export const getTokenExpiryMs = (token: string | null): number | null => {
+  if (!token) {
+    return null;
+  }
+
+  const exp = decodeJwtPayload(token)?.exp;
+  return typeof exp === 'number' && Number.isFinite(exp) ? exp * 1000 : null;
+};
+
 export const markKnownUser = (): void => {
   localStorage.setItem(KNOWN_USER_KEY, 'true');
 };

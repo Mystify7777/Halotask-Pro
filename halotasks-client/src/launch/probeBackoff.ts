@@ -21,3 +21,13 @@ export function probeDelayMs(attempt: number, random: () => number = Math.random
   const jittered = raw * (1 + (r * 2 - 1) * BACKOFF_JITTER);
   return Math.max(BACKOFF_FLOOR_MS, Math.round(jittered));
 }
+
+/** After the wait has ended in 'error', how often the launch provider quietly re-checks in the background. */
+export const BACKGROUND_BASE_MS = 30_000;
+
+/** ~30 s with the same +-20% jitter. One probe in flight at a time, so the server sees at most about two requests a minute per tab. */
+export function backgroundProbeDelayMs(random: () => number = Math.random): number {
+  const sample = random();
+  const r = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0.5;
+  return Math.round(BACKGROUND_BASE_MS * (1 + (r * 2 - 1) * BACKOFF_JITTER));
+}

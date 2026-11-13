@@ -255,3 +255,80 @@ describe('the page lifecycle', () => {
     expect(probe).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('launch pacing (Issue #49): a custom gap and a background re-check, opt-in', () => {
+  const pacing = (calls: number[] = []) => ({
+    nextDelayMs: (n: number) => {
+      calls.push(n);
+      return 1_000 * n;
+    },
+    backgroundDelayMs: () => 30_000,
+  });
+  const mountPaced = (p: ReturnType<typeof pacing>) => {
+    const phases: string[] = [];
+    const hook = renderHook(() => {
+      const s = useBackendReadiness(p);
+      phases.push(s.phase);
+      return s;
+    });
+    return { ...hook, phases };
+  };
+
+  it('asks the pacing for each gap with the count of unanswered probes (1, 2, 3...)', async () => {
+    answers('no-answer', 'no-answer', 'no-answer', 'ok');
+    const calls: number[] = [];
+    const { result } = mountPaced(pacing(calls));
+    await advance(0);
+    await advance(1_000);
+    await advance(2_000);
+    await advance(3_000);
+    expect(calls).toEqual([1, 2, 3]);
+    expect(result.current.phase).toBe('ready');
+  });
+
+  it('after the wait ends in error it keeps checking in the background, stays in error (never waking), and recovers to ready', async () => {
+    answers('no-answer');
+    const { result, phases } = mountPaced(pacing());
+    await advance(WAKE_BUDGET_MS + 20_000);
+    expect(result.current.phase).toBe('error');
+    const errorAt = phases.length;
+    const before = probe.mock.calls.length;
+    await advance(65_000);
+    expect(probe.mock.calls.length).toBeGreaterThanOrEqual(before + 2);
+    expect(phases.slice(errorAt)).not.toContain('waking');
+    expect(phases.slice(errorAt)).not.toContain('checking');
+
+    answers('ok');
+    await advance(30_000);
+    expect(result.current.phase).toBe('ready');
+    const done = probe.mock.calls.length;
+    await advance(5 * 60_000);
+    expect(probe).toHaveBeenCalledTimes(done); // ready ends it
+  });
+
+  it('the background re-check keeps the cause current (timeout <-> unhealthy)', async () => {
+    answers('no-answer');
+    const { result } = mountPaced(pacing());
+    await advance(WAKE_BUDGET_MS + 20_000);
+    expect(result.current.reason).toBe('timeout');
+    answers('unhealthy');
+    await advance(30_000);
+    expect(result.current.reason).toBe('unhealthy');
+    expect(result.current.phase).toBe('error');
+  });
+
+  it('probes never overlap: a slow probe is never joined by another', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    probe.mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5_000));
+      inFlight--;
+      return 'no-answer';
+    });
+    mountPaced(pacing());
+    await advance(5 * 60_000);
+    expect(peak).toBe(1);
+  });
+});

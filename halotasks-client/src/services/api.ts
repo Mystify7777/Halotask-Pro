@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { resolveApiBaseUrl } from '../config/apiBaseUrl';
+import { reportSessionAnswer } from '../launch/sessionAnswers';
 import { useAuthStore } from '../store/authStore';
 import { TOKEN_KEY } from '../store/authStore';
 
@@ -129,9 +130,23 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/** Sign-in, registration and password reset carry no session of their own: whatever they answer says nothing about a session. */
+const isPublicAuthCall = (config: { url?: string } | undefined): boolean => config?.url?.startsWith('/api/auth/') === true;
+
+/** Tells the launch provider what the server said about the session this request was sent with (Issue #49). */
+const reportAnswer = (config: { headers?: unknown; url?: string } | undefined, verdict: 'valid' | 'invalid'): void => {
+  const sessionKey = bearerSentWith(config);
+  if (sessionKey && !isPublicAuthCall(config)) reportSessionAnswer({ sessionKey, verdict });
+};
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    reportAnswer(response.config, 'valid');
+    return response;
+  },
   (error) => {
+    if (error?.response?.status === 401) reportAnswer(error.config, 'invalid');
+
     // A 401 only ends the session that issued the request. A late 401 for a previous account (logged out,
     // then another account signed in while the request was in flight) says nothing about the current one.
     if (error?.response?.status === 401 && issuedByActiveSession(error.config)) {
