@@ -60,7 +60,7 @@
 - ✅ `hooks/useTaskFilters.ts` - null-safe description search
 - ✅ `pages/ResetPasswordPage.tsx` - cleaned redirect timer, fixed token input to 6 digits
 - ✅ `pages/LoginPage.tsx` + `pages/RegisterPage.tsx` - trimmed auth emails
-- ✅ `hooks/useRedirectIfAuthenticated.ts` - shared authenticated redirect hook
+- ✅ `hooks/useRedirectIfAuthenticated.ts` - shared authenticated redirect hook (removed in Issue #49 phase 49D: unused, replaced by `AuthEntryRoute`)
 - ✅ `pages/ForgotPasswordPage.tsx` - trimmed email and disabled resubmit after success
 - ✅ `components/dashboard/TaskList.tsx` - Set-based selection and better empty state
 - ✅ `components/dashboard/GrowthTree.tsx` - static health constants moved outside component and footer fallback added
@@ -557,7 +557,7 @@ authService.register({ name: name.trim(), email: email.trim(), password })
 
 ---
 
-### 2.17 Pages — extract `useRedirectIfAuthenticated` hook ✅ Completed
+### 2.17 Pages — extract `useRedirectIfAuthenticated` hook ✅ Completed (hook later removed in Issue #49 / 49D, replaced by `AuthEntryRoute`)
 
 **Files:** `pages/LoginPage.tsx` + `pages/RegisterPage.tsx`
 

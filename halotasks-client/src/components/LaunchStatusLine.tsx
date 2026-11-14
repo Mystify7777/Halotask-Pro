@@ -17,17 +17,21 @@ const COPY: Record<UnavailableCause, string> = {
 export default function LaunchStatusLine() {
   // Without a provider (an isolated render of the layout) there is nothing to report.
   const launch = useOptionalLaunch();
-  if (!launch || launch.decision.state !== 'offline-capable' || !launch.decision.unavailable) return null;
-  const { readiness } = launch;
-  const cause = launch.decision.unavailable;
+  const cause = launch?.decision.state === 'offline-capable' ? launch.decision.unavailable : null;
 
+  // The live region is always mounted and only its content comes and goes: a region that is inserted together with its
+  // text is announced unreliably by screen readers, one that already exists is announced when its text appears.
   return (
-    <div className="launch-status" role="status" data-cause={cause}>
-      <span>{COPY[cause]}</span>
-      {cause !== 'browser-offline' && (
-        <button type="button" className="ghost-btn btn-sm" onClick={readiness.retry}>
-          Check now
-        </button>
+    <div role="status" aria-live="polite" className="launch-status-region">
+      {launch && cause && (
+        <div className="launch-status" data-cause={cause}>
+          <span>{COPY[cause]}</span>
+          {cause !== 'browser-offline' && (
+            <button type="button" className="ghost-btn btn-sm" onClick={launch.readiness.retry}>
+              Check now
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

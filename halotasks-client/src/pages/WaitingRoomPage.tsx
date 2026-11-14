@@ -39,7 +39,14 @@ export default function WaitingRoomPage() {
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const [playing, setPlaying] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const playRef = useRef<HTMLButtonElement>(null);
+  const wasPlaying = useRef(false);
   useEffect(() => headingRef.current?.focus(), []);
+  // When the game closes, focus goes back to the button that opened it (the dialog's unmount would drop it on <body>).
+  useEffect(() => {
+    if (wasPlaying.current && !playing) playRef.current?.focus();
+    wasPlaying.current = playing;
+  }, [playing]);
 
   const copy = COPY[decision.unavailable ?? 'timeout'];
   const offline = decision.unavailable === 'browser-offline';
@@ -78,7 +85,7 @@ export default function WaitingRoomPage() {
               Check now
             </button>
           )}
-          <button type="button" className="btn-secondary" onClick={() => setPlaying(true)} disabled={playing}>
+          <button type="button" className="btn-secondary" ref={playRef} onClick={() => setPlaying(true)} disabled={playing}>
             Play while you wait
           </button>
           <button type="button" className="btn-secondary" onClick={signOut}>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
 import { useServerRecoveries } from '../launch/launchContext';
+import { looksLikeServerTrouble } from '../launch/serverTrouble';
 import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
 import { processSyncQueue } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
@@ -122,6 +123,12 @@ export function useDashboardSync({
     setSyncStatus('synced');
   };
 
+  const unreachableNoticeRef = useRef(false);
+  // The browser's state NOW, not when the request started: a request that fails because the browser went offline
+  // mid-flight is not evidence about the server, and `looksLikeServerTrouble` must be told so.
+  const isOnlineRef = useRef(isOnline);
+  isOnlineRef.current = isOnline;
+
   const loadTasks = async () => {
     const cachedTasks = await getCachedTasks();
     const cachedSyncTime = await getLastSyncTimestamp();
@@ -169,6 +176,12 @@ export function useDashboardSync({
 
       await fetchFreshTasks();
 
+      // The calm "server unreachable" note was ours; once a load succeeds it is no longer true.
+      if (unreachableNoticeRef.current) {
+        unreachableNoticeRef.current = false;
+        setStatusInfo(null);
+      }
+
       // Only a real, successful response counts as "ready" — a request that
       // resolved fast (before the warmup UI ever appeared) has nothing to report.
       if (coldStartCycleRef.current === cycleId) {
@@ -176,7 +189,17 @@ export function useDashboardSync({
       }
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
-      if (cachedTasks.length > 0) {
+      if (looksLikeServerTrouble(axiosError, isOnlineRef.current)) {
+        // The server could not be reached. That is not an error in the person's data, and the app says so elsewhere
+        // (Issue #49): a calm note, not a red alarm that contradicts "you can keep working".
+        setStatusInfo(
+          cachedTasks.length > 0
+            ? "Showing what's saved on this device. Updates will appear when the server is back."
+            : 'Nothing is saved on this device yet. Your tasks will appear here when the server is back.',
+        );
+        unreachableNoticeRef.current = true;
+        if (cachedTasks.length > 0) setSyncStatus('cached');
+      } else if (cachedTasks.length > 0) {
         setStatusError('Unable to sync latest tasks. Showing cached data.');
         setSyncStatus('cached');
       } else {

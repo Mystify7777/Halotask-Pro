@@ -232,6 +232,20 @@ describe('a session that cannot be trusted without the server', () => {
     expect(secret()).toBeNull();
   });
 
+  it('closing the game with Escape puts focus back on "Play while you wait"', async () => {
+    await unverified();
+    answers('no-answer');
+    tree('/dashboard');
+    await advance(2_000);
+    const play = screen.getByRole('button', { name: 'Play while you wait' });
+    fireEvent.click(play);
+    const dialog = screen.getByRole('dialog', { name: 'Server loading' });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await advance(1_500);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Play while you wait' }));
+  });
+
   it('signing out while waiting leaves a correct signed-out state, not the waiting room', async () => {
     await unverified();
     answers('no-answer');

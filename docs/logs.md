@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #49 phase 49D: calm copy and accessibility pass
+
+**2026-11-14 · Frontend · in progress · Priority: high**
+
+Phase 49D of the server-unavailable launch work: calm copy and an accessibility pass, with no launch or auth policy change. When the server cannot be reached the dashboard no longer shows its red "Unable to load tasks" box: it shows a neutral note (what is saved on this device, and that tasks appear when the server is back), clears it by itself on the next good load, and still shows a real error when the server answers with one. The offline status line is now a permanent polite live region whose text comes and goes (so screen readers announce it), and its Check now button is 44 px tall on phones. Closing the Task Tapper from the waiting room returns focus to Play while you wait. The unused useRedirectIfAuthenticated hook was removed (a search found no importers). 13 new tests, 10 mutation checks (all killed), checked in a browser at 1280 and 320 px with the API blocked (no horizontal scroll, heading focus, Tab order, Escape). Client suite 69 files / 1445 tests.
+
 #### Issue #49 phase 49C: launch routing, waiting room, status line, recovery
 
 **2026-11-14 · Frontend · in progress · Priority: high**

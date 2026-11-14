@@ -19,6 +19,26 @@
     {
       "date": "2026-11-14",
       "category": "Frontend",
+      "title": "Issue #49 phase 49D: calm copy and accessibility pass",
+      "description": "Phase 49D of the server-unavailable launch work: calm copy and an accessibility pass, with no launch or auth policy change. When the server cannot be reached the dashboard no longer shows its red \"Unable to load tasks\" box: it shows a neutral note (what is saved on this device, and that tasks appear when the server is back), clears it by itself on the next good load, and still shows a real error when the server answers with one. The offline status line is now a permanent polite live region whose text comes and goes (so screen readers announce it), and its Check now button is 44 px tall on phones. Closing the Task Tapper from the waiting room returns focus to Play while you wait. The unused useRedirectIfAuthenticated hook was removed (a search found no importers). 13 new tests, 10 mutation checks (all killed), checked in a browser at 1280 and 320 px with the API blocked (no horizontal scroll, heading focus, Tab order, Escape). Client suite 69 files / 1445 tests.",
+      "files": [
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/hooks/useDashboardSync.test.ts",
+        "halotasks-client/src/components/LaunchStatusLine.tsx",
+        "halotasks-client/src/components/LaunchStatusLine.test.tsx",
+        "halotasks-client/src/pages/WaitingRoomPage.tsx",
+        "halotasks-client/src/launch/LaunchRouting.test.tsx",
+        "halotasks-client/src/styles/app.css",
+        "halotasks-client/src/hooks/useRedirectIfAuthenticated.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        "docs/HalotaskPro-Client-UpgradePlan.md",
+        ".logs"
+      ]
+    },
+    {
+      "date": "2026-11-14",
+      "category": "Frontend",
       "title": "Issue #49 phase 49C: launch routing, waiting room, status line, recovery",
       "description": "Phase 49C of the server-unavailable launch work: routing, screens and runtime recovery on top of the launch decision. ProtectedRoute, the entry gate and the four public sign-in routes (through AuthEntryRoute) all obey decision.access only (app, hold, waiting-room, login), so a session the launch does not trust cannot reach protected content, step around the waiting room through a sign-in route, or bounce between a guard and the sign-in page. A trusted session opens the app even with the server down and shows one slim status line saying it keeps working and will sync; an unverified session gets a waiting room (explanation per cause, automatic re-checks, Check now, the existing data-free Task Tapper, Sign out) and moves on by itself when the server answers, with no reload. The dashboard re-syncs through its existing load when the server comes back, never twice just because it opened. A failed authenticated request that looks like an unreachable server only asks for one fresh readiness probe (at most once per 30 s, only while ready); the probe decides. The probe runs only where something uses the answer (a session exists, or sign-in, register and the two password-reset pages, which now show the Issue #12 warm-up); an anonymous visitor on the landing page asks nothing. 72 new tests, 24 mutation checks (23 killed, 1 equivalent), checked in a browser with the API blocked. Client suite 68 files / 1432 tests.",
       "files": [
@@ -1648,5 +1668,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-14T07:01:00.000Z"
+  "lastUpdated": "2026-11-14T10:38:00.000Z"
 }
