@@ -332,3 +332,29 @@ describe('launch pacing (Issue #49): a custom gap and a background re-check, opt
     expect(peak).toBe(1);
   });
 });
+
+describe('enabled (Issue #49): nothing is probed where nothing uses the answer', () => {
+  it('is dormant, with no probe at all, while disabled, and starts the moment it is enabled', async () => {
+    answers('ok');
+    const hook = renderHook(({ on }) => useBackendReadiness(undefined, on), { initialProps: { on: false } });
+    await advance(60_000);
+    expect(hook.result.current.phase).toBe('dormant');
+    expect(probe).not.toHaveBeenCalled();
+
+    hook.rerender({ on: true });
+    await advance(0);
+    expect(hook.result.current.phase).toBe('ready');
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('disabling again stops probing at once', async () => {
+    answers('no-answer');
+    const hook = renderHook(({ on }) => useBackendReadiness(undefined, on), { initialProps: { on: true } });
+    await advance(5_000);
+    hook.rerender({ on: false });
+    const calls = probe.mock.calls.length;
+    await advance(5 * 60_000);
+    expect(probe).toHaveBeenCalledTimes(calls);
+    expect(hook.result.current.phase).toBe('dormant');
+  });
+});

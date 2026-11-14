@@ -69,6 +69,9 @@ export function serverStatusFrom(phase: BackendReadinessPhase, reason: BackendFa
     case 'ready':
       return { kind: 'ready' };
     case 'checking':
+    case 'dormant':
+      // 'dormant' means nothing asked for the server (an anonymous page): the answer cannot matter then, and the first render
+      // after a session appears reads as "checking", which is the quiet, correct start.
       return { kind: 'checking' };
     case 'idle':
       return { kind: 'unavailable', cause: 'browser-offline' };

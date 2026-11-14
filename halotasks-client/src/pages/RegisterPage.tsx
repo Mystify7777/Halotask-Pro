@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import BackendWarmup from '../components/BackendWarmup';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { hasCompletedOnboarding, isSessionTokenValid } from '../utils/authSession';
+import { hasCompletedOnboarding } from '../utils/authSession';
 import styles from './AuthPages.module.css';
 
 type StrengthLevel = 0 | 1 | 2 | 3;
@@ -28,7 +28,6 @@ const STRENGTH_META: Record<StrengthLevel, { label: string; color: string; width
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const token = useAuthStore((state) => state.token);
   const setAuth = useAuthStore((state) => state.setAuth);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -41,11 +40,6 @@ export default function RegisterPage() {
   const strengthMeta = STRENGTH_META[strength];
   const confirmMismatch = confirm.length > 0 && confirm !== password;
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate(hasCompletedOnboarding() ? '/dashboard' : '/onboarding', { replace: true });
-    }
-  }, [token, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

@@ -1,16 +1,14 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import BackendWarmup from '../components/BackendWarmup';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
 import styles from './AuthPages.module.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const token = useAuthStore((state) => state.token);
   const setAuth = useAuthStore((state) => state.setAuth);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,11 +17,6 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [token, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

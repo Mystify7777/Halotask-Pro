@@ -9,6 +9,8 @@ export type LaunchContextValue = {
   /** What the app may show now. Render by `decision.access`, never by `decision.state` alone. */
   decision: LaunchDecision;
   readiness: SharedReadiness;
+  /** Times the server came back after being unavailable. Moves only on a real recovery, never on a brief healthy re-check. */
+  serverRecoveries: number;
 };
 
 export const LaunchContext = createContext<LaunchContextValue | null>(null);
@@ -21,3 +23,6 @@ export function useLaunch(): LaunchContextValue {
 
 /** For code that must also work without the provider (the sign-in warm-up keeps its own probe when rendered alone). */
 export const useOptionalLaunch = (): LaunchContextValue | null => useContext(LaunchContext);
+
+/** Recoveries seen so far; 0 without a provider (isolated renders), so a consumer simply never re-syncs there. */
+export const useServerRecoveries = (): number => useContext(LaunchContext)?.serverRecoveries ?? 0;

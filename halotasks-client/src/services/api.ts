@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { resolveApiBaseUrl } from '../config/apiBaseUrl';
 import { reportSessionAnswer } from '../launch/sessionAnswers';
+import { looksLikeServerTrouble, reportServerTrouble } from '../launch/serverTrouble';
 import { useAuthStore } from '../store/authStore';
 import { TOKEN_KEY } from '../store/authStore';
 
@@ -146,6 +147,15 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     if (error?.response?.status === 401) reportAnswer(error.config, 'invalid');
+    // An authenticated request that failed like an unreachable server only asks the launch provider for a fresh readiness
+    // probe; it never decides anything itself (Issue #49). Public auth calls are not part of a session.
+    if (
+      bearerSentWith(error?.config) &&
+      !isPublicAuthCall(error?.config) &&
+      looksLikeServerTrouble(error ?? {}, typeof navigator === 'undefined' || navigator.onLine !== false)
+    ) {
+      reportServerTrouble();
+    }
 
     // A 401 only ends the session that issued the request. A late 401 for a previous account (logged out,
     // then another account signed in while the request was in flight) says nothing about the current one.

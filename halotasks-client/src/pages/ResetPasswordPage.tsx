@@ -2,14 +2,12 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
-import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import BackendWarmup from '../components/BackendWarmup';
 import styles from './AuthPages.module.css';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const authToken = useAuthStore((s) => s.token);
 
   const prefilledEmail = (location.state as { email?: string } | null)?.email ?? '';
 
@@ -23,11 +21,6 @@ export default function ResetPasswordPage() {
 
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (isSessionTokenValid(authToken)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [authToken, navigate]);
 
   useEffect(() => {
     return () => {
@@ -132,6 +125,8 @@ export default function ResetPasswordPage() {
               <h1 className={styles.cardTitle}>Set a new password</h1>
               <p className={styles.cardSub}>Enter the 6-digit code from your email and choose a new password.</p>
             </div>
+
+            <BackendWarmup />
 
             <form onSubmit={handleSubmit} className="auth-form" noValidate>
               <label>

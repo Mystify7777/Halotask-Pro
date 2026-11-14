@@ -140,6 +140,7 @@ describe('classifySession: pathological tokens (the policy boundary must not tru
 describe('serverStatusFrom: the existing readiness phases, with the cause kept apart', () => {
   it.each<[BackendReadinessPhase, BackendFailureReason | null, ServerStatus]>([
     ['checking', null, { kind: 'checking' }],
+    ['dormant', null, { kind: 'checking' }], // nothing asked for the server: only ever with no session, where the answer cannot matter
     ['ready', null, { kind: 'ready' }],
     ['idle', null, { kind: 'unavailable', cause: 'browser-offline' }],
     ['waking', null, { kind: 'unavailable', cause: 'waking' }],

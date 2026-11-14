@@ -1,9 +1,8 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
-import { useAuthStore } from '../store/authStore';
-import { isSessionTokenValid } from '../utils/authSession';
+import BackendWarmup from '../components/BackendWarmup';
 import styles from './AuthPages.module.css';
 
 const NEUTRAL_MESSAGE =
@@ -12,18 +11,12 @@ const NEUTRAL_MESSAGE =
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
-  const token = useAuthStore((s) => s.token);
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
-  useEffect(() => {
-    if (isSessionTokenValid(token)) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [navigate, token]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -69,6 +62,8 @@ export default function ForgotPasswordPage() {
           <h1 className={styles.cardTitle}>Forgot password?</h1>
           <p className={styles.cardSub}>Enter your email and we'll send you a reset code.</p>
         </div>
+
+        <BackendWarmup />
 
         {sent ? (
           <>

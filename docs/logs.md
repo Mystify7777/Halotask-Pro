@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #49 phase 49C: launch routing, waiting room, status line, recovery
+
+**2026-11-14 · Frontend · in progress · Priority: high**
+
+Phase 49C of the server-unavailable launch work: routing, screens and runtime recovery on top of the launch decision. ProtectedRoute, the entry gate and the four public sign-in routes (through AuthEntryRoute) all obey decision.access only (app, hold, waiting-room, login), so a session the launch does not trust cannot reach protected content, step around the waiting room through a sign-in route, or bounce between a guard and the sign-in page. A trusted session opens the app even with the server down and shows one slim status line saying it keeps working and will sync; an unverified session gets a waiting room (explanation per cause, automatic re-checks, Check now, the existing data-free Task Tapper, Sign out) and moves on by itself when the server answers, with no reload. The dashboard re-syncs through its existing load when the server comes back, never twice just because it opened. A failed authenticated request that looks like an unreachable server only asks for one fresh readiness probe (at most once per 30 s, only while ready); the probe decides. The probe runs only where something uses the answer (a session exists, or sign-in, register and the two password-reset pages, which now show the Issue #12 warm-up); an anonymous visitor on the landing page asks nothing. 72 new tests, 24 mutation checks (23 killed, 1 equivalent), checked in a browser with the API blocked. Client suite 68 files / 1432 tests.
+
 #### Issue #49 phase 49B: launch provider, one shared probe, session-scoped verdict
 
 **2026-11-13 · Frontend · in progress · Priority: high**

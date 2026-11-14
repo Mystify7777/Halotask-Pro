@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../App';
+import LaunchStatusLine from './LaunchStatusLine';
 import styles from './AppLayout.module.css';
 
 type OrbData = { xp: number; stage: string; xpToNext: number; progressPct: number };
@@ -151,6 +152,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </button>
         </div>
       </header>
+
+      <LaunchStatusLine />
 
       <main className={`main-grid ${styles.main}`}>{children}</main>
 

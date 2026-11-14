@@ -224,3 +224,9 @@
 .resendBtn:hover {
   color: var(--color-text-link);
 }
+
+/* A heading that receives focus from script when a screen opens (so a screen reader announces it) needs no ring:
+   it is not an interactive control, and the ring would look like a stray box. */
+.focusTarget:focus {
+  outline: none;
+}

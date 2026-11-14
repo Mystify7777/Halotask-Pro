@@ -1,6 +1,7 @@
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import axios from 'axios';
 import { useEffect, type ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HealthProbeResult } from '../services/healthService';
 
@@ -20,6 +21,7 @@ import { useAuthStore } from '../store/authStore';
 import LaunchProvider from './LaunchProvider';
 import { useLaunch } from './launchContext';
 import { reportSessionAnswer, subscribeSessionAnswers } from './sessionAnswers';
+import { TROUBLE_RECHECK_MIN_GAP_MS, reportServerTrouble } from './serverTrouble';
 
 const NOW = new Date('2026-11-13T10:00:00Z');
 const b64 = (v: object) => btoa(JSON.stringify(v)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -37,7 +39,12 @@ const answers = (...results: HealthProbeResult[]) => {
 };
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
-const wrapper = ({ children }: { children: ReactNode }) => <LaunchProvider>{children}</LaunchProvider>;
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <MemoryRouter initialEntries={['/dashboard']}>
+    <LaunchProvider>{children}</LaunchProvider>
+  </MemoryRouter>
+);
+const inApp = (ui: ReactNode, path = '/dashboard') => render(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>);
 const mount = () => renderHook(() => useLaunch(), { wrapper });
 const stateOf = (r: { current: ReturnType<typeof useLaunch> }) => `${r.current.decision.state}/${r.current.decision.access}`;
 
@@ -127,7 +134,7 @@ describe('recovery without a reload or a remount', () => {
     await signIn('u1');
     const mounted = vi.fn();
     answers('no-answer');
-    render(<LaunchProvider><Probe onMount={mounted} /></LaunchProvider>);
+    inApp(<LaunchProvider><Probe onMount={mounted} /></LaunchProvider>);
     await advance(WAKE_BUDGET_MS + 30_000);
     expect(screen.getByTestId('s').textContent).toBe('offline-capable/app');
 
@@ -284,7 +291,7 @@ describe('a trusted session stops being trusted when its token expires', () => {
 describe('one probe for the whole app', () => {
   it('the sign-in warm-up shows the provider\'s answer instead of starting a second probe', async () => {
     answers('no-answer');
-    render(<LaunchProvider><BackendWarmup /></LaunchProvider>);
+    inApp(<LaunchProvider><BackendWarmup /></LaunchProvider>, '/login'); // signed out: only a sign-in page probes
     await advance(0);
     expect(probe).toHaveBeenCalledTimes(1);
     await advance(WAKE_BUDGET_MS + 20_000);
@@ -377,5 +384,139 @@ describe('the API client is the only source of verdicts', () => {
     await act(async () => { release(); await inFlight; });
     expect(useAuthStore.getState().user?.id).toBe('b');
     expect(stateOf(result)).toBe('revalidating/app');
+  });
+});
+
+describe('mid-session server loss: a failed request only asks, the probe decides (49C)', () => {
+  const trouble = () => act(() => reportServerTrouble());
+  const readyAndConfirmed = async () => {
+    await signIn('a');
+    answers('ok');
+    const hook = mount();
+    await advance(0);
+    await answer(tokenFor('a'), 'valid');
+    probe.mockClear();
+    return hook;
+  };
+
+  it('one failure asks for one fresh probe; a healthy answer changes nothing the user can see and counts as no recovery', async () => {
+    const { result } = await readyAndConfirmed();
+    const seen = new Set<string>();
+    trouble();
+    for (let i = 0; i < 5; i++) {
+      await advance(500);
+      seen.add(stateOf(result));
+    }
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(stateOf(result)).toBe('normal-online/app');
+    expect([...seen].every((s) => s.endsWith('/app'))).toBe(true);
+    expect(seen.has('offline-capable/app')).toBe(false);
+    expect(result.current.serverRecoveries).toBe(0);
+  });
+
+  it('a burst of failures is still one probe, and the next one is allowed only after the minimum gap', async () => {
+    await readyAndConfirmed();
+    for (let i = 0; i < 50; i++) trouble();
+    await advance(0);
+    expect(probe).toHaveBeenCalledTimes(1);
+    await advance(TROUBLE_RECHECK_MIN_GAP_MS - 1_000);
+    trouble();
+    await advance(0);
+    expect(probe).toHaveBeenCalledTimes(1);
+    await advance(1_000);
+    trouble();
+    await advance(0);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('when the probe fails too, the app goes offline-capable (still the app), and the server coming back is exactly one recovery', async () => {
+    const { result } = await readyAndConfirmed();
+    answers('no-answer');
+    trouble();
+    await advance(3_000);
+    expect(stateOf(result)).toBe('offline-capable/app');
+    expect(result.current.serverRecoveries).toBe(0);
+
+    answers('ok');
+    await advance(150_000);
+    expect(result.current.decision.state).toBe('normal-online'); // the earlier confirmation still holds for this session
+    expect(result.current.serverRecoveries).toBe(1);
+  });
+
+  it('is ignored while the server is already known to be unavailable', async () => {
+    await signIn('a');
+    answers('no-answer');
+    const { result } = mount();
+    await advance(3_000);
+    const calls = probe.mock.calls.length;
+    trouble();
+    await advance(0);
+    expect(probe.mock.calls.length).toBe(calls);
+    expect(result.current.decision.state).toBe('offline-capable');
+  });
+
+  it('"Check now" after a failed wait that then succeeds is a recovery', async () => {
+    await signIn('a');
+    answers('no-answer');
+    const { result } = mount();
+    await advance(100_000);
+    answers('ok');
+    act(() => result.current.readiness.retry());
+    await advance(0);
+    expect(result.current.serverRecoveries).toBe(1);
+  });
+});
+
+describe('the API client tells the provider about unreachable servers (49C)', () => {
+  const failWith = (init: { code?: string; status?: number }) =>
+    vi.fn(async (config: never) => {
+      throw new axios.AxiosError(
+        'fail',
+        init.code,
+        config,
+        null,
+        init.status ? ({ status: init.status, statusText: '', headers: {}, config, data: {} } as never) : undefined,
+      );
+    });
+  const probesAfter = async (call: () => Promise<unknown>) => {
+    await signIn('a');
+    answers('ok');
+    mount();
+    await advance(0);
+    probe.mockClear();
+    await act(async () => { await call().catch(() => undefined); });
+    await advance(0);
+    return probe.mock.calls.length;
+  };
+
+  beforeEach(() => {
+    vi.spyOn(authRedirect, 'toLogin').mockImplementation(() => undefined);
+  });
+
+  it.each([
+    ['a network error', { code: 'ERR_NETWORK' }],
+    ['a timeout', { code: 'ECONNABORTED' }],
+    ['a 502', { status: 502 }],
+    ['a 503', { status: 503 }],
+    ['a 504', { status: 504 }],
+  ])('%s on an authenticated request asks for one probe', async (_name, init) => {
+    apiClient.defaults.adapter = failWith(init) as never;
+    expect(await probesAfter(() => apiClient.get('/api/tasks'))).toBe(1);
+  });
+
+  it.each([
+    ['a 400', { status: 400 }],
+    ['a 404', { status: 404 }],
+    ['a 409', { status: 409 }],
+    ['a 500', { status: 500 }],
+    ['a cancelled request', { code: 'ERR_CANCELED' }],
+  ])('%s is the server speaking (or the app cancelling): no probe', async (_name, init) => {
+    apiClient.defaults.adapter = failWith(init) as never;
+    expect(await probesAfter(() => apiClient.get('/api/tasks'))).toBe(0);
+  });
+
+  it('a public sign-in call that cannot reach the server is not session trouble', async () => {
+    apiClient.defaults.adapter = failWith({ code: 'ERR_NETWORK' }) as never;
+    expect(await probesAfter(() => apiClient.post('/api/auth/login', {}))).toBe(0);
   });
 });

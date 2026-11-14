@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
+import { useServerRecoveries } from '../launch/launchContext';
 import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
 import { processSyncQueue } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
@@ -209,6 +210,18 @@ export function useDashboardSync({
     setLoadingTasks(true);
     void loadTasks();
   }, [isOnline]);
+
+  // The server came back after being unavailable (Issue #49): the work that piled up while it was away is sent and the
+  // list is read fresh, exactly as when the browser comes back online, without waiting for a manual "Sync now". This
+  // only starts the existing load; the cold-start overlay and the queue are still the existing ones. The count at mount
+  // is the baseline, so opening the dashboard never causes a second load.
+  const serverRecoveries = useServerRecoveries();
+  const seenRecoveries = useRef(serverRecoveries);
+  useEffect(() => {
+    if (serverRecoveries === seenRecoveries.current) return;
+    seenRecoveries.current = serverRecoveries;
+    if (isOnline) void loadTasks();
+  }, [serverRecoveries]);
 
   const handleRetrySync = async () => {
     if (!isOnline) {

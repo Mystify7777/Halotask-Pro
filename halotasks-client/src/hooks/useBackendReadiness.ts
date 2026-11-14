@@ -5,13 +5,15 @@ import { probeBackendHealth } from '../services/healthService';
  * Where the backend stands, as learned from real readiness probes (Issue #12). It needs no session, no user and no task
  * data, so it works on the login and register pages before anyone is signed in.
  *
+ *  - 'dormant'   nothing needs the server right now (Issue #49: the launch provider does not probe on pages that do not use
+ *                the answer); it starts as soon as something does
  *  - 'idle'      nothing to wait for (the browser is offline; probing starts when it is back online)
  *  - 'checking'  the first probe is out and has not been slow yet: show nothing
  *  - 'waking'    a probe came back without a healthy answer, or the first one is slow: the backend is (probably) cold
  *  - 'ready'     a probe got `ok`. This is the ONLY way to get here; no timer ever declares the backend ready
  *  - 'error'     the wait ended without success, with a `reason` that tells the two failures apart
  */
-export type BackendReadinessPhase = 'idle' | 'checking' | 'waking' | 'ready' | 'error';
+export type BackendReadinessPhase = 'dormant' | 'idle' | 'checking' | 'waking' | 'ready' | 'error';
 
 /**
  *  - 'timeout'    nothing healthy answered within WAKE_BUDGET_MS: the host is down or unreachable, not just slow
@@ -50,7 +52,8 @@ export const FIXED_PACING: ReadinessPacing = { nextDelayMs: () => RETRY_DELAY_MS
 
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 
-export function useBackendReadiness(pacing: ReadinessPacing = FIXED_PACING): State & { retry: () => void } {
+/** `enabled` (default true) lets the launch provider hold the probe back where nothing uses it; callers that always want it ignore it. */
+export function useBackendReadiness(pacing: ReadinessPacing = FIXED_PACING, enabled = true): State & { retry: () => void } {
   // Read through a ref so a new object identity never restarts the probing; only the current pace matters.
   const pacingRef = useRef(pacing);
   pacingRef.current = pacing;
@@ -69,6 +72,11 @@ export function useBackendReadiness(pacing: ReadinessPacing = FIXED_PACING): Sta
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setState({ phase: 'dormant', reason: null });
+      return;
+    }
+
     if (!online) {
       setState({ phase: 'idle', reason: null });
       return;
@@ -139,7 +147,7 @@ export function useBackendReadiness(pacing: ReadinessPacing = FIXED_PACING): Sta
       clearTimeout(slowTimer);
       clearTimeout(retryTimer);
     };
-  }, [runId, online]);
+  }, [runId, online, enabled]);
 
   const retry = useCallback(() => setRunId((current) => current + 1), []);
 

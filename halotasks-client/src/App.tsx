@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import AppLayout from './components/AppLayout';
+import AuthEntryRoute from './components/AuthEntryRoute';
 import ProtectedRoute from './components/ProtectedRoute';
 import SmartEntryGate from './components/SmartEntryGate';
 import LaunchProvider from './launch/LaunchProvider';
@@ -30,15 +31,15 @@ export default function App() {
 
   return (
     <ThemeContext.Provider value={themeControls}>
-      <LaunchProvider>
-        <BrowserRouter>
+      <BrowserRouter>
+        <LaunchProvider>
           <Routes>
             <Route path="/" element={<SmartEntryGate />} />
             <Route path="/home" element={<HomePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/login" element={<AuthEntryRoute><LoginPage /></AuthEntryRoute>} />
+            <Route path="/forgot-password" element={<AuthEntryRoute><ForgotPasswordPage /></AuthEntryRoute>} />
+            <Route path="/reset-password" element={<AuthEntryRoute><ResetPasswordPage /></AuthEntryRoute>} />
+            <Route path="/register" element={<AuthEntryRoute onboardingAware><RegisterPage /></AuthEntryRoute>} />
             <Route
               path="/onboarding"
               element={
@@ -89,8 +90,8 @@ export default function App() {
             />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
-        </BrowserRouter>
-      </LaunchProvider>
+        </LaunchProvider>
+      </BrowserRouter>
     </ThemeContext.Provider>
   );
 }

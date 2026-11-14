@@ -18,6 +18,8 @@ vi.mock('../services/authService', () => ({
 
 import { apiClient } from '../services/api';
 import { authService } from '../services/authService';
+import { FIXED_PACING } from '../hooks/useBackendReadiness';
+import LaunchProvider from '../launch/LaunchProvider';
 import { useAuthStore } from '../store/authStore';
 import LoginPage from './LoginPage';
 import RegisterPage from './RegisterPage';
@@ -37,13 +39,16 @@ const overlay = () => screen.queryByRole('dialog', { name: 'Server loading' });
 const renderAt = (path: '/login' | '/register') =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/dashboard" element={<p>dashboard reached</p>} />
-        <Route path="/onboarding" element={<p>onboarding reached</p>} />
-        <Route path="/home" element={<p>home</p>} />
-      </Routes>
+      {/* The app always has the launch provider; FIXED_PACING keeps these Issue #12 expectations on their original timing. */}
+      <LaunchProvider pacing={FIXED_PACING}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/dashboard" element={<p>dashboard reached</p>} />
+          <Route path="/onboarding" element={<p>onboarding reached</p>} />
+          <Route path="/home" element={<p>home</p>} />
+        </Routes>
+      </LaunchProvider>
     </MemoryRouter>,
   );
 
