@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #48 phase 48B: Insights history reader
+
+**2026-11-14 · Frontend · in progress · Priority: medium**
+
+Phase 48B of the Insights redesign: the history reader, with no UI. src/insights/dayPoints.ts (pure) turns the server's history rows or the device's 7 days into the DayPoints the trend model takes, and src/insights/trendHistory.ts loads them through the existing GET /api/history (one request for the 90 days ending on the device's local today, which serves the 7, 30 and 90-day ranges), with a 60 s in-memory cache, one shared request for concurrent callers, and a fallback to the 7 days the device holds when the browser is offline or the server does not answer usefully (coverage 'device-only', never presented as 90 days, never cached). A day is known from the first day with evidence of history onward; days before it are unknown, not zero. A server answer of the wrong length, dates or order is refused and falls back. The reader only reads: no PUT, no snapshot update, no reconcile, no new endpoint, and no change to offline/history.ts; an answer that arrives after the account changed is dropped. Findings: the server requires endDate to be today and answers at most 90 days, so a 90-day range has no earlier window to compare with (comparison reports previous-missing); the 90-day payload measured on synthetic data is about 53 KiB raw for 5 completions a day and 175 KiB for 20 a day (the server does not compress), so no counts-only query is justified. 53 new tests, 25 mutation checks (all killed). Client suite 72 files / 1569 tests, typecheck clean.
+
 #### Issue #48 phase 48A: pure Insights trend model
 
 **2026-11-14 · Frontend · in progress · Priority: medium**

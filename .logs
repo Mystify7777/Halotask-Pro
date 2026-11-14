@@ -19,6 +19,22 @@
     {
       "date": "2026-11-14",
       "category": "Frontend",
+      "title": "Issue #48 phase 48B: Insights history reader",
+      "description": "Phase 48B of the Insights redesign: the history reader, with no UI. src/insights/dayPoints.ts (pure) turns the server's history rows or the device's 7 days into the DayPoints the trend model takes, and src/insights/trendHistory.ts loads them through the existing GET /api/history (one request for the 90 days ending on the device's local today, which serves the 7, 30 and 90-day ranges), with a 60 s in-memory cache, one shared request for concurrent callers, and a fallback to the 7 days the device holds when the browser is offline or the server does not answer usefully (coverage 'device-only', never presented as 90 days, never cached). A day is known from the first day with evidence of history onward; days before it are unknown, not zero. A server answer of the wrong length, dates or order is refused and falls back. The reader only reads: no PUT, no snapshot update, no reconcile, no new endpoint, and no change to offline/history.ts; an answer that arrives after the account changed is dropped. Findings: the server requires endDate to be today and answers at most 90 days, so a 90-day range has no earlier window to compare with (comparison reports previous-missing); the 90-day payload measured on synthetic data is about 53 KiB raw for 5 completions a day and 175 KiB for 20 a day (the server does not compress), so no counts-only query is justified. 53 new tests, 25 mutation checks (all killed). Client suite 72 files / 1569 tests, typecheck clean.",
+      "files": [
+        "halotasks-client/src/insights/dayPoints.ts",
+        "halotasks-client/src/insights/dayPoints.test.ts",
+        "halotasks-client/src/insights/trendHistory.ts",
+        "halotasks-client/src/insights/trendHistory.test.ts",
+        "halotasks-client/src/services/historyService.test.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ]
+    },
+    {
+      "date": "2026-11-14",
+      "category": "Frontend",
       "title": "Issue #48 phase 48A: pure Insights trend model",
       "description": "Phase 48A of the Insights redesign: the pure trend model, with no UI, no API call, no storage and no new endpoint. src/insights/trend.ts takes already-normalised DayPoints (date, completed, minutes, known) from a future history reader and computes everything else: 7, 30 and 90-day windows, the previous window for comparison, totals, active days, best day, weekday averages and weekly buckets. known separates a real zero day from a day before recorded history; unknown days are left out of every count and a comparison that would need one is reported as unavailable (with the reason) instead of computed over a hole. The model never decides what today is or which timezone a day belongs to: the last point is today, and calendar arithmetic uses UTC date parts only, so DST and device timezone cannot change a result. Weekday averages need at least 4 known days of every weekday. A broken series (gap, duplicate, out of order, bad date, negative or fractional counts) is reported as invalid rather than charted. 71 new tests (including a source guard that the module imports nothing and never reads a clock, randomness, storage or the network), 23 mutation checks (22 killed, 1 equivalent). Client suite 70 files / 1516 tests, typecheck clean.",
       "files": [
@@ -1681,5 +1697,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-14T15:27:50.000Z"
+  "lastUpdated": "2026-11-14T15:58:03.000Z"
 }

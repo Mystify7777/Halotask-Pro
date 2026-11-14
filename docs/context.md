@@ -1060,6 +1060,20 @@ A server-confirmed `invalid` verdict is `auth-flow` in every case. `access: 'app
 - **Not here by design.** Streak (stays with the Growth Tree, D3), offline behaviour (48B, D4), the count/list disclosure (48C, D5).
 - **Evidence.** 71 tests (calendar edges, validation, every status and comparison reason, 7/30/90, purity and a source guard), 23 mutation checks (22 killed, 1 equivalent: the day-of-month check in date validation is implied by the month check). Client suite 70 files / 1516 tests.
 
+### Insights history reader (Issue #48, phase 48B)
+
+**Status.** Phase 48B only: `src/insights/dayPoints.ts` (pure) and `src/insights/trendHistory.ts` (I/O). Nothing renders them yet; 48C (page) and 48D (polish) follow, each on request.
+
+- **One request.** `historyService.getHistory(90, today)` on the existing `GET /api/history`. The server requires `endDate` to be the client's today and answers at most 90 days, so one request serves every range: 7 and 30 days (each with the equal window before it) and 90 days. A 90-day range has no earlier window to compare with; the trend model reports `previous-missing`. Changing that needs a server change (#47-F4), not done.
+- **Read-only.** No PUT, no snapshot update, no reconcile, no queue, no change to `offline/history.ts`; the only state is a 60 s in-memory cache of the last server answer (keyed by account and local day, one shared request for concurrent callers, dropped when the account changes mid-request, never filled by a fallback). `invalidateTrendHistory()` is for the page to call after it changes completions.
+- **Today.** The reader owns it: the device's local calendar day (`toLocalDateKey`), the same basis as every history request.
+- **Known span.** A day is `known` from the first day with evidence of history onward (server `source` canonical or legacy, or an existing row from an older server; locally, a completion). Earlier days are unknown, not zero. Limit: only the fetched window is visible, so an account active long before the window and idle for the stretch before its first recent activity looks new, and those leading days are reported unknown. This fails toward "comparison unavailable", never toward a made-up number; fixing it needs the account start date from the server.
+- **No catch in the reader, by contract.** `historyService.getHistory` never rejects: every transport or parsing failure is `null` (14 tests in `historyService.test.ts` prove it, including a thrown non-Error and a synchronous throw). The reader therefore has no try/catch, so a rejection would be a programming error that surfaces. The account check is account-scoped, not session-scoped: signing out and back in as the same user while a request is pending is not detected (no cross-account leak).
+- **Fallback (D4).** Offline, or a server answer that is missing, of the wrong length, dates or order: the 7 days from `getWeekHistory` (including changes not yet synced), `coverage: 'device-only'` with a reason (`browser-offline` | `unavailable`). The page must say older history needs a connection.
+- **Payload (measured on synthetic data of the real response shape).** 90 days raw JSON: 12 KiB empty, 29.5 KiB at 2 completions a day, 53 KiB at 5, 175 KiB at 20, 828 KiB at 100, 4.0 MiB at the server cap of 500. The server has no compression middleware (gzip would be 7.5 KiB at 5 a day, if the host compresses). Normal use is tens of KiB, so no counts-only endpoint is justified now.
+- **Open for 48C.** Insights has two sources for "today" (this series and the 7-day store that feeds the cards); the page should read one.
+- **Evidence.** 53 new tests (known span, broken answers, day boundary at 23:30 and 00:30, cache and TTL, single flight, account switching, offline and failure fallback, a strict-double guard that nothing is written, and 14 proving that historyService.getHistory never rejects), 25 mutation checks (all killed; one equivalent mutant was removed as dead code). Client suite 72 files / 1569 tests.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through
