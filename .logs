@@ -19,6 +19,19 @@
     {
       "date": "2026-11-14",
       "category": "Frontend",
+      "title": "Issue #48 phase 48A: pure Insights trend model",
+      "description": "Phase 48A of the Insights redesign: the pure trend model, with no UI, no API call, no storage and no new endpoint. src/insights/trend.ts takes already-normalised DayPoints (date, completed, minutes, known) from a future history reader and computes everything else: 7, 30 and 90-day windows, the previous window for comparison, totals, active days, best day, weekday averages and weekly buckets. known separates a real zero day from a day before recorded history; unknown days are left out of every count and a comparison that would need one is reported as unavailable (with the reason) instead of computed over a hole. The model never decides what today is or which timezone a day belongs to: the last point is today, and calendar arithmetic uses UTC date parts only, so DST and device timezone cannot change a result. Weekday averages need at least 4 known days of every weekday. A broken series (gap, duplicate, out of order, bad date, negative or fractional counts) is reported as invalid rather than charted. 71 new tests (including a source guard that the module imports nothing and never reads a clock, randomness, storage or the network), 23 mutation checks (22 killed, 1 equivalent). Client suite 70 files / 1516 tests, typecheck clean.",
+      "files": [
+        "halotasks-client/src/insights/trend.ts",
+        "halotasks-client/src/insights/trend.test.ts",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ]
+    },
+    {
+      "date": "2026-11-14",
+      "category": "Frontend",
       "title": "Issue #49 phase 49D: calm copy and accessibility pass",
       "description": "Phase 49D of the server-unavailable launch work: calm copy and an accessibility pass, with no launch or auth policy change. When the server cannot be reached the dashboard no longer shows its red \"Unable to load tasks\" box: it shows a neutral note (what is saved on this device, and that tasks appear when the server is back), clears it by itself on the next good load, and still shows a real error when the server answers with one. The offline status line is now a permanent polite live region whose text comes and goes (so screen readers announce it), and its Check now button is 44 px tall on phones. Closing the Task Tapper from the waiting room returns focus to Play while you wait. The unused useRedirectIfAuthenticated hook was removed (a search found no importers). 13 new tests, 10 mutation checks (all killed), checked in a browser at 1280 and 320 px with the API blocked (no horizontal scroll, heading focus, Tab order, Escape). Client suite 69 files / 1445 tests.",
       "files": [
@@ -1668,5 +1681,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-14T10:38:00.000Z"
+  "lastUpdated": "2026-11-14T15:27:50.000Z"
 }

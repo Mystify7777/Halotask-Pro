@@ -1048,6 +1048,18 @@ A server-confirmed `invalid` verdict is `auth-flow` in every case. `access: 'app
 - **Removed.** `hooks/useRedirectIfAuthenticated.ts` (a search found no importers; routing uses `AuthEntryRoute`).
 - **Evidence.** 13 new tests (dashboard notes, live region, focus return, offline invariant), 10 mutation checks (all killed), browser pass at 1280 and 320 px with the API blocked (no horizontal scroll, Tab order, Escape). Client suite 69 files / 1445 tests.
 
+### Insights trend model (Issue #48, phase 48A)
+
+**Status.** Phase 48A only: `src/insights/trend.ts`, a pure model with no UI, no fetch, no storage and no new endpoint. Nothing consumes it yet; 48B (history reader), 48C (page) and 48D (polish) follow, each on request. Design and decisions D1-D5: project doc `design-issue-48.md`.
+
+- **Boundary.** `GET /api/history` -> history reader (48B: source, local date, coverage) -> `DayPoint[]` -> this module -> Insights UI. The reader owns timezone and day-boundary interpretation; this module never decides what "today" is (the last point is today) and uses `Date.UTC` calendar arithmetic only.
+- **`known`.** `true`: inside recorded history, a day with no completions is a real zero. `false`: nothing recorded; left out of totals, active days, averages and comparisons (numbers attached to it are ignored).
+- **Outputs (`buildTrend(points, 7 | 30 | 90)`).** Window = last N days, previous = the N before (rolling, D2). Summary (completed, minutes, active days, best day; the most recent on a tie), comparison (deltas and a percentage, `null` when the previous period had none), weekly buckets aligned to the end of the window, weekday averages only with at least 4 known days of every weekday (leaders must average at least 1).
+- **Status.** `no-history`, `no-activity`, `partial` (history begins inside the window, or the series is shorter than the range: `truncated`), `complete`; a broken series (gap, duplicate, out of order, bad date, negative or fractional counts) is `invalid`, never charted.
+- **Comparison unavailable** (with a reason) unless both windows are complete and fully known: `previous-missing`, `no-previous-history`, `previous-incomplete`, `current-incomplete`.
+- **Not here by design.** Streak (stays with the Growth Tree, D3), offline behaviour (48B, D4), the count/list disclosure (48C, D5).
+- **Evidence.** 71 tests (calendar edges, validation, every status and comparison reason, 7/30/90, purity and a source guard), 23 mutation checks (22 killed, 1 equivalent: the day-of-month check in date validation is implied by the month check). Client suite 70 files / 1516 tests.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through

@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #48 phase 48A: pure Insights trend model
+
+**2026-11-14 · Frontend · in progress · Priority: medium**
+
+Phase 48A of the Insights redesign: the pure trend model, with no UI, no API call, no storage and no new endpoint. src/insights/trend.ts takes already-normalised DayPoints (date, completed, minutes, known) from a future history reader and computes everything else: 7, 30 and 90-day windows, the previous window for comparison, totals, active days, best day, weekday averages and weekly buckets. known separates a real zero day from a day before recorded history; unknown days are left out of every count and a comparison that would need one is reported as unavailable (with the reason) instead of computed over a hole. The model never decides what today is or which timezone a day belongs to: the last point is today, and calendar arithmetic uses UTC date parts only, so DST and device timezone cannot change a result. Weekday averages need at least 4 known days of every weekday. A broken series (gap, duplicate, out of order, bad date, negative or fractional counts) is reported as invalid rather than charted. 71 new tests (including a source guard that the module imports nothing and never reads a clock, randomness, storage or the network), 23 mutation checks (22 killed, 1 equivalent). Client suite 70 files / 1516 tests, typecheck clean.
+
 #### Issue #49 phase 49D: calm copy and accessibility pass
 
 **2026-11-14 · Frontend · in progress · Priority: high**
