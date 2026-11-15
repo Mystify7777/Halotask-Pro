@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #48 phase 48D: Insights polish (pattern rules, accessibility, layout)
+
+**2026-11-15 · Frontend · completed · Priority: medium**
+
+Phase 48D of the Insights redesign: polish. (1) Weekday pattern rules: a best weekday is claimed only when it is clear, i.e. at least 4 known days per weekday, an average of at least 1, no more than 3 weekdays tied, and at least 1.5x the average of the other weekdays; a steady week no longer produces 'most tasks on every day'. The sentence now says how many known days of history it rests on and that it does not follow the chosen range. (2) Accessibility from a real axe-core pass in a browser (all four themes, 1280 and 320 px, every state): the 7-day view was invalid ARIA (aria-pressed together with role=listitem on a button), it is now a real list of list items each holding one button; the range toggle's active state, the Today card labels, the work-done card, today's day label and the day task durations failed contrast and now use theme tokens; day buttons get the app's focus ring; the headline is a polite live region so a range change is announced. No Insights violation remains; the app header and the floating XP orb (shared, not Insights) still report contrast failures. (3) Layout: the Insights page is one column (440 px, one variable, --insights-max-width) and the Today cards are two columns, all left-aligned (clickable cards are buttons, which centred their content while the others did not). 10 new tests, 11 mutation checks (all killed), keyboard walk-through (range, days, cards, table). Review follow-up: the pattern sentence reads "Based on N known days of history" (known days are a count, not a calendar span). Client suite 75 files / 1633 tests, typecheck clean.
+
 #### Issue #48 phase 48C: Insights page around persistent trends
 
 **2026-11-15 · Frontend · completed · Priority: medium**

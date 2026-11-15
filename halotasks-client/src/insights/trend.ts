@@ -40,6 +40,10 @@ export type TrendRange = (typeof TREND_RANGES)[number];
 export const MIN_SAMPLES_PER_WEEKDAY = 4;
 /** A weekday must average at least this many completions to be called "best" (a day of 0.4 is not a habit). */
 export const MIN_BEST_WEEKDAY_AVERAGE = 1;
+/** More leaders than this is not a pattern ("most on every day"): the result carries no leaders. */
+export const MAX_LEADING_WEEKDAYS = 3;
+/** The leaders must average at least this many times the average of the other weekdays, or the difference is noise. */
+export const MIN_LEADER_RATIO = 1.5;
 
 // ─── Calendar arithmetic (no timezone involved) ──────────────────────────────────────────────────────────────────
 
@@ -195,7 +199,11 @@ export type WeekdayAverages =
       status: 'ok';
       /** Index 0 = Sunday ... 6 = Saturday. Average completions per known day of that weekday. */
       averages: number[];
-      /** Weekdays sharing the highest average, when it is at least `MIN_BEST_WEEKDAY_AVERAGE`; empty otherwise. */
+      /**
+       * Weekdays sharing the highest average, only when the pattern is clear: the average is at least
+       * `MIN_BEST_WEEKDAY_AVERAGE`, no more than `MAX_LEADING_WEEKDAYS` weekdays tie, and it is at least `MIN_LEADER_RATIO`
+       * times the average of the other weekdays. Empty otherwise (a steady week has no best day).
+       */
       leaders: number[];
     };
 
@@ -218,8 +226,11 @@ export function weekdayAverages(window: readonly DayPoint[]): WeekdayAverages {
 
   const averages = totals.map((total, dow) => total / samples[dow]);
   const top = Math.max(...averages);
-  const leaders = top >= MIN_BEST_WEEKDAY_AVERAGE ? averages.flatMap((a, dow) => (a === top ? [dow] : [])) : [];
-  return { status: 'ok', averages, leaders };
+  const tied = top >= MIN_BEST_WEEKDAY_AVERAGE ? averages.flatMap((a, dow) => (a === top ? [dow] : [])) : [];
+  const others = averages.filter((a) => a !== top);
+  const othersMean = others.length === 0 ? 0 : others.reduce((sum, a) => sum + a, 0) / others.length;
+  const clear = tied.length > 0 && tied.length <= MAX_LEADING_WEEKDAYS && others.length > 0 && top >= MIN_LEADER_RATIO * othersMean;
+  return { status: 'ok', averages, leaders: clear ? tied : [] };
 }
 
 // ─── Weekly buckets (for the 90-day bars) ────────────────────────────────────────────────────────────────────────

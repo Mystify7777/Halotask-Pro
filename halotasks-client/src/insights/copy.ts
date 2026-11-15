@@ -73,6 +73,10 @@ export function weekdayList(dows: readonly number[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
+/** The weekday pattern sentence. It always says how much history it rests on (a count of KNOWN days, not a calendar span): it is about the whole history read, not the chosen range. */
+export const patternNote = (leaders: readonly number[], knownDays: number): string =>
+  `You tend to complete the most tasks on ${weekdayList(leaders)}. Based on ${knownDays} known ${knownDays === 1 ? 'day' : 'days'} of history.`;
+
 export const dayLabel = (date: string, today: string): string =>
   date === today ? 'Today' : formatDateKey(date, { weekday: 'long', month: 'short', day: 'numeric' });
 

@@ -9,6 +9,8 @@ import {
   summarize,
   weekBuckets,
   weekdayAverages,
+  MAX_LEADING_WEEKDAYS,
+  MIN_LEADER_RATIO,
   weekdayOf,
   type DayPoint,
   type TrendRange,
@@ -225,6 +227,33 @@ describe('weekdayAverages', () => {
   it('an average of exactly the threshold counts as a leader', () => {
     const r = weekdayAverages(fourWeeks([0, 1, 0, 0, 0, 0, 0]));
     expect(r).toMatchObject({ status: 'ok', leaders: [1] });
+  });
+
+  it('a steady week has no best day: every weekday tying is not a pattern', () => {
+    const r = weekdayAverages(fourWeeks([2, 2, 2, 2, 2, 2, 2]));
+    expect(r).toMatchObject({ status: 'ok', averages: repeat(2, 7), leaders: [] });
+  });
+
+  it('more than MAX_LEADING_WEEKDAYS tied leaders is no pattern; exactly the maximum is', () => {
+    expect(MAX_LEADING_WEEKDAYS).toBe(3);
+    expect(weekdayAverages(fourWeeks([0, 4, 4, 4, 4, 0, 0]))).toMatchObject({ leaders: [] });
+    expect(weekdayAverages(fourWeeks([0, 4, 0, 4, 0, 4, 0]))).toMatchObject({ leaders: [1, 3, 5] });
+  });
+
+  it('the leader must clearly beat the other weekdays (MIN_LEADER_RATIO)', () => {
+    expect(MIN_LEADER_RATIO).toBe(1.5);
+    // Thursday 3 against 2 everywhere else: 1.5x is enough
+    expect(weekdayAverages(fourWeeks([2, 2, 2, 2, 3, 2, 2]))).toMatchObject({ leaders: [4] });
+    // Thursday 2.75 against 2: 1.375x is not
+    const near = fourWeeks([2, 2, 2, 2, 2, 2, 2]);
+    const thursdays = near.filter((p) => weekdayOf(p.date) === 4);
+    thursdays.forEach((p, i) => { p.completed = i === 0 ? 2 : 3; }); // 2, 3, 3, 3 = 2.75
+    expect(weekdayAverages(near)).toMatchObject({ leaders: [] });
+  });
+
+  it('the comparison is with the OTHER weekdays, not with the leaders themselves', () => {
+    // two leaders at 6 against five weekdays at 2: ratio 3 even though the all-weekday mean is lower
+    expect(weekdayAverages(fourWeeks([2, 6, 2, 6, 2, 2, 2]))).toMatchObject({ leaders: [1, 3] });
   });
 
   it('unknown days are not samples: a long series whose known part is short stays insufficient', () => {

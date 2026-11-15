@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  comparisonText, coverageNote, dayLabel, formatDateKey, formatMinutes, headline, missingCompletionsNote, weekdayList,
+  comparisonText, coverageNote, dayLabel, formatDateKey, formatMinutes, headline, missingCompletionsNote, patternNote, weekdayList,
 } from './copy';
 import { addDays, buildTrend, type DayPoint, type TrendRange, type TrendResult } from './trend';
 
@@ -75,6 +75,11 @@ describe('small helpers', () => {
     expect(weekdayList([1, 4])).toBe('Mondays and Thursdays');
     expect(weekdayList([1, 3, 5])).toBe('Mondays, Wednesdays and Fridays');
     expect(weekdayList([])).toBe('');
+  });
+  it('patternNote names the leaders and always says how much history it rests on', () => {
+    expect(patternNote([4], 90)).toBe('You tend to complete the most tasks on Thursdays. Based on 90 known days of history.');
+    expect(patternNote([1, 4], 28)).toBe('You tend to complete the most tasks on Mondays and Thursdays. Based on 28 known days of history.');
+    expect(patternNote([4], 1)).toMatch(/Based on 1 known day of history/);
   });
   it('coverageNote tells offline from unreachable and always says older history needs a connection', () => {
     expect(coverageNote('browser-offline')).toMatch(/offline/i);

@@ -7,8 +7,8 @@ import {
   formatDateKey,
   formatMinutes,
   headline,
+  patternNote,
   shortWeekday,
-  weekdayList,
 } from '../../insights/copy';
 import type { DayTask } from '../../insights/dayPoints';
 import { TREND_RANGES, buildTrend, weekdayAverages, type DayPoint, type TrendRange, type WeekBucket } from '../../insights/trend';
@@ -88,33 +88,33 @@ function WeekDays({
 
   return (
     <div className="week-history">
-      <div className="week-history-bars" role="list" aria-label="Completions per day">
+      <ul className="week-history-bars" aria-label="Completions per day">
         {points.map((p) => {
           const isToday = p.date === today;
           const active = p.date === selected;
           const label = `${shortWeekday(p.date)}${isToday ? ' (today)' : ''}: ${p.known ? `${p.completed} ${p.completed === 1 ? 'task' : 'tasks'}` : 'no history'}`;
           return (
-            <button
-              key={p.date}
-              type="button"
-              role="listitem"
-              className={`week-history-day${active ? ' active' : ''}${isToday ? ' today' : ''}`}
-              onClick={() => setSelected(active ? null : p.date)}
-              aria-label={label}
-              aria-pressed={active}
-            >
-              <span className="week-history-bar-wrap">
-                <span
-                  className={`week-history-bar${p.known ? '' : ' unknown'}`}
-                  style={{ height: `${p.known ? Math.max(percent(p.completed, max), p.completed > 0 ? 8 : 2) : 100}%` }}
-                />
-              </span>
-              <span className="week-history-count">{p.known ? p.completed : '–'}</span>
-              <span className="week-history-label">{shortWeekday(p.date)}</span>
-            </button>
+            <li key={p.date}>
+              <button
+                type="button"
+                className={`week-history-day${active ? ' active' : ''}${isToday ? ' today' : ''}`}
+                onClick={() => setSelected(active ? null : p.date)}
+                aria-label={label}
+                aria-pressed={active}
+              >
+                <span className="week-history-bar-wrap">
+                  <span
+                    className={`week-history-bar${p.known ? '' : ' unknown'}`}
+                    style={{ height: `${p.known ? Math.max(percent(p.completed, max), p.completed > 0 ? 8 : 2) : 100}%` }}
+                  />
+                </span>
+                <span className="week-history-count">{p.known ? p.completed : '–'}</span>
+                <span className="week-history-label">{shortWeekday(p.date)}</span>
+              </button>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
       {day && (
         <div className="week-history-detail">
@@ -186,6 +186,7 @@ export default function TrendSection({ history, failed, range, onRangeChange, on
   const deviceOnly = history?.coverage === 'device-only';
   const result = useMemo(() => (history && history.points.length > 0 ? buildTrend(history.points, range) : null), [history, range]);
   const pattern = useMemo(() => (history ? weekdayAverages(history.points) : null), [history]);
+  const knownDays = useMemo(() => (history ? history.points.filter((p) => p.known).length : 0), [history]);
 
   return (
     <section className="settings-section panel" aria-labelledby="trend-heading">
@@ -240,7 +241,7 @@ export default function TrendSection({ history, failed, range, onRangeChange, on
 
       {history && result && result.status !== 'invalid' && (
         <>
-          <p className="trend-headline">{headline(result)}</p>
+          <p className="trend-headline" aria-live="polite">{headline(result)}</p>
 
           {(result.status === 'complete' || result.status === 'partial') && (
             <>
@@ -278,9 +279,7 @@ export default function TrendSection({ history, failed, range, onRangeChange, on
           {pattern && pattern.status === 'ok' && pattern.leaders.length > 0 && (
             <div className="insights-pattern" role="note">
               <span className="insights-pattern-icon" aria-hidden="true">💡</span>
-              <p className="insights-pattern-text">
-                You tend to complete the most tasks on <strong>{weekdayList(pattern.leaders)}</strong>.
-              </p>
+              <p className="insights-pattern-text">{patternNote(pattern.leaders, knownDays)}</p>
             </div>
           )}
         </>

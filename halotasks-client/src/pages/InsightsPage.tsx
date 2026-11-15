@@ -202,7 +202,7 @@ export default function InsightsPage() {
   const activeModal = modal ? modalConfig[modal] : null;
 
   return (
-    <div className="settings-page">
+    <div className="settings-page insights-page">
       <TrendSection history={history} failed={historyFailed} range={range} onRangeChange={setRange} onRetry={retryHistory} />
 
       <section className="settings-section panel">

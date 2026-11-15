@@ -121,9 +121,20 @@ describe('TrendSection 7-day view', () => {
     expect(screen.getByText('Today')).toBeTruthy();
   });
 
+  it('the days are a real list: one list item per day, each holding exactly one button (no role on the button)', () => {
+    setup(full(rep(1, 90), tasks), { range: 7 });
+    const items = within(screen.getByRole('list', { name: 'Completions per day' })).getAllByRole('listitem');
+    expect(items).toHaveLength(7);
+    for (const item of items) {
+      const buttons = within(item).getAllByRole('button');
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0].hasAttribute('role')).toBe(false);
+    }
+  });
+
   it('day buttons have accessible names and toggle the detail by keyboard-activatable buttons', () => {
     setup(full(rep(1, 90), tasks), { range: 7 });
-    const days = within(screen.getByRole('list', { name: 'Completions per day' })).getAllByRole('listitem');
+    const days = within(screen.getByRole('list', { name: 'Completions per day' })).getAllByRole('button');
     expect(days).toHaveLength(7);
     const last = days[6];
     expect(last.getAttribute('aria-label')).toMatch(/\(today\): 1 task/);
@@ -135,7 +146,7 @@ describe('TrendSection 7-day view', () => {
 
   it('an unknown day says no history was recorded, not "0 tasks"', () => {
     setup(full([...rep(null, 85), ...rep(1, 5)]), { range: 7 });
-    const days = within(screen.getByRole('list', { name: 'Completions per day' })).getAllByRole('listitem');
+    const days = within(screen.getByRole('list', { name: 'Completions per day' })).getAllByRole('button');
     expect(days[0].getAttribute('aria-label')).toMatch(/no history/);
     fireEvent.click(days[0]);
     expect(screen.getByText('No history was recorded for this day.')).toBeTruthy();
@@ -144,6 +155,13 @@ describe('TrendSection 7-day view', () => {
   it('a known day with a count but no names says so', () => {
     setup(full(rep(2, 90)), { range: 7 });
     expect(screen.getByText(/2 completed; no task names were kept for this day/)).toBeTruthy();
+  });
+});
+
+describe('TrendSection announcements', () => {
+  it('the headline is a polite live region, so changing the range is announced', () => {
+    setup(full(rep(1, 90)));
+    expect(screen.getByText('30 tasks in the last 30 days.').getAttribute('aria-live')).toBe('polite');
   });
 });
 
@@ -167,6 +185,25 @@ describe('TrendSection table and pattern', () => {
     // 28 days where Thursdays hold everything
     const counts = Array.from({ length: 90 }, (_, i) => (new Date(Date.UTC(2026, 10, 14) - (89 - i) * 86_400_000).getUTCDay() === 4 ? 3 : 0));
     setup(full(counts));
+    expect(screen.getByText(/most tasks on/).textContent).toMatch(/Thursdays/);
+    expect(screen.getByText(/most tasks on/).textContent).toMatch(/Based on 90 known days of history/);
+  });
+
+  it('the pattern says how many KNOWN days it rests on, not the length of the series', () => {
+    const counts = Array.from({ length: 90 }, (_, i) => (i < 30 ? null : new Date(Date.UTC(2026, 10, 14) - (89 - i) * 86_400_000).getUTCDay() === 4 ? 3 : 0));
+    setup(full(counts));
+    expect(screen.getByText(/most tasks on/).textContent).toMatch(/Based on 60 known days of history/);
+  });
+
+  it('a steady user has no "best weekday": nothing is claimed', () => {
+    setup(full(rep(2, 90)));
+    expect(screen.queryByText(/most tasks on/)).toBeNull();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('the pattern does not depend on the chosen range', () => {
+    const counts = Array.from({ length: 90 }, (_, i) => (new Date(Date.UTC(2026, 10, 14) - (89 - i) * 86_400_000).getUTCDay() === 4 ? 3 : 0));
+    setup(full(counts), { range: 7 });
     expect(screen.getByText(/most tasks on/).textContent).toMatch(/Thursdays/);
   });
 
