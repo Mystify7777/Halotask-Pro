@@ -15,6 +15,8 @@ type InsightModalProps = {
   title: string;
   tasks: Task[];
   emptyMessage: string;
+  /** Optional line shown under the list (e.g. completions the live list no longer holds). */
+  footnote?: string | null;
   onClose: () => void;
   onToggleTask: (task: Task) => void;
 };
@@ -24,6 +26,7 @@ export default function InsightModal({
   title,
   tasks,
   emptyMessage,
+  footnote,
   onClose,
   onToggleTask,
 }: InsightModalProps) {
@@ -124,6 +127,7 @@ export default function InsightModal({
               ))}
             </ul>
           )}
+          {footnote && <p className="insight-modal-empty" role="note">{footnote}</p>}
         </div>
       </div>
     </>

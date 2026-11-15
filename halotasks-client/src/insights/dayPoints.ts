@@ -70,3 +70,26 @@ export function pointsFromLocal(entries: readonly HistoryEntry[], today: string)
   const points = applyKnownSpan(base, evidence);
   return seriesProblem(points) === null ? points : null;
 }
+
+/** The tasks completed on a day, as the history layer lists them (used only for a selected day's detail, never for counts). */
+export type DayTask = { id: string; title: string; estimatedMinutes: number };
+
+/**
+ * date -> the tasks listed for that day, from the same rows the points were built from, so the detail of a day can never
+ * come from a different source than its count. Only days that list tasks appear.
+ */
+export function tasksByDateFromServer(rows: readonly ServerHistoryEntry[]): Record<string, DayTask[]> {
+  const out: Record<string, DayTask[]> = {};
+  for (const { entry } of rows) {
+    if (entry.completedTasks.length > 0) out[entry.date] = entry.completedTasks.map((t) => ({ ...t }));
+  }
+  return out;
+}
+
+export function tasksByDateFromLocal(entries: readonly HistoryEntry[]): Record<string, DayTask[]> {
+  const out: Record<string, DayTask[]> = {};
+  for (const entry of entries) {
+    if (entry.completedTasks.length > 0) out[entry.date] = entry.completedTasks.map((t) => ({ ...t }));
+  }
+  return out;
+}

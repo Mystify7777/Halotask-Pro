@@ -1467,3 +1467,48 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   color: var(--color-text-secondary);
   line-height: var(--leading-relaxed);
 }
+
+/* ── Insights trend section (Issue #48, 48C) ─────────────────────────────────────────────────────────────────── */
+.trend-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.insights-range-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.insights-range-btn {
+  background: none; border: none; cursor: pointer; padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-secondary); min-height: 36px;
+}
+.insights-range-btn + .insights-range-btn { border-left: 1px solid var(--color-border); }
+.insights-range-btn.active { background: var(--color-btn-primary-bg); color: var(--color-btn-primary-text); font-weight: var(--weight-semibold); }
+.insights-range-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.insights-range-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+@media (max-width: 767px) {
+  .insights-range-toggle { width: 100%; }
+  .insights-range-btn { flex: 1; min-height: 44px; }
+}
+.trend-headline { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--color-text-primary); margin: 0; }
+.trend-note { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0; }
+.trend-bars { display: grid; gap: 2px; align-items: end; height: 120px; }
+.trend-bar-slot { display: flex; align-items: flex-end; height: 100%; min-width: 0; }
+.trend-bar { display: block; width: 100%; background: var(--color-primary); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.trend-bar.partial { opacity: 0.55; }
+.trend-bar.unknown, .week-history-bar.unknown {
+  background: none; border: 1px dashed var(--color-border); opacity: 0.8;
+}
+.trend-axis { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-tertiary); }
+.trend-table summary { cursor: pointer; font-size: var(--text-sm); color: var(--color-text-secondary); min-height: 32px; display: flex; align-items: center; }
+.trend-table summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.trend-table table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-top: var(--space-2); }
+.trend-table th, .trend-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--color-border); font-weight: var(--weight-normal); }
+.trend-table thead th { font-weight: var(--weight-semibold); color: var(--color-text-secondary); }
+.trend-table tbody th { color: var(--color-text-primary); }
+.insights-skeleton { display: grid; gap: var(--space-3); }
+.insights-skeleton-line, .insights-skeleton-bars { display: block; border-radius: var(--radius-md); background: var(--color-surface-raised); }
+.insights-skeleton-line { height: 20px; width: 60%; }
+.insights-skeleton-bars { height: 120px; }
+@media (prefers-reduced-motion: no-preference) {
+  .insights-skeleton-line, .insights-skeleton-bars { animation: insights-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes insights-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@media (max-width: 767px) {
+  .insights-weekly-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insights-weekly-chip { min-width: 0; padding: var(--space-3); gap: var(--space-1); flex-direction: column; align-items: flex-start; }
+  .insights-weekly-chip-value { white-space: nowrap; }
+}

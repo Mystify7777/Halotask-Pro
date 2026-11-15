@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Issue #48 phase 48C: Insights page around persistent trends
+
+**2026-11-15 · Frontend · completed · Priority: medium**
+
+Phase 48C of the Insights redesign: the page. The trend section now comes first (range toggle 7/30/90 days, default 30; a one-sentence headline; comparison with the previous period of the same length; completed, active days, work done and best day; bars per day or per week at 90 days; a View as table route; the 7-day view keeps the day buttons and the selected day's tasks), with calm loading, empty, partial-history, offline (7 days saved on the device; 30 and 90 are disabled) and retry states. Insights now has ONE source for today: the last point of the trend series feeds the Completed today and Work done today cards (until it loads they use the live task list), and the Completed today list says how many completions the live list no longer holds. The streak stays with the Growth Tree, the weekday pattern appears only with enough history, the all-time completion rate (a snapshot of whatever tasks still exist) is replaced by completed-in-range, and Insights no longer calls the 7-day card store. A successful toggle from a list refreshes the series. The reader gained a per-day task list from the same rows. The page is split into TrendSection and BacklogBreakdown; InsightModal gained an optional footnote. 53 new tests, 20 mutation checks (all killed), browser pass at 1280 and 320 px (no horizontal scroll, 44 px range buttons on phones, keyboard reachable day buttons and table). Review follow-up: the page no longer adds a second "Growth tree" heading (GrowthTree renders the only one). Client suite 75 files / 1623 tests, typecheck clean.
+
 #### Issue #48 phase 48B: Insights history reader
 
 **2026-11-14 · Frontend · in progress · Priority: medium**

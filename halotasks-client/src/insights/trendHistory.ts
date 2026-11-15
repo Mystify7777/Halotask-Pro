@@ -2,7 +2,7 @@ import { getWeekHistory } from '../offline/history';
 import { historyService } from '../services/historyService';
 import { useAuthStore } from '../store/authStore';
 import { toLocalDateKey } from '../utils/localDate';
-import { pointsFromLocal, pointsFromServer } from './dayPoints';
+import { pointsFromLocal, pointsFromServer, tasksByDateFromLocal, tasksByDateFromServer, type DayTask } from './dayPoints';
 import type { DayPoint } from './trend';
 
 /**
@@ -36,8 +36,15 @@ export type TrendFallbackReason = 'browser-offline' | 'unavailable';
 
 export type TrendHistory =
   | { coverage: 'none'; points: [] }
-  | { coverage: 'full'; points: DayPoint[]; today: string; fetchedAt: number }
-  | { coverage: 'device-only'; points: DayPoint[]; today: string; reason: TrendFallbackReason; fetchedAt: number };
+  | { coverage: 'full'; points: DayPoint[]; tasksByDate: Record<string, DayTask[]>; today: string; fetchedAt: number }
+  | {
+      coverage: 'device-only';
+      points: DayPoint[];
+      tasksByDate: Record<string, DayTask[]>;
+      today: string;
+      reason: TrendFallbackReason;
+      fetchedAt: number;
+    };
 
 type CacheEntry = { userId: string; today: string; at: number; value: Extract<TrendHistory, { coverage: 'full' }> };
 
@@ -62,7 +69,7 @@ async function loadFresh(userId: string, today: string, now: () => number): Prom
     if (currentUserId() !== userId) return { coverage: 'none', points: [] };
     const points = rows ? pointsFromServer(rows, today, TREND_FETCH_DAYS) : null;
     if (points) {
-      const value = { coverage: 'full' as const, points, today, fetchedAt: now() };
+      const value = { coverage: 'full' as const, points, tasksByDate: tasksByDateFromServer(rows ?? []), today, fetchedAt: now() };
       cache = { userId, today, at: now(), value };
       return value;
     }
@@ -74,7 +81,14 @@ async function loadFresh(userId: string, today: string, now: () => number): Prom
   const local = await getWeekHistory();
   if (currentUserId() !== userId) return { coverage: 'none', points: [] };
   const points = pointsFromLocal(local, today);
-  return { coverage: 'device-only', points: points ?? [], today, reason, fetchedAt: now() };
+  return {
+    coverage: 'device-only',
+    points: points ?? [],
+    tasksByDate: points ? tasksByDateFromLocal(local) : {},
+    today,
+    reason,
+    fetchedAt: now(),
+  };
 }
 
 /**

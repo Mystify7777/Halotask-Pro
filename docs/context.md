@@ -1074,6 +1074,18 @@ A server-confirmed `invalid` verdict is `auth-flow` in every case. `access: 'app
 - **Open for 48C.** Insights has two sources for "today" (this series and the 7-day store that feeds the cards); the page should read one.
 - **Evidence.** 53 new tests (known span, broken answers, day boundary at 23:30 and 00:30, cache and TTL, single flight, account switching, offline and failure fallback, a strict-double guard that nothing is written, and 14 proving that historyService.getHistory never rejects), 25 mutation checks (all killed; one equivalent mutant was removed as dead code). Client suite 72 files / 1569 tests.
 
+### Insights page (Issue #48, phase 48C)
+
+**Status.** Phase 48C (approved): the Insights page now reads the trend model (48A) through the history reader (48B). 48D (polish) follows on request. Decisions D1-D5 and the design: project docs `design-issue-48.md`, `design-issue-48b.md`, `design-issue-48c.md`.
+
+- **Order.** Activity (trend), Today at a glance, Open tasks (priority and tags), Growth tree (one heading, rendered by `GrowthTree`; the section is only labelled). `components/insights/TrendSection.tsx` and `BacklogBreakdown.tsx` were split out of `InsightsPage.tsx`; words are pure functions in `insights/copy.ts`.
+- **Trend section.** Range 7 / 30 / 90 days (default 30, `aria-pressed`), a headline sentence, the comparison text, chips (completed, active days of known days, work done, best day), bars per day (7, 30) or per week (90), unknown days as dashed slots (never zeros), a "View as table" route with every number, and the weekday pattern only when every weekday has at least 4 known days and the leader averages at least 1. The 7-day view keeps the day buttons and the selected day's task names (from the same rows as its count). The 90-day range has no comparison (no earlier window from the history endpoint).
+- **States.** Loading skeleton (`aria-busy`); no history ("Nothing recorded yet..."); no activity; partial ("since your history began on ..."); offline or unreachable (the 7 days saved on the device, a plain note, 30 and 90 disabled); an unexpected reader failure or a series the model refuses: a calm "Try again".
+- **One source for today (D5).** The last point of the series feeds Completed today and Work done today (the live task list only until the series loads). The Completed today list stays the live tasks and adds "N completed tasks are no longer in your list" when the count is higher. Insights no longer calls `getWeekHistory` itself (the reader does, only as the offline fallback). A successful toggle from a list invalidates the cache and reloads the series; a failed one touches nothing.
+- **Removed or moved.** The streak chip (the streak stays with the Growth Tree, D3), the all-time completion rate (a snapshot of whatever tasks still exist; replaced by completed-in-range), the 7-sample weekday pattern, the "This week" label (the range is now explicit).
+- **Not changed.** Today-at-a-glance cards and modals, the completion write path, `offline/history.ts`, the server.
+- **Evidence.** 53 new tests (copy, section states, page integration including no `getWeekHistory` call, today from the series, the modal footnote and reload after a toggle), 20 mutation checks (all killed), browser pass at 1280 and 320 px (no horizontal scroll, 44 px range buttons on phones, chips two per row). Client suite 75 files / 1623 tests.
+
 ## AI Task Creation (Issue #22)
 
 The browser no longer talks to the AI provider. `useAiTaskCreation` calls the backend through
