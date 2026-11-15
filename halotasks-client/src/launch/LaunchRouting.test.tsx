@@ -232,6 +232,21 @@ describe('a session that cannot be trusted without the server', () => {
     expect(secret()).toBeNull();
   });
 
+  it('the waiting room never opens the game by itself: not on entry, not as the cause changes, not on "Check now"', async () => {
+    await unverified();
+    answers('no-answer', 'unhealthy', 'no-answer');
+    tree('/dashboard');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    for (const ms of [0, 2_000, 5_000, 30_000, 60_000, 120_000]) {
+      await advance(ms);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    }
+    expect(waitingRoom()).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check now' }));
+    await advance(0);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('closing the game with Escape puts focus back on "Play while you wait"', async () => {
     await unverified();
     answers('no-answer');

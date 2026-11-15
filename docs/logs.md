@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Cold-start game opens only on request (dashboard auto-open removed)
+
+**2026-11-15 · Bugfix · completed · Priority: high**
+
+Issue #49 follow-up: the cold-start game no longer opens by itself on the working dashboard. The dashboard's own trigger (a 3 s timer in useDashboardSync that made DashboardPage open the Task Tapper) is removed; it fired even when the server was healthy (slow queue), contradicted the status line's 'you can keep working', and could reopen after being closed when the recovery reload restarted the timer. The game is now opened only by 'Play while you wait', added to the status line; the open/close/focus rule is shared (usePlayWhileYouWait) with the waiting room, whose behaviour is unchanged. If the server recovers while the game is open it closes with the 'ready' beat (a real recovery only); a closed game never reopens. The sign-in pages (Issue #12) are unchanged. 21 net new tests including the real DashboardPage in the real launch provider (the first three fail on the old code), a source guard on who may import the overlay, 12 mutation checks (all killed), browser check. Client suite 77 files / 1654 tests, typecheck clean.
+
 #### Issue #48 phase 48D: Insights polish (pattern rules, accessibility, layout)
 
 **2026-11-15 · Frontend · completed · Priority: medium**

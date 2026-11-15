@@ -13,7 +13,6 @@ import CompletedSection from '../components/dashboard/CompletedSection';
 import TaskCreateForm from '../components/dashboard/TaskCreateForm';
 import TaskCreateSheet from '../components/dashboard/TaskCreateSheet';
 import GrowthTreeSheet from '../components/dashboard/GrowthTreeSheet';
-import ColdStartOverlay from '../components/dashboard/ColdStartOverlay';
 import { useRegisterOrbTap, useUpdateOrbData } from '../components/AppLayout';
 import TaskFilters from '../components/dashboard/TaskFilters';
 import TaskList from '../components/dashboard/TaskList';
@@ -83,7 +82,6 @@ function getTaskEmptyStateContent({
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
-  const [showColdStart, setShowColdStart] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [todayHistory, setTodayHistory] = useState<HistoryEntry | null>(null);
@@ -193,12 +191,6 @@ export default function DashboardPage() {
 
   syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;
   syncBridgeRef.current.refreshPendingQueueCount = sync.refreshPendingQueueCount;
-
-  useEffect(() => {
-    if (sync.coldStartPhase === 'waking') {
-      setShowColdStart(true);
-    }
-  }, [sync.coldStartPhase]);
 
   const reminders = useDashboardReminders({
     getTasks: () => tasksRef.current,
@@ -468,16 +460,6 @@ export default function DashboardPage() {
           isOpen={isGrowthSheetOpen}
           onClose={() => setIsGrowthSheetOpen(false)}
           treeState={treeState}
-        />
-      )}
-
-      {showColdStart && (
-        <ColdStartOverlay
-          outcome={
-            sync.coldStartPhase === 'waking' ? 'waking' : sync.coldStartPhase === 'ready' ? 'ready' : 'error'
-          }
-          onExited={() => setShowColdStart(false)}
-          onDismiss={() => setShowColdStart(false)}
         />
       )}
     </section>

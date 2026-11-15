@@ -12,12 +12,6 @@ import type { GrowthResult } from '../growth/treeTypes';
 
 export type SyncStatus = 'cached' | 'syncing' | 'synced' | 'offline' | 'errors-pending';
 
-// 'idle'   — no cold-start warmup is in progress (fast load, or nothing to wait on)
-// 'waking' — the request has taken long enough that the backend is likely cold-starting
-// 'ready'  — the backend genuinely responded successfully; safe to show a "ready" state
-// 'error'  — the wait ended without a successful response; never reported as "ready"
-export type ColdStartPhase = 'idle' | 'waking' | 'ready' | 'error';
-
 type UseDashboardSyncArgs = {
   isOnline: boolean;
   persistTasks: (updater: (current: Task[]) => Task[]) => void;
@@ -49,11 +43,6 @@ export function useDashboardSync({
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
   const [retryingSync, setRetryingSync] = useState(false);
-  const [coldStartPhase, setColdStartPhase] = useState<ColdStartPhase>('idle');
-  const coldStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Identifies the current load attempt so a stale timer/callback from a
-  // previous cycle can never flip the phase for a load that already ended.
-  const coldStartCycleRef = useRef(0);
 
   const refreshPendingQueueCount = async () => {
     const queued = await getSyncQueue();
@@ -147,29 +136,12 @@ export function useDashboardSync({
       return;
     }
 
-    if (coldStartTimerRef.current) {
-      clearTimeout(coldStartTimerRef.current);
-    }
-
-    // New load cycle: any overlay driven by a previous cycle's outcome is done.
-    const cycleId = ++coldStartCycleRef.current;
-    setColdStartPhase('idle');
-
-    coldStartTimerRef.current = setTimeout(() => {
-      if (coldStartCycleRef.current === cycleId) {
-        setColdStartPhase('waking');
-      }
-    }, 3000);
-
     try {
       setStatusError(null);
 
       const queueResult = await processPendingQueue();
 
       if (queueResult.remaining > 0) {
-        if (coldStartCycleRef.current === cycleId) {
-          setColdStartPhase((current) => (current === 'waking' ? 'error' : 'idle'));
-        }
         setLoadingTasks(false);
         return;
       }
@@ -180,12 +152,6 @@ export function useDashboardSync({
       if (unreachableNoticeRef.current) {
         unreachableNoticeRef.current = false;
         setStatusInfo(null);
-      }
-
-      // Only a real, successful response counts as "ready" — a request that
-      // resolved fast (before the warmup UI ever appeared) has nothing to report.
-      if (coldStartCycleRef.current === cycleId) {
-        setColdStartPhase((current) => (current === 'waking' ? 'ready' : 'idle'));
       }
     } catch (requestError) {
       const axiosError = requestError as AxiosError<{ message?: string }>;
@@ -205,29 +171,10 @@ export function useDashboardSync({
       } else {
         setStatusError(axiosError.response?.data?.message ?? 'Unable to load tasks');
       }
-
-      // A failure never gets reported as "ready" — the backend may genuinely
-      // still be unavailable, and the overlay must not claim otherwise.
-      if (coldStartCycleRef.current === cycleId) {
-        setColdStartPhase((current) => (current === 'waking' ? 'error' : 'idle'));
-      }
     } finally {
-      if (coldStartTimerRef.current) {
-        clearTimeout(coldStartTimerRef.current);
-        coldStartTimerRef.current = null;
-      }
       setLoadingTasks(false);
     }
   };
-
-  useEffect(
-    () => () => {
-      if (coldStartTimerRef.current) {
-        clearTimeout(coldStartTimerRef.current);
-      }
-    },
-    [],
-  );
 
   useEffect(() => {
     setLoadingTasks(true);
@@ -236,7 +183,7 @@ export function useDashboardSync({
 
   // The server came back after being unavailable (Issue #49): the work that piled up while it was away is sent and the
   // list is read fresh, exactly as when the browser comes back online, without waiting for a manual "Sync now". This
-  // only starts the existing load; the cold-start overlay and the queue are still the existing ones. The count at mount
+  // only starts the existing load. The count at mount
   // is the baseline, so opening the dashboard never causes a second load.
   const serverRecoveries = useServerRecoveries();
   const seenRecoveries = useRef(serverRecoveries);
@@ -283,7 +230,6 @@ export function useDashboardSync({
     lastSyncAt,
     pendingQueueCount,
     retryingSync,
-    coldStartPhase,
     refreshPendingQueueCount,
     handleRetrySync,
   };

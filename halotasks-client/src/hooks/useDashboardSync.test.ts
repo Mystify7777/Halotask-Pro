@@ -50,7 +50,7 @@ function setupHook() {
   );
 }
 
-describe('useDashboardSync cold-start phase', () => {
+describe('useDashboardSync owns no cold-start overlay signal (the game is only ever opened by the person)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(taskService.getTasks).mockReset();
@@ -60,7 +60,7 @@ describe('useDashboardSync cold-start phase', () => {
     vi.useRealTimers();
   });
 
-  it('only enters "waking" after 3s, and only reports "ready" once the request genuinely succeeds', async () => {
+  it('a request that takes a long time changes nothing but the sync status: no "waking" state is exposed, and the load still completes', async () => {
     let resolveTasks: ((value: Awaited<ReturnType<typeof taskService.getTasks>>) => void) | undefined;
     vi.mocked(taskService.getTasks).mockImplementation(
       () =>
@@ -73,64 +73,27 @@ describe('useDashboardSync cold-start phase', () => {
     await flushMicrotasks();
 
     await act(async () => {
-      vi.advanceTimersByTime(2999);
+      vi.advanceTimersByTime(60_000);
     });
-    expect(result.current.coldStartPhase).toBe('idle');
-
-    await act(async () => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(result.current.coldStartPhase).toBe('waking');
+    expect(result.current.syncStatus).toBe('syncing');
+    expect('coldStartPhase' in result.current).toBe(false);
 
     await act(async () => {
       resolveTasks?.({ tasks: [], page: 1, limit: 0, hasMore: false });
     });
     await flushMicrotasks();
-
-    expect(result.current.coldStartPhase).toBe('ready');
+    expect(result.current.syncStatus).toBe('synced');
+    expect('coldStartPhase' in result.current).toBe(false);
   });
 
-  it('never reports "ready" when the request ultimately fails', async () => {
-    let rejectTasks: ((reason?: unknown) => void) | undefined;
-    vi.mocked(taskService.getTasks).mockImplementation(
-      () =>
-        new Promise((_, reject) => {
-          rejectTasks = reject;
-        }),
-    );
-
-    const { result } = setupHook();
-    await flushMicrotasks();
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(result.current.coldStartPhase).toBe('waking');
-
-    await act(async () => {
-      rejectTasks?.(new Error('network error'));
-    });
-    await flushMicrotasks();
-
-    expect(result.current.coldStartPhase).toBe('error');
-    expect(result.current.coldStartPhase).not.toBe('ready');
-  });
-
-  it('never enters "waking" at all for a fast, successful response', async () => {
+  it('a slow sync queue is just a sync in progress: nothing is exposed that a page could turn into a modal', async () => {
     vi.mocked(taskService.getTasks).mockResolvedValue({ tasks: [], page: 1, limit: 0, hasMore: false });
-
     const { result } = setupHook();
     await flushMicrotasks();
-
-    expect(result.current.coldStartPhase).toBe('idle');
-
     await act(async () => {
-      vi.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(10_000);
     });
-
-    // The 3s timer's own guard (matching the load's cycle id) prevents a
-    // stale timer from a completed, fast load from ever firing 'waking'.
-    expect(result.current.coldStartPhase).toBe('idle');
+    expect(Object.keys(result.current).filter((key) => /cold|wak|overlay/i.test(key))).toEqual([]);
   });
 });
 

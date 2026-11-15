@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ColdStartOverlay from '../components/dashboard/ColdStartOverlay';
+import { usePlayWhileYouWait } from '../hooks/usePlayWhileYouWait';
 import { useLaunch } from '../launch/launchContext';
 import type { UnavailableCause } from '../launch/launchState';
 import { useAuthStore } from '../store/authStore';
@@ -37,16 +38,10 @@ export default function WaitingRoomPage() {
   const { decision, readiness } = useLaunch();
   const navigate = useNavigate();
   const clearAuth = useAuthStore((s) => s.clearAuth);
-  const [playing, setPlaying] = useState(false);
+  // Opening, closing and the focus on return are the shared rule (the game never opens by itself).
+  const { playing, play, close, playRef } = usePlayWhileYouWait();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const playRef = useRef<HTMLButtonElement>(null);
-  const wasPlaying = useRef(false);
   useEffect(() => headingRef.current?.focus(), []);
-  // When the game closes, focus goes back to the button that opened it (the dialog's unmount would drop it on <body>).
-  useEffect(() => {
-    if (wasPlaying.current && !playing) playRef.current?.focus();
-    wasPlaying.current = playing;
-  }, [playing]);
 
   const copy = COPY[decision.unavailable ?? 'timeout'];
   const offline = decision.unavailable === 'browser-offline';
@@ -85,7 +80,7 @@ export default function WaitingRoomPage() {
               Check now
             </button>
           )}
-          <button type="button" className="btn-secondary" ref={playRef} onClick={() => setPlaying(true)} disabled={playing}>
+          <button type="button" className="btn-secondary" ref={playRef} onClick={play} disabled={playing}>
             Play while you wait
           </button>
           <button type="button" className="btn-secondary" onClick={signOut}>
@@ -94,7 +89,7 @@ export default function WaitingRoomPage() {
         </div>
       </section>
 
-      {playing && <ColdStartOverlay outcome="waking" onExited={() => setPlaying(false)} onDismiss={() => setPlaying(false)} />}
+      {playing && <ColdStartOverlay outcome="waking" onExited={close} onDismiss={close} />}
     </main>
   );
 }
