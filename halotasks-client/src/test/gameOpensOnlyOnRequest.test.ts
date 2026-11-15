@@ -12,12 +12,35 @@ describe('the Task Tapper has reviewed owners only', () => {
     expect(code.length).toBeGreaterThan(50);
   });
 
-  it('is imported only by the waiting room and the status line (a button), and the sign-in warm-up (the issue #12 experience)', () => {
-    const importers = code
-      .filter(([path, text]) => /from\s+'[^']*ColdStartOverlay'/.test(text) && !path.endsWith('/ColdStartOverlay.tsx'))
-      .map(([path]) => path.replace('/src/', ''))
-      .sort();
-    expect(importers).toEqual(['components/BackendWarmup.tsx', 'components/LaunchStatusLine.tsx', 'pages/WaitingRoomPage.tsx']);
+  // The scan looks for the NAME of the component, not for one import syntax. Every way of reaching it (a default or named
+  // import, either quote style, `import()` / `lazy()`, `require`, or a re-export from another module) has to spell the module
+  // name in the file that does it, so any of them lands in this list and fails unless the file is one of the reviewed owners.
+  // A barrel that re-exports it is itself a mention, so it fails too. (Building the module path from strings would get past
+  // a text scan; code review is the backstop for that, and there is no reason to do it.)
+  const referencesModule = (text: string, name: string) => text.includes(name);
+  const mentions = (name: string) => code.filter(([path, text]) => referencesModule(text, name) && !path.endsWith('/components/dashboard/ColdStartOverlay.tsx')).map(([path]) => path.replace('/src/', '')).sort();
+
+  it('is mentioned only by the waiting room and the status line (a button), and the sign-in warm-up (the issue #12 experience)', () => {
+    expect(mentions('ColdStartOverlay')).toEqual(['components/BackendWarmup.tsx', 'components/LaunchStatusLine.tsx', 'pages/WaitingRoomPage.tsx']);
+  });
+
+  it('the scan catches the import forms a developer could plausibly write', () => {
+    const forms = [
+      "import ColdStartOverlay from './dashboard/ColdStartOverlay';",
+      'import ColdStartOverlay from "./dashboard/ColdStartOverlay";',
+      "import { default as Overlay } from './dashboard/ColdStartOverlay';",
+      "const Overlay = lazy(() => import('./dashboard/ColdStartOverlay'));",
+      'const Overlay = require("./dashboard/ColdStartOverlay");',
+      "export { default as Game } from './dashboard/ColdStartOverlay';",
+      "export * from './ColdStartOverlay';",
+    ];
+    for (const form of forms) expect(referencesModule(form, 'ColdStartOverlay')).toBe(true);
+    expect(referencesModule("import Other from './dashboard/TaskCard';", 'ColdStartOverlay')).toBe(false);
+  });
+
+  it('the overlay folder has no barrel that could re-export it under another name', () => {
+    const barrels = Object.keys(sources).filter((path) => /\/components\/dashboard\/index\.tsx?$/.test(path));
+    expect(barrels).toEqual([]);
   });
 
   it.each(['/src/pages/DashboardPage.tsx', '/src/hooks/useDashboardSync.ts'])('%s has no cold-start overlay or phase', (path) => {

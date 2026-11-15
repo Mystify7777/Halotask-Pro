@@ -19,6 +19,19 @@
     {
       "date": "2026-11-15",
       "category": "Bugfix",
+      "title": "Cold-start game review fixes (source guard, recovery-count tests, stale #12 note)",
+      "description": "Review fixes on the cold-start game patch. The source guard now looks for the component's name instead of one import syntax, so double quotes, import()/lazy(), require and re-exports are all caught, and the overlay folder may not grow a barrel; a test pins the forms it must catch. Two explicit LaunchStatusLine tests: with the game open, the status flickers to checking-server and back with the recovery count unmoved and the game stays open (30 s each way); and a healthy-looking status with the count unmoved neither claims ready nor closes it. The stale #12 line saying forgot/reset are not wired now says Issue #49 wired them. The recovery rule is unchanged and stays in LaunchStatusLine, not in usePlayWhileYouWait. 4 net new tests, 2 mutation checks killed (a double-quoted import in DashboardPage; ready decided by the status instead of the count). Client suite 77 files / 1658 tests, typecheck clean.",
+      "files": [
+        "halotasks-client/src/test/gameOpensOnlyOnRequest.test.ts",
+        "halotasks-client/src/components/LaunchStatusLine.test.tsx",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ]
+    },
+    {
+      "date": "2026-11-15",
+      "category": "Bugfix",
       "title": "Cold-start game opens only on request (dashboard auto-open removed)",
       "description": "Issue #49 follow-up: the cold-start game no longer opens by itself on the working dashboard. The dashboard's own trigger (a 3 s timer in useDashboardSync that made DashboardPage open the Task Tapper) is removed; it fired even when the server was healthy (slow queue), contradicted the status line's 'you can keep working', and could reopen after being closed when the recovery reload restarted the timer. The game is now opened only by 'Play while you wait', added to the status line; the open/close/focus rule is shared (usePlayWhileYouWait) with the waiting room, whose behaviour is unchanged. If the server recovers while the game is open it closes with the 'ready' beat (a real recovery only); a closed game never reopens. The sign-in pages (Issue #12) are unchanged. 21 net new tests including the real DashboardPage in the real launch provider (the first three fail on the old code), a source guard on who may import the overlay, 12 mutation checks (all killed), browser check. Client suite 77 files / 1654 tests, typecheck clean.",
       "files": [
@@ -1786,5 +1799,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-15T15:41:29.000Z"
+  "lastUpdated": "2026-11-15T15:50:43.000Z"
 }

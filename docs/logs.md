@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Cold-start game review fixes (source guard, recovery-count tests, stale #12 note)
+
+**2026-11-15 · Bugfix · completed · Priority: medium**
+
+Review fixes on the cold-start game patch. The source guard now looks for the component's name instead of one import syntax, so double quotes, import()/lazy(), require and re-exports are all caught, and the overlay folder may not grow a barrel; a test pins the forms it must catch. Two explicit LaunchStatusLine tests: with the game open, the status flickers to checking-server and back with the recovery count unmoved and the game stays open (30 s each way); and a healthy-looking status with the count unmoved neither claims ready nor closes it. The stale #12 line saying forgot/reset are not wired now says Issue #49 wired them. The recovery rule is unchanged and stays in LaunchStatusLine, not in usePlayWhileYouWait. 4 net new tests, 2 mutation checks killed (a double-quoted import in DashboardPage; ready decided by the status instead of the count). Client suite 77 files / 1658 tests, typecheck clean.
+
 #### Cold-start game opens only on request (dashboard auto-open removed)
 
 **2026-11-15 · Bugfix · completed · Priority: high**

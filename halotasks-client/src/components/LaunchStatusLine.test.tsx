@@ -110,6 +110,31 @@ describe('LaunchStatusLine: "Play while you wait" is the only way the game opens
     expect(dialog()).toBeInTheDocument();
   });
 
+  it('open game -> status flickers to checking-server -> recovery count does NOT move -> status returns: the game stays open', async () => {
+    const r = mount(decision('offline-capable', 'waking'), 4);
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
+    expect(dialog()).toBeInTheDocument();
+
+    rerenderWith(r, decision('checking-server'), 4); // "Check now" is running; the count has not moved
+    await advance(30_000);
+    expect(dialog()).toBeInTheDocument();
+    expect(screen.queryByText(/Server is ready/)).toBeNull();
+
+    rerenderWith(r, decision('offline-capable', 'waking'), 4); // back to the same trouble, still no recovery
+    await advance(30_000);
+    expect(dialog()).toBeInTheDocument();
+    expect(screen.queryByText(/Server is ready/)).toBeNull();
+  });
+
+  it('only the recovery COUNT decides: a healthy-looking status with the count unmoved does not claim "ready" or close it', async () => {
+    const r = mount(decision('offline-capable', 'waking'), 7);
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
+    rerenderWith(r, decision('normal-online'), 7);
+    for (let i = 0; i < 40; i += 1) await advance(100);
+    expect(dialog()).toBeInTheDocument();
+    expect(screen.queryByText(/Server is ready/)).toBeNull();
+  });
+
   it('a real recovery while it is open gives the "ready" beat and closes it', async () => {
     const r = mount(decision('offline-capable', 'waking'), 2);
     fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
