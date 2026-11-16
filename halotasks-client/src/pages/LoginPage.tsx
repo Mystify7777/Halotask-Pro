@@ -5,6 +5,7 @@ import BackendWarmup from '../components/BackendWarmup';
 import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import styles from './AuthPages.module.css';
+import PasswordInput from '../components/PasswordInput';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -75,13 +76,13 @@ export default function LoginPage() {
 
           <label>
             Password
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="********"
               required
               autoComplete="current-password"
+              aria-label="Password"
             />
           </label>
 

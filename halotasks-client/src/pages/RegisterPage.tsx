@@ -6,6 +6,7 @@ import { authService } from '../services/authService';
 import { useAuthStore } from '../store/authStore';
 import { hasCompletedOnboarding } from '../utils/authSession';
 import styles from './AuthPages.module.css';
+import PasswordInput from '../components/PasswordInput';
 
 type StrengthLevel = 0 | 1 | 2 | 3;
 
@@ -119,14 +120,14 @@ export default function RegisterPage() {
 
           <label>
             Password
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 6 characters"
               required
               autoComplete="new-password"
               minLength={6}
+              aria-label="Password"
             />
           </label>
 
@@ -149,14 +150,13 @@ export default function RegisterPage() {
 
           <label>
             Confirm password
-            <input
-              type="password"
+            <PasswordInput
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Type it again"
               required
               autoComplete="new-password"
-              style={confirmMismatch ? { borderColor: 'var(--color-danger)' } : undefined}
+              aria-label="Confirm password"
             />
           </label>
 

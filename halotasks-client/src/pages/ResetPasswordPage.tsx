@@ -4,6 +4,7 @@ import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import BackendWarmup from '../components/BackendWarmup';
 import styles from './AuthPages.module.css';
+import PasswordInput from '../components/PasswordInput';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -161,27 +162,26 @@ export default function ResetPasswordPage() {
 
               <label>
                 New password
-                <input
-                  type="password"
+                <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 6 characters"
                   required
                   minLength={6}
                   autoComplete="new-password"
+                  aria-label="New password"
                 />
               </label>
 
               <label>
                 Confirm new password
-                <input
-                  type="password"
+                <PasswordInput
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                   placeholder="Type it again"
                   required
                   autoComplete="new-password"
-                  style={confirmMismatch ? { borderColor: 'var(--color-danger)' } : undefined}
+                  aria-label="Confirm new password"
                 />
               </label>
 
