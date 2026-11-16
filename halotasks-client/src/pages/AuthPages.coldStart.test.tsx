@@ -24,6 +24,7 @@ import LaunchProvider from '../launch/LaunchProvider';
 import { useAuthStore } from '../store/authStore';
 import LoginPage from './LoginPage';
 import RegisterPage from './RegisterPage';
+import ResetPasswordPage from './ResetPasswordPage';
 
 const answers = (...results: HealthProbeResult[]) => {
   let call = 0;
@@ -38,7 +39,7 @@ const finishClose = async () => {
 const overlay = () => screen.queryByRole('dialog', { name: 'Server loading' });
 const waking = () => screen.queryByTestId('backend-warmup-waking');
 
-const renderAt = (path: '/login' | '/register') =>
+const renderAt = (path: '/login' | '/register' | '/reset-password') =>
   render(
     <MemoryRouter initialEntries={[path]}>
       {/* The app always has the launch provider; FIXED_PACING keeps these Issue #12 expectations on their original timing. */}
@@ -46,6 +47,7 @@ const renderAt = (path: '/login' | '/register') =>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/dashboard" element={<p>dashboard reached</p>} />
           <Route path="/onboarding" element={<p>onboarding reached</p>} />
           <Route path="/home" element={<p>home</p>} />
@@ -171,5 +173,74 @@ describe('normal behaviour when the backend is already available', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Invalid email or password');
     expect(overlay()).toBeNull();
+  });
+});
+
+
+describe('password visibility controls', () => {
+  it('keeps passwords masked by default and toggles visibility accessibly on login', async () => {
+    answers('ok');
+    renderAt('/login');
+    await advance(0);
+
+    const password = screen.getByLabelText('Password') as HTMLInputElement;
+    const toggle = screen.getByRole('button', { name: 'Show password' });
+    expect(password.type).toBe('password');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(toggle);
+
+    expect(password.type).toBe('text');
+    expect(screen.getByRole('button', { name: 'Hide password' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(password.type).toBe('password');
+  });
+
+  it('provides independent visibility controls for both registration passwords', async () => {
+    answers('ok');
+    renderAt('/register');
+    await advance(0);
+
+    const password = screen.getByLabelText('Password') as HTMLInputElement;
+    const confirm = screen.getByLabelText('Confirm password') as HTMLInputElement;
+    const toggles = screen.getAllByRole('button', { name: 'Show password' });
+
+    expect(password.type).toBe('password');
+    expect(confirm.type).toBe('password');
+    expect(toggles).toHaveLength(2);
+
+    fireEvent.click(toggles[0]);
+    expect(password.type).toBe('text');
+    expect(confirm.type).toBe('password');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(confirm.type).toBe('text');
+  });
+
+  it('keeps reset passwords masked by default and preserves mismatch validation', async () => {
+    answers('ok');
+    render(
+      <MemoryRouter initialEntries={['/reset-password']}>
+        <LaunchProvider pacing={FIXED_PACING}>
+          <Routes>
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/login" element={<p>login</p>} />
+            <Route path="/forgot-password" element={<p>forgot</p>} />
+          </Routes>
+        </LaunchProvider>
+      </MemoryRouter>,
+    );
+    await advance(0);
+
+    const password = screen.getByLabelText('New password') as HTMLInputElement;
+    const confirm = screen.getByLabelText('Confirm new password') as HTMLInputElement;
+    expect(password.type).toBe('password');
+    expect(confirm.type).toBe('password');
+
+    fireEvent.change(password, { target: { value: 'secret123' } });
+    fireEvent.change(confirm, { target: { value: 'different123' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/don't match/i);
+    expect(screen.getByRole('button', { name: 'Reset password' })).toBeDisabled();
   });
 });
