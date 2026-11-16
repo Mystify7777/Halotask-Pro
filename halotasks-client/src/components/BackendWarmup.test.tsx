@@ -31,68 +31,97 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const waking = () => screen.queryByTestId('backend-warmup-waking');
+const playButton = () => screen.getByRole('button', { name: 'Play while you wait' });
+const play = () => fireEvent.click(playButton());
+const closeButton = () => screen.getByRole('button', { name: /close server loading screen/i });
+
 describe('<BackendWarmup /> with no session (nothing is rendered from, or read from, an account)', () => {
-  it('a backend that answers at once renders nothing at all', async () => {
+  it('a backend that answers at once shows nothing: no notice, no button, no game', async () => {
     answers('ok');
     const { container } = render(<BackendWarmup />);
     await advance(WAKE_BUDGET_MS);
-    expect(container).toBeEmptyDOMElement();
+    expect(container).toHaveTextContent('');
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(overlay()).toBeNull();
+    expect(waking()).toBeNull();
   });
 
-  it('a slow backend gets the existing Task Tapper overlay, and it closes with the "ready" beat once a probe says ok', async () => {
+  it('a slow backend gets a calm notice and a "Play while you wait" button, and the game does NOT open by itself', async () => {
     answers('no-answer', 'ok');
     render(<BackendWarmup />);
-    expect(overlay()).toBeNull();
+    expect(waking()).toBeNull();
     await advance(0); // the first probe came back empty: the backend is waking
-    expect(overlay()).toBeInTheDocument();
-    expect(screen.getByText(/Waking up the server/)).toBeInTheDocument();
-
-    await advance(RETRY_DELAY_MS); // the next probe is ok
-    expect(screen.getByText(/Server is ready!/)).toBeInTheDocument();
-    await finishClose();
+    expect(waking()).toHaveTextContent(/waking up/i);
+    expect(playButton()).toBeEnabled();
     expect(overlay()).toBeNull();
-    expect(failure()).toBeNull();
   });
 
-  it('a first probe that is merely slow (still unanswered) also brings the overlay up, after SLOW_PROBE_MS and not before', async () => {
+  it('a first probe that is merely slow (still unanswered) brings the notice after SLOW_PROBE_MS and not before, and never the game', async () => {
     pending();
     render(<BackendWarmup />);
     await advance(SLOW_PROBE_MS - 1);
-    expect(overlay()).toBeNull();
+    expect(waking()).toBeNull();
     await advance(1);
-    expect(overlay()).toBeInTheDocument();
+    expect(waking()).toBeInTheDocument();
+    expect(overlay()).toBeNull();
   });
 
-  it('keeps the overlay up for as long as the backend is only waking (no timer ends it)', async () => {
+  it('keeps only the notice up for as long as the backend is only waking: no timer, and no number of probes, opens the game', async () => {
     answers('no-answer');
     render(<BackendWarmup />);
-    await advance(WAKE_BUDGET_MS - RETRY_DELAY_MS * 3);
-    expect(overlay()).toBeInTheDocument();
-    expect(screen.getByText(/Waking up the server/)).toBeInTheDocument();
+    for (let i = 0; i < 20; i += 1) {
+      await advance(RETRY_DELAY_MS * 2);
+      expect(overlay()).toBeNull();
+    }
+    expect(waking()).toBeInTheDocument();
     expect(failure()).toBeNull();
   });
 
-  it('the overlay closes by itself when the backend comes up after a wait of several probes', async () => {
+  it('the notice is in a live region that exists from the start, and the game is not inside it', async () => {
+    answers('no-answer');
+    render(<BackendWarmup />);
+    const region = screen.getByRole('status');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region).toBeEmptyDOMElement();
+    await advance(0);
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toContainElement(waking());
+    play();
+    expect(overlay()).toBeInTheDocument();
+    expect(region).not.toContainElement(overlay());
+  });
+
+  it('"Play while you wait" opens the game, and when a probe says ok it closes with the "ready" beat', async () => {
     answers('no-answer', 'no-answer', 'ok');
     render(<BackendWarmup />);
     await advance(0);
-    await advance(RETRY_DELAY_MS * 2);
+    play();
+    expect(overlay()).toBeInTheDocument();
+    expect(screen.getByText(/Waking up the server/)).toBeInTheDocument();
+    expect(playButton()).toBeDisabled();
+
+    await advance(RETRY_DELAY_MS * 2); // the next probes: the last one is ok
     expect(screen.getByText(/Server is ready!/)).toBeInTheDocument();
     await finishClose();
     expect(overlay()).toBeNull();
+    expect(waking()).toBeNull(); // the backend is ready: the notice is gone too
+    expect(failure()).toBeNull();
   });
 
-  it('the user can dismiss the overlay early, and nothing reappears when the backend later comes up', async () => {
+  it('closing the game puts focus back on the button, and it never reopens as the wait goes on or the backend comes up', async () => {
     answers('no-answer', 'no-answer', 'ok');
     render(<BackendWarmup />);
     await advance(0);
+    play();
     await advance(400);
-    fireEvent.click(screen.getByRole('button', { name: /close server loading screen/i }));
+    fireEvent.click(closeButton());
     await advance(0); // exiting
     await advance(500); // the exit animation ends
     expect(overlay()).toBeNull();
+    expect(document.activeElement).toBe(playButton());
 
-    await advance(RETRY_DELAY_MS * 3);
+    await advance(RETRY_DELAY_MS * 3); // the backend comes up
     expect(overlay()).toBeNull();
     expect(failure()).toBeNull();
   });
@@ -109,6 +138,20 @@ describe('<BackendWarmup /> when the backend has failed (not just a cold start)'
     expect(failure()).toHaveAttribute('data-reason', 'timeout');
     expect(failure()).toHaveTextContent(/couldn't reach the server/i);
     expect(failure()).not.toHaveTextContent(/waking/i);
+  });
+
+  it('a failure while the game is open closes it quietly (never "ready") and the failure notice takes over', async () => {
+    answers('no-answer');
+    render(<BackendWarmup />);
+    await advance(0);
+    play();
+    await advance(WAKE_BUDGET_MS + RETRY_DELAY_MS + 2_000);
+    for (let i = 0; i < 30 && overlay(); i += 1) await advance(100);
+
+    expect(screen.queryByText(/Server is ready!/)).toBeNull();
+    expect(overlay()).toBeNull();
+    expect(waking()).toBeNull();
+    expect(failure()).toHaveAttribute('data-reason', 'timeout');
   });
 
   it('a backend that answers "unavailable" gets its own wording: up, but without its database', async () => {
@@ -128,10 +171,11 @@ describe('<BackendWarmup /> when the backend has failed (not just a cold start)'
     answers(probeResult);
     render(<BackendWarmup />);
     await advance(0);
+    play();
     await advance(400);
     expect(overlay()).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /close server loading screen/i }));
+    fireEvent.click(closeButton());
     await advance(0);
     await advance(500);
     expect(overlay()).toBeNull();

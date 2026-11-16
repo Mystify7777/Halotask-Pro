@@ -20,7 +20,7 @@ describe('the Task Tapper has reviewed owners only', () => {
   const referencesModule = (text: string, name: string) => text.includes(name);
   const mentions = (name: string) => code.filter(([path, text]) => referencesModule(text, name) && !path.endsWith('/components/dashboard/ColdStartOverlay.tsx')).map(([path]) => path.replace('/src/', '')).sort();
 
-  it('is mentioned only by the waiting room and the status line (a button), and the sign-in warm-up (the issue #12 experience)', () => {
+  it('is mentioned only by the waiting room, the status line and the sign-in warm-up, each behind a "Play while you wait" button', () => {
     expect(mentions('ColdStartOverlay')).toEqual(['components/BackendWarmup.tsx', 'components/LaunchStatusLine.tsx', 'pages/WaitingRoomPage.tsx']);
   });
 
@@ -50,14 +50,28 @@ describe('the Task Tapper has reviewed owners only', () => {
     expect(text).not.toMatch(/coldStart/);
   });
 
-  it('the status line and the waiting room open the game only through the shared hook, from a click', () => {
-    for (const path of ['/src/components/LaunchStatusLine.tsx', '/src/pages/WaitingRoomPage.tsx']) {
+  const OWNERS = ['/src/components/LaunchStatusLine.tsx', '/src/pages/WaitingRoomPage.tsx', '/src/components/BackendWarmup.tsx'];
+
+  it('every owner opens the game only through the shared hook, and renders it only while `playing`', () => {
+    for (const path of OWNERS) {
       const text = sources[path];
-      expect(text).toMatch(/usePlayWhileYouWait/);
-      // `play` is only ever wired to an onClick
-      const uses = text.match(/\bplay\b/g) ?? [];
-      expect(uses.length).toBeGreaterThan(0);
-      expect(text).not.toMatch(/useEffect\([^)]*play\(/s);
+      expect(text, path).toMatch(/usePlayWhileYouWait/);
+      expect(text, path).toMatch(/\bplaying\s*&&\s*\(?\s*<ColdStartOverlay/);
+      // nothing else decides that the overlay is shown: no state of its own, and `play` is never called from an effect
+      expect(text, path).not.toMatch(/useState\([^)]*\)[^\n]*[Oo]verlay/);
+      expect(text, path).not.toMatch(/set(Overlay|ColdStart|Game|Show)\w*\(true\)/);
+      expect(text, path).not.toMatch(/useEffect\([^)]*play\(/s);
+      expect(text, path).toMatch(/onClick=\{[^}]*\bplay\b/);
     }
+  });
+
+  it('the shared hook turns the game on in exactly one place: the `play` callback', () => {
+    const text = sources['/src/hooks/usePlayWhileYouWait.ts'];
+    expect(text.match(/setPlaying\(true\)/g)).toHaveLength(1);
+    expect(text).toMatch(/const play = useCallback\(\(\) => setPlaying\(true\)/);
+  });
+
+  it('the guard itself knows which files own the overlay', () => {
+    expect(OWNERS.map((path) => path.replace('/src/', '')).sort()).toEqual(mentions('ColdStartOverlay'));
   });
 });

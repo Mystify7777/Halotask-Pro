@@ -19,6 +19,23 @@
     {
       "date": "2026-11-15",
       "category": "Bugfix",
+      "title": "Cold-start game on the sign-in pages opens only on request",
+      "description": "Issue #49 follow-up, audit of the fresh/incognito path. A visitor with no session is the sign-in flow in every server state by the launch design (not the waiting room), so /login, /register, /forgot-password and /reset-password reach BackendWarmup, which opened the Task Tapper by itself at the first failed probe and was the only place that said the server was waking. Now BackendWarmup shows a calm 'server is waking' notice in an always-mounted polite live region with 'Play while you wait' (the shared usePlayWhileYouWait), and the game opens only from that button. A healthy server shows nothing; a real recovery while it is open gives the ready beat and closes it; a failure closes it quietly and the existing alert takes over; a re-check leaves it open; a closed game never reopens. The waiting-room routing, readiness probing and the form are unchanged. 25 net new tests (all four routes x server unavailable / slow / ready / checking, explicit launch, Escape and focus, recovery, flicker, trusted session down and ready, a stronger ownership guard), 6 mutation checks all killed, browser check on a fresh context, axe clean. Client suite 77 files / 1683 tests, typecheck clean.",
+      "files": [
+        "halotasks-client/src/components/BackendWarmup.tsx",
+        "halotasks-client/src/components/BackendWarmup.test.tsx",
+        "halotasks-client/src/pages/AuthPages.coldStart.test.tsx",
+        "halotasks-client/src/launch/LaunchRouting.test.tsx",
+        "halotasks-client/src/test/gameOpensOnlyOnRequest.test.ts",
+        "halotasks-client/src/styles/app.css",
+        "docs/context.md",
+        "docs/logs.md",
+        ".logs"
+      ]
+    },
+    {
+      "date": "2026-11-15",
+      "category": "Bugfix",
       "title": "Cold-start game review fixes (source guard, recovery-count tests, stale #12 note)",
       "description": "Review fixes on the cold-start game patch. The source guard now looks for the component's name instead of one import syntax, so double quotes, import()/lazy(), require and re-exports are all caught, and the overlay folder may not grow a barrel; a test pins the forms it must catch. Two explicit LaunchStatusLine tests: with the game open, the status flickers to checking-server and back with the recovery count unmoved and the game stays open (30 s each way); and a healthy-looking status with the count unmoved neither claims ready nor closes it. The stale #12 line saying forgot/reset are not wired now says Issue #49 wired them. The recovery rule is unchanged and stays in LaunchStatusLine, not in usePlayWhileYouWait. 4 net new tests, 2 mutation checks killed (a double-quoted import in DashboardPage; ready decided by the status instead of the count). Client suite 77 files / 1658 tests, typecheck clean.",
       "files": [
@@ -1799,5 +1816,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-15T15:50:43.000Z"
+  "lastUpdated": "2026-11-15T23:13:10.000Z"
 }

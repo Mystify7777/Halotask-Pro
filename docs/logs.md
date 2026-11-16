@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Cold-start game on the sign-in pages opens only on request
+
+**2026-11-15 · Bugfix · completed · Priority: high**
+
+Issue #49 follow-up, audit of the fresh/incognito path. A visitor with no session is the sign-in flow in every server state by the launch design (not the waiting room), so /login, /register, /forgot-password and /reset-password reach BackendWarmup, which opened the Task Tapper by itself at the first failed probe and was the only place that said the server was waking. Now BackendWarmup shows a calm 'server is waking' notice in an always-mounted polite live region with 'Play while you wait' (the shared usePlayWhileYouWait), and the game opens only from that button. A healthy server shows nothing; a real recovery while it is open gives the ready beat and closes it; a failure closes it quietly and the existing alert takes over; a re-check leaves it open; a closed game never reopens. The waiting-room routing, readiness probing and the form are unchanged. 25 net new tests (all four routes x server unavailable / slow / ready / checking, explicit launch, Escape and focus, recovery, flicker, trusted session down and ready, a stronger ownership guard), 6 mutation checks all killed, browser check on a fresh context, axe clean. Client suite 77 files / 1683 tests, typecheck clean.
+
 #### Cold-start game review fixes (source guard, recovery-count tests, stale #12 note)
 
 **2026-11-15 · Bugfix · completed · Priority: medium**

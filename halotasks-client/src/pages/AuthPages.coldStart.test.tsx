@@ -3,7 +3,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HealthProbeResult } from '../services/healthService';
 
-// Issue #12: the login and register pages get the cold-start experience BEFORE anyone is signed in. The real pages, the
+// Issue #12 (changed by the "game opens only on request" follow-up): the login and register pages get the cold-start
+// notice BEFORE anyone is signed in; the game opens only from its button. The real pages, the
 // real warm-up component, hook and overlay run; replaced are only the readiness probe, the auth network calls and
 // IndexedDB.
 const probe = vi.hoisted(() => vi.fn<(signal?: AbortSignal) => Promise<HealthProbeResult>>());
@@ -35,6 +36,7 @@ const finishClose = async () => {
   await advance(500);
 };
 const overlay = () => screen.queryByRole('dialog', { name: 'Server loading' });
+const waking = () => screen.queryByTestId('backend-warmup-waking');
 
 const renderAt = (path: '/login' | '/register') =>
   render(
@@ -64,27 +66,35 @@ afterEach(() => {
 });
 
 describe.each(['/login', '/register'] as const)('%s, reached directly while signed out', (path) => {
-  it('shows the cold-start experience while the backend is waking, with the form still on the page', async () => {
+  it('says the server is waking, with the form still on the page, and does NOT open the game by itself', async () => {
     pending();
     renderAt(path);
-    expect(overlay()).toBeNull(); // not before the backend is actually slow
+    expect(waking()).toBeNull(); // not before the backend is actually slow
     await advance(2_000);
 
-    expect(overlay()).toBeInTheDocument();
-    expect(screen.getByText(/Waking up the server/)).toBeInTheDocument();
+    expect(waking()).toHaveTextContent(/waking up/i);
+    expect(screen.getByRole('button', { name: 'Play while you wait' })).toBeInTheDocument();
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
+    for (const ms of [1_000, 10_000, 60_000]) {
+      await advance(ms);
+      expect(overlay()).toBeNull();
+    }
   });
 
-  it('closes the overlay by itself once the backend is ready, and the form is usable', async () => {
+  it('"Play while you wait" opens the game; once the backend is ready it closes with the ready beat, and the form is usable', async () => {
     answers('no-answer', 'ok');
     renderAt(path);
     await advance(0); // the first probe came back empty: waking
+    expect(overlay()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
     expect(overlay()).toBeInTheDocument();
+    expect(screen.getByText(/Waking up the server/)).toBeInTheDocument();
 
     await advance(2_000); // the next probe is ok
     expect(screen.getByText(/Server is ready!/)).toBeInTheDocument();
     await finishClose();
     expect(overlay()).toBeNull();
+    expect(waking()).toBeNull();
     expect(screen.getByLabelText(/email address/i)).toBeEnabled();
   });
 
@@ -99,7 +109,7 @@ describe.each(['/login', '/register'] as const)('%s, reached directly while sign
     expect(screen.getByLabelText(/email address/i)).toBeEnabled(); // a notice never locks the form
   });
 
-  it('a refresh (a new mount) starts the check again from scratch', async () => {
+  it('a refresh (a new mount) starts the check again from scratch, and still opens no game', async () => {
     answers('ok');
     const first = renderAt(path);
     await advance(0);
@@ -109,7 +119,8 @@ describe.each(['/login', '/register'] as const)('%s, reached directly while sign
     renderAt(path);
     await advance(2_000);
     expect(probe).toHaveBeenCalledTimes(2);
-    expect(overlay()).toBeInTheDocument();
+    expect(waking()).toBeInTheDocument();
+    expect(overlay()).toBeNull();
   });
 
   it('touches no protected data: the page only ever asks for readiness, never an authenticated endpoint', async () => {
@@ -119,7 +130,7 @@ describe.each(['/login', '/register'] as const)('%s, reached directly while sign
     renderAt(path);
     await advance(10_000);
 
-    expect(overlay()).toBeInTheDocument();
+    expect(waking()).toBeInTheDocument();
     expect(requests).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
     expect(useAuthStore.getState().token).toBeNull();

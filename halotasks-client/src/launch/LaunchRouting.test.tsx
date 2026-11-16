@@ -318,12 +318,13 @@ describe('direct navigation', () => {
     expect(secret()).toBeInTheDocument();
   });
 
-  it('"/login" while the server is down is the sign-in page with its warm-up (the issue #12 experience), not the waiting room', async () => {
+  it('"/login" while the server is down is the sign-in page with a calm "waking" notice (the issue #12 warm-up), not the waiting room, and no game', async () => {
     answers('no-answer');
     tree('/login');
     await advance(2_000);
     expect(loginForm()).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Server loading' })).toBeInTheDocument();
+    expect(screen.getByTestId('backend-warmup-waking')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(waitingRoom()).toBeNull();
   });
 
@@ -428,5 +429,120 @@ describe('the public sign-in routes obey the same contract as the protected ones
     await advance(0);
     expect(secret()).toBeInTheDocument();
     expect(loginForm()).toBeNull();
+  });
+});
+
+// The game opens only after a person's action, on every route and in every state. A fresh or incognito browser has NO
+// session ('none'): by the launch design that is the sign-in flow, never the waiting room (there is nothing to protect and
+// nothing to sign out of), so the notice and the button live on the sign-in pages themselves.
+describe('an anonymous visitor (fresh or incognito) never gets the game without asking for it', () => {
+  const dialog = () => screen.queryByRole('dialog', { name: 'Server loading' });
+  const form = () => document.querySelector('form');
+  const wakingNotice = () => screen.queryByTestId('backend-warmup-waking');
+  const routes = ['/login', '/register', '/forgot-password', '/reset-password'] as const;
+
+  it.each(routes)('%s, server unavailable: the form, a "waking" notice and a button; no dialog at any moment', async (path) => {
+    answers('no-answer');
+    tree(path);
+    expect(dialog()).toBeNull();
+    for (const ms of [0, 1_400, 200, 3_000, 20_000, 70_000, 300_000]) {
+      await advance(ms);
+      expect(dialog()).toBeNull();
+    }
+    expect(form()).toBeInTheDocument();
+    expect(waitingRoom()).toBeNull();
+    expect(wakingNotice() ?? screen.queryByTestId('backend-warmup-failure')).toBeInTheDocument();
+  });
+
+  it.each(routes)('%s, server unavailable and slow to answer: still no dialog', async (path) => {
+    probe.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve('no-answer'), 8_000)));
+    tree(path);
+    for (const ms of [1_500, 8_000, 16_000, 60_000]) {
+      await advance(ms);
+      expect(dialog()).toBeNull();
+    }
+    expect(wakingNotice()).toBeInTheDocument();
+  });
+
+  it.each(routes)('%s, server ready: no notice, no button, no dialog', async (path) => {
+    answers('ok');
+    tree(path);
+    await advance(60_000);
+    expect(dialog()).toBeNull();
+    expect(wakingNotice()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Play while you wait' })).toBeNull();
+  });
+
+  it.each(routes)('%s, server still checking (the first answer is out): no dialog', async (path) => {
+    probe.mockImplementation(() => new Promise(() => undefined));
+    tree(path);
+    await advance(1_000);
+    expect(dialog()).toBeNull();
+    expect(wakingNotice()).toBeNull();
+  });
+
+  it('explicit launch: the button opens it; Escape closes it and returns focus; it does not reopen as the status changes', async () => {
+    answers('no-answer', 'unhealthy', 'no-answer');
+    tree('/register');
+    await advance(2_000);
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
+    expect(dialog()).toBeInTheDocument();
+    fireEvent.keyDown(dialog()!, { key: 'Escape' });
+    await advance(1_500);
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Play while you wait' }));
+    for (const ms of [5_000, 30_000, 120_000]) {
+      await advance(ms);
+      expect(dialog()).toBeNull();
+    }
+  });
+
+  it('recovery while it is open: the ready beat, then it closes and does not come back', async () => {
+    let up = false;
+    probe.mockImplementation(async () => (up ? 'ok' : 'no-answer'));
+    tree('/register');
+    await advance(2_000);
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
+    expect(dialog()).toBeInTheDocument();
+    up = true;
+    await advance(20_000);
+    expect(screen.getByText(/Server is ready!/)).toBeInTheDocument();
+    for (let i = 0; i < 40 && dialog(); i += 1) await advance(100);
+    expect(dialog()).toBeNull();
+    await advance(60_000);
+    expect(dialog()).toBeNull();
+    expect(form()).toBeInTheDocument();
+  });
+
+  it('status flicker while it is open (checking again, then waking again) neither closes it nor claims ready', async () => {
+    answers('no-answer');
+    tree('/login');
+    await advance(2_000);
+    fireEvent.click(screen.getByRole('button', { name: 'Play while you wait' }));
+    for (const ms of [3_000, 12_000, 30_000]) {
+      await advance(ms);
+      expect(dialog()).toBeInTheDocument();
+      expect(screen.queryByText(/Server is ready!/)).toBeNull();
+    }
+  });
+
+  it('a trusted session with the server down (authenticated, unavailable) is the app with no dialog; ready is the app with no dialog', async () => {
+    await trusted();
+    answers('no-answer');
+    tree('/dashboard');
+    for (const ms of [0, 2_000, 30_000, 120_000]) {
+      await advance(ms);
+      expect(dialog()).toBeNull();
+    }
+    expect(secret()).toBeInTheDocument();
+  });
+
+  it('a trusted session with the server ready is the app with no dialog', async () => {
+    await trusted();
+    answers('ok');
+    tree('/dashboard');
+    await advance(60_000);
+    expect(dialog()).toBeNull();
+    expect(secret()).toBeInTheDocument();
   });
 });
