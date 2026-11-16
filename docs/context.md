@@ -148,6 +148,17 @@ XP and the awarded-task ledger are created **only by the server**. The client ca
 
 **Award triggers.** `PUT /api/tasks/:id` on an incomplete -> complete transition, and `POST /api/tasks` when the task is created already `completed:true` (an offline create-then-complete arrives this way). Both return an additive `growth` block: `{ taskId, awarded, xpGained, reason?, treeState }` (`treeState` = the tree without the ledger). No other request changes XP. `XP_PER_COMPLETION = 10`; there is deliberately no daily cap, rate limiter or anti-cheat layer.
 
+**Award day (Issue #24, G1).** The UTC day an award is recorded under (`activeDays`, and so the streak and health) is the day the user acted, not the day the server heard about it, but only inside a small window. `awardDayFor(completedAt, now)` in `utils/treeRules.ts` is the one rule; `completedAt` is the instant of the completion event the server has ALREADY validated and accepted on `PUT /api/tasks/:id` or `POST /api/tasks` (no other input is read):
+
+| Event | Award day |
+| --- | --- |
+| no accepted completion event (a legacy client) | today (the server's UTC day), as before |
+| event day from 7 days before today up to today | the event's own UTC day |
+| event day in the future (clock skew; the history window allows 5 minutes) | today, never a future day |
+| event day more than 7 UTC days before today | today: the completion is too old to claim its own day |
+
+Days are whole UTC calendar days (the unit the streak already uses); exactly 7 days before today is inside the window, 8 is not. `GROWTH_AWARD_BACKDATE_DAYS = 7` is deliberately **not** the CompletionRecord window (90 days back): history may keep an old completion exactly, whereas here the timestamp is a client-influenced input to progression, so it gets much less authority. A completion outside the Growth Tree window is still a valid history record; it just counts for today. Example: tasks completed offline on Monday and Tuesday and on Wednesday, all delivered on Wednesday, give `activeDays` Monday, Tuesday, Wednesday and a streak of 3 (before this change: Wednesday only, streak 1). The streak is a pure fold of the SET of days, so the order in which days arrive does not matter (Wednesday first, then Monday and Tuesday, gives the same streak). Only the day changes: XP (+10), the ledger (`awardedTaskIds`, idempotent by task id), the caps (`ledger_full`, `history_full`, `xp_ceiling`) and the refusal rules are exactly as below, and the day chosen is the one the capacity checks and the legacy-adoption reservation use. A retry or re-completion of an already-awarded task never adds a day, whatever timestamp it carries. A backdated day claimed for a task the server has validated is the most a client can influence; a client still cannot create XP, tasks it does not own, or days outside the window.
+
 **Atomic award** (`awardTaskCompletion`). Step 1 is one conditional update on the user document:
 
 ```
@@ -155,7 +166,7 @@ filter  { _id, 'treeState.awardedTaskIds': { $ne: taskId },
           'treeState.awardedTaskIds.19999': { $exists: false },      // ledger not full
           'treeState.xp': { $gte: 0, $lte: MAX_SAFE_INTEGER - 10 }, // xp is a usable number
           'treeState.activeDays': { $type: 'array' },                // history adopted ...
-          $or: [ { 'treeState.activeDays': <today> },                // ... and today already in it,
+          $or: [ { 'treeState.activeDays': <award day> },            // ... and the award day already in it,
                  { 'treeState.activeDays.19999': { $exists: false } } ] } // or room for it
 update  { $inc: { 'treeState.xp': 10 },
           $push: { 'treeState.awardedTaskIds': taskId },
@@ -199,7 +210,7 @@ So a damaged tree is shown repaired immediately and is repaired in storage the f
 
 **Client behaviour.** `initTreeStorage()` adopts the server tree (the stored IndexedDB copy is used only if the server is unreachable, and is never pushed). `applyServerGrowth(growth)` adopts the tree from a task response and ignores a response with lower XP than the cache (bulk requests can finish out of order). Online completions show the server's `growth`; offline completions show a +10 **preview in React state only** (never stored or sent), which the server's answer replaces after the queued request is replayed (`processSyncQueue({ onGrowth })`). Local `local-...` ids are never awarded locally, so they cannot double-count. `treeService` has no write method. `growth/treeLogic.ts` is now display/preview logic; its constants are pinned against the server copy by `growth/treeRules.parity.test.ts`.
 
-**Known limitations.** An offline preview is not persisted: reloading while offline shows the last server-confirmed tree until the queue syncs. `GET /api/tree` still returns the whole ledger (up to roughly 0.5 MB at the cap). Streak/health reset rules are defined in "Growth Tree reset and recovery rules (Issue #16)" below.
+**Known limitations.** There is no daily reward cap and no rate limit on task routes: a client may legitimately create many tasks and complete them, each new task id earns +10 (a product decision, not an integrity hole; the 20,000-id ledger bounds one account). A completion of an orphaned task (created offline, completed and deleted before it ever synced) reaches the server only as a standalone `POST /api/completion-events`, which records history but never awards Growth Tree progression, so it earns no XP. An offline preview is not persisted: reloading while offline shows the last server-confirmed tree until the queue syncs. `GET /api/tree` still returns the whole ledger (up to roughly 0.5 MB at the cap). Streak/health reset rules are defined in "Growth Tree reset and recovery rules (Issue #16)" below.
 
 ### Growth Tree reset and recovery rules (Issue #16)
 

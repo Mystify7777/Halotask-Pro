@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_EVENT_AGE_MS } from '../src/utils/completionValidators';
 import {
   ACTIVE_DAYS_MAX,
   AWARDED_TASK_IDS_MAX,
+  GROWTH_AWARD_BACKDATE_DAYS,
   AWARDED_TASK_ID_MAX_LENGTH,
   MAX_XP,
   STAGE_THRESHOLDS,
   TREE_REWARD_FIELDS,
   XP_PER_COMPLETION,
   XP_PER_LEAF,
+  awardDayFor,
   deriveTreeStatus,
   effectiveFold,
   impliedStreakDays,
@@ -521,5 +524,69 @@ describe('normalizeTreeState', () => {
     expect(summary).not.toHaveProperty('awardedTaskIds');
     const { awardedTaskIds: _ledger, ...everythingElse } = state;
     expect(summary).toEqual(everythingElse);
+  });
+});
+
+describe('awardDayFor: the UTC day an award is recorded under (Issue #24, G1)', () => {
+  // NOW is Tuesday 2026-10-06 10:00Z. The window is whole UTC days: today and the 7 days before it.
+  const day = (iso: string | undefined) => awardDayFor(iso === undefined ? undefined : new Date(iso), NOW);
+
+  it('keeps the window deliberately small and separate from the CompletionRecord history window', () => {
+    expect(GROWTH_AWARD_BACKDATE_DAYS).toBe(7);
+    expect(GROWTH_AWARD_BACKDATE_DAYS).toBeLessThan(MAX_EVENT_AGE_MS / 86_400_000); // 90 days for history
+  });
+
+  it('no accepted event: today (the existing behaviour)', () => {
+    expect(day(undefined)).toBe('2026-10-06');
+  });
+
+  it('an event today, or earlier today, is today', () => {
+    expect(day('2026-10-06T10:00:00.000Z')).toBe('2026-10-06');
+    expect(day('2026-10-06T00:00:00.000Z')).toBe('2026-10-06');
+  });
+
+  it('an event on an earlier day inside the window keeps its OWN UTC day', () => {
+    expect(day('2026-10-05T09:00:00.000Z')).toBe('2026-10-05');
+    expect(day('2026-10-04T23:59:59.999Z')).toBe('2026-10-04');
+  });
+
+  it('the day boundary is UTC midnight, not the device or server local day', () => {
+    expect(day('2026-10-05T23:59:59.999Z')).toBe('2026-10-05');
+    expect(day('2026-10-06T00:00:00.000Z')).toBe('2026-10-06');
+  });
+
+  it('exactly on the boundary: 7 days before today is inside the window (first and last instant of that day)', () => {
+    expect(day('2026-09-29T00:00:00.000Z')).toBe('2026-09-29');
+    expect(day('2026-09-29T23:59:59.999Z')).toBe('2026-09-29');
+  });
+
+  it('one day older than the boundary falls back to today (the completion is too old to claim its own day)', () => {
+    expect(day('2026-09-28T23:59:59.999Z')).toBe('2026-10-06');
+    expect(day('2026-09-28T00:00:00.000Z')).toBe('2026-10-06');
+    expect(day('2026-07-08T12:00:00.000Z')).toBe('2026-10-06'); // 90 days is valid HISTORY but not a valid award day
+  });
+
+  it('a future event never produces a future award day', () => {
+    expect(day('2026-10-06T10:04:59.000Z')).toBe('2026-10-06'); // inside the 5 minute skew, same day
+    expect(day('2026-10-07T00:00:00.000Z')).toBe('2026-10-06'); // tomorrow
+    expect(day('2027-01-01T00:00:00.000Z')).toBe('2026-10-06');
+  });
+
+  it('skew across midnight: an event a few minutes ahead that lands on the next UTC day is today, not tomorrow', () => {
+    const late = new Date('2026-10-06T23:58:00.000Z');
+    expect(awardDayFor(new Date('2026-10-07T00:02:00.000Z'), late)).toBe('2026-10-06');
+  });
+
+  it('an invalid or non-Date value is today', () => {
+    expect(awardDayFor(new Date('not a date'), NOW)).toBe('2026-10-06');
+    expect(awardDayFor('2026-10-05T00:00:00Z' as unknown as Date, NOW)).toBe('2026-10-06');
+    expect(awardDayFor(null as unknown as Date, NOW)).toBe('2026-10-06');
+    expect(awardDayFor(new Date(8.64e15), NOW)).toBe('2026-10-06'); // largest Date: its ISO year is not a plain 4 digits
+  });
+
+  it('works across month and year boundaries', () => {
+    const jan = new Date('2027-01-03T12:00:00.000Z');
+    expect(awardDayFor(new Date('2026-12-27T08:00:00.000Z'), jan)).toBe('2026-12-27'); // 7 days back
+    expect(awardDayFor(new Date('2026-12-26T08:00:00.000Z'), jan)).toBe('2027-01-03'); // 8 days back
   });
 });

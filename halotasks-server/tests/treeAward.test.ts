@@ -1056,3 +1056,224 @@ describe('property: storage matches the log of atomic award records (Issue #16 r
     expect(stats.recordedAwards).toBeGreaterThanOrEqual(200);
   });
 });
+
+describe('the award day: an offline completion keeps the day the user acted (Issue #24, G1)', () => {
+  const MON = new Date('2026-10-05T09:00:00.000Z');
+  const TUE = new Date('2026-10-06T09:00:00.000Z');
+  const WED = new Date('2026-10-07T10:00:00.000Z'); // the device reconnects, the server clock
+  const activeDaysOf = () => (users.tree(USER) as { activeDays?: string[] }).activeDays;
+  const consecutive = (count: number, end: string) => Array.from({ length: count }, (_, i) => addDays(end, i - count + 1));
+
+  it('Monday completion synced Wednesday: Monday is the award day', async () => {
+    users.seed(USER, fresh());
+
+    const result = await award(USER, taskIdOf(1), WED, MON);
+
+    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
+    expect(activeDaysOf()).toEqual(['2026-10-05']);
+    expect(result.treeState).toMatchObject({ xp: 10, streakDays: 0, lastActiveDate: '2026-10-05', status: 'wilting', health: 'wilting' });
+  });
+
+  it('Monday + Tuesday + Wednesday completed offline, all synced Wednesday: streak 3, active today', async () => {
+    users.seed(USER, fresh());
+
+    await award(USER, taskIdOf(1), WED, MON);
+    await award(USER, taskIdOf(2), WED, TUE);
+    const result = await award(USER, taskIdOf(3), WED, WED);
+
+    expect(activeDaysOf()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
+    expect(result.treeState).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07', health: 'healthy', status: 'active' });
+    expect(users.tree(USER)).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07' });
+  });
+
+  it('the same days arriving in ANY order give the same tree (award-day insertion is order-independent)', async () => {
+    const orders: [number, Date][][] = [
+      [[1, MON], [2, TUE], [3, WED]],
+      [[3, WED], [2, TUE], [1, MON]],
+      [[2, TUE], [3, WED], [1, MON]],
+      [[3, WED], [1, MON], [2, TUE]],
+    ];
+    const outcomes: unknown[] = [];
+    for (const order of orders) {
+      users.seed(USER, fresh());
+      for (const [n, when] of order) await award(USER, taskIdOf(n), WED, when);
+      const t = users.tree(USER);
+      outcomes.push({ xp: t.xp, streakDays: t.streakDays, lastActiveDate: t.lastActiveDate, activeDays: [...(t.activeDays as string[])].sort(), health: t.health }); // storage order is insertion order; the history is a SET
+    }
+    for (const outcome of outcomes) expect(outcome).toEqual(outcomes[0]);
+    expect(outcomes[0]).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07' });
+  });
+
+  it('a day with a gap still resets: Monday and Wednesday (no Tuesday) is streak 1', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, MON);
+    const result = await award(USER, taskIdOf(2), WED, WED);
+    expect(result.treeState).toMatchObject({ xp: 20, streakDays: 1, lastActiveDate: '2026-10-07' });
+  });
+
+  it('exactly on the 7-day boundary the event day is used; one day older falls back to the receipt day', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, new Date('2026-09-30T00:00:00.000Z')); // 7 UTC days before Wednesday 10-07
+    expect(activeDaysOf()).toEqual(['2026-09-30']);
+
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, new Date('2026-09-29T23:59:59.999Z')); // 8 days
+    expect(activeDaysOf()).toEqual(['2026-10-07']);
+  });
+
+  it('an event older than the window (even a valid 90-day history event) is recorded under the receipt day', async () => {
+    users.seed(USER, fresh());
+    const result = await award(USER, taskIdOf(1), WED, new Date('2026-07-20T12:00:00.000Z'));
+    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
+    expect(activeDaysOf()).toEqual(['2026-10-07']);
+    expect(result.treeState).toMatchObject({ streakDays: 1, lastActiveDate: '2026-10-07' });
+  });
+
+  it('a future event never records a future day', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, new Date('2026-10-08T00:00:00.000Z'));
+    await award(USER, taskIdOf(2), WED, new Date('2027-06-01T00:00:00.000Z'));
+    expect(activeDaysOf()).toEqual(['2026-10-07']);
+    expect(users.tree(USER)).toMatchObject({ xp: 20, lastActiveDate: '2026-10-07' });
+  });
+
+  it('no completion event: the existing current-day behaviour, byte for byte the same write as before', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED);
+
+    const write = users.applied.find((o) => o.update?.$inc);
+    expect(write?.update).toEqual({
+      $inc: { 'treeState.xp': 10 },
+      $push: { 'treeState.awardedTaskIds': taskIdOf(1) },
+      $addToSet: { 'treeState.activeDays': '2026-10-07' },
+    });
+  });
+
+  it('the XP and the ledger do not depend on the day: +10 per task whatever day it is recorded under', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, MON);
+    await award(USER, taskIdOf(2), WED, new Date('2026-01-01T00:00:00.000Z'));
+    await award(USER, taskIdOf(3), WED);
+    expect(users.tree(USER)).toMatchObject({ xp: 30, awardedTaskIds: [taskIdOf(1), taskIdOf(2), taskIdOf(3)] });
+  });
+
+  it('the same task retried many times, with the same or different timestamps, is awarded once and adds no day', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, MON);
+    const mark = users.applied.length;
+
+    const again = await award(USER, taskIdOf(1), WED, MON);
+    const other = await award(USER, taskIdOf(1), WED, TUE);
+    const later = await award(USER, taskIdOf(1), WED, WED);
+    const none = await award(USER, taskIdOf(1), WED);
+
+    for (const r of [again, other, later, none]) expect(r).toMatchObject({ awarded: false, xpGained: 0, reason: 'already_awarded' });
+    expect(users.tree(USER)).toMatchObject({ xp: 10, awardedTaskIds: [taskIdOf(1)] });
+    expect(activeDaysOf()).toEqual(['2026-10-05']); // a later event time cannot add a day to an awarded task
+    expect(writesSince(mark).some((o) => o.update?.$inc)).toBe(false);
+  });
+
+  it('concurrent duplicates of one task with different event days: one award, one day', async () => {
+    users.seed(USER, fresh());
+    const when = [MON, TUE, WED, MON, TUE, WED, MON, TUE];
+    const results = await Promise.all(when.map((w) => award(USER, taskIdOf(1), WED, w)));
+    expect(results.filter((r) => r.awarded)).toHaveLength(1);
+    expect(users.tree(USER).xp).toBe(10);
+    expect((activeDaysOf() ?? []).length).toBe(1);
+  });
+
+  it('a backdated day does not bypass the ledger cap', async () => {
+    const ids = Array.from({ length: AWARDED_TASK_IDS_MAX }, (_, i) => `id-${i}`);
+    users.seed(USER, fresh({ xp: 1000, awardedTaskIds: ids, activeDays: ['2026-10-07'] }));
+
+    const result = await award(USER, taskIdOf(1), WED, MON);
+
+    expect(result).toMatchObject({ awarded: false, reason: 'ledger_full', xpGained: 0 });
+    expect(activeDaysOf()).toEqual(['2026-10-07']);
+    expect(users.tree(USER).xp).toBe(1000);
+  });
+
+  it('a backdated day does not bypass the history cap: a NEW backdated day is refused, a held one is accepted', async () => {
+    const days = consecutive(ACTIVE_DAYS_MAX, '2026-10-05'); // holds 10-05 and earlier, not 10-06 or 10-07
+    users.seed(USER, fresh({ xp: 100, streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['old'], activeDays: days }));
+
+    const refused = await award(USER, taskIdOf(1), WED, TUE); // 10-06 would be a new day
+    expect(refused).toMatchObject({ awarded: false, reason: 'history_full', xpGained: 0 });
+    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
+    expect(users.tree(USER).xp).toBe(100);
+
+    const accepted = await award(USER, taskIdOf(2), WED, MON); // 10-05 is already held
+    expect(accepted).toMatchObject({ awarded: true });
+    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
+    expect(users.tree(USER).xp).toBe(110);
+  });
+
+  it('a full history that holds the award day still repairs an unusable xp and awards (the refusal reason is judged on the award day)', async () => {
+    const days = consecutive(ACTIVE_DAYS_MAX, '2026-10-05'); // holds the award day 10-05, not today (10-07)
+    users.seed(USER, fresh({ xp: 'junk', streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['old'], activeDays: days }));
+
+    const result = await award(USER, taskIdOf(1), WED, MON);
+
+    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
+    expect(users.tree(USER).xp).toBe(10);
+    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
+  });
+
+  it('legacy adoption reserves the slot for the AWARD day, not for today', async () => {
+    // 19,000 streak days ending 10-05 + 1,000 old marker days = 20,000 distinct. Awarding the held day 10-05 fits; a NEW day does not.
+    const legacy = () =>
+      fresh({
+        xp: 100,
+        streakDays: 19_000,
+        lastActiveDate: '2026-10-05',
+        awardedTaskIds: ['old'],
+        pendingDerivedDays: Array.from({ length: 1_000 }, (_, i) => addDays('1900-01-01', i)),
+      });
+
+    users.seed(USER, legacy());
+    expect(await award(USER, taskIdOf(1), WED, MON)).toMatchObject({ awarded: true }); // award day 10-05: already in the set
+    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
+
+    users.seed(USER, legacy());
+    const before = users.get(USER);
+    expect(await award(USER, taskIdOf(1), WED, TUE)).toMatchObject({ awarded: false, reason: 'history_full' }); // 10-06 would be a new day
+    expect(users.get(USER)).toEqual(before);
+  });
+
+  it('a legacy tree adopts its implied days and then records the backdated day', async () => {
+    users.seed(USER, fresh({ xp: 40, streakDays: 3, lastActiveDate: '2026-10-04', awardedTaskIds: ['old'] })); // days 10-02..10-04
+    const result = await award(USER, taskIdOf(1), WED, MON); // 10-05 continues the streak
+    expect(activeDaysOf()).toEqual(['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05']);
+    expect(result.treeState).toMatchObject({ xp: 50, lastActiveDate: '2026-10-05' });
+  });
+
+  it('a backdated award never moves a LATER stored last-active date backwards', async () => {
+    users.seed(USER, fresh());
+    await award(USER, taskIdOf(1), WED, WED);
+    const result = await award(USER, taskIdOf(2), WED, MON);
+    expect(users.tree(USER)).toMatchObject({ lastActiveDate: '2026-10-07', xp: 20 });
+    expect(result.treeState.lastActiveDate).toBe('2026-10-07');
+  });
+
+  it('a recorded award whose derived write failed keeps its backdated day, and the retry repairs the copy from it', async () => {
+    users.seed(USER, fresh());
+    users.faults.push({ op: 'findOneAndUpdate', count: 1, when: isDerivedWrite });
+    await expect(award(USER, taskIdOf(1), WED, MON)).rejects.toMatchObject({ kind: 'derived_unpersisted' });
+    expect(users.tree(USER)).toMatchObject({ xp: 10, streakDays: 0, activeDays: ['2026-10-05'] });
+
+    const retry = await award(USER, taskIdOf(1), WED, new Date('2026-10-07T09:00:00.000Z')); // a different timestamp on the retry
+    expect(retry).toMatchObject({ awarded: false, reason: 'already_awarded' });
+    expect(users.tree(USER)).toMatchObject({ xp: 10, lastActiveDate: '2026-10-05', activeDays: ['2026-10-05'] });
+  });
+
+  it("another user's tree is never touched by a backdated award", async () => {
+    users.seed(USER, fresh());
+    users.seed('user-2', fresh({ xp: 50, awardedTaskIds: ['x'], activeDays: ['2026-10-01'] }));
+    const before = users.get('user-2');
+
+    await award(USER, taskIdOf(1), WED, MON);
+
+    expect(users.get('user-2')).toEqual(before);
+    expect(activeDaysOf()).toEqual(['2026-10-05']);
+  });
+});

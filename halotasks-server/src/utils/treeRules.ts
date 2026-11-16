@@ -183,6 +183,39 @@ export const getHealthForStreak = (
   today: string,
 ): TreeHealth => deriveTreeStatus(streakDays, lastActiveDate, 1, today).health;
 
+// ── The award day (Issue #24, G1) ───────────────────────────────────────────────
+//
+// `activeDays` records the UTC day an award is FOR. Normally that is the day the server receives the completion. An
+// offline completion is delivered later, so the day the user really acted (the validated completion event's
+// `completedAt`) is used instead, but only inside a deliberately SMALL window. This window is NOT the CompletionRecord
+// window (90 days back for history): history may keep an old completion exactly, whereas here the timestamp is a
+// client-influenced input to progression (streak, health), so it gets much less authority.
+//
+//   event day in [today - GROWTH_AWARD_BACKDATE_DAYS, today]   the event's UTC day
+//   event day in the future (clock skew, 5 minute allowance)    today
+//   event day older than the window                             today (the completion is too old to claim its own day)
+//   no accepted completion event (legacy client, no timestamp)  today
+//
+// Days are whole UTC calendar days, the same unit as the streak rule. A day exactly GROWTH_AWARD_BACKDATE_DAYS before
+// today is inside the window; one more day back is not.
+
+/** How many UTC days before today a completion event may still claim its own day for the Growth Tree. */
+export const GROWTH_AWARD_BACKDATE_DAYS = 7;
+
+/**
+ * The UTC calendar day (YYYY-MM-DD) an award is recorded under. Pure: `completedAt` must be the instant of a completion
+ * event the server has already validated (undefined when there is none), `now` is the server clock.
+ */
+export const awardDayFor = (completedAt: Date | undefined, now: Date): string => {
+  const today = getTodayUtc(now);
+  if (!(completedAt instanceof Date) || !Number.isFinite(completedAt.getTime())) return today;
+  const eventDay = getTodayUtc(completedAt);
+  if (!isValidCalendarDate(eventDay)) return today;
+  if (eventDay > today) return today;
+  if (daysBetween(eventDay, today) > GROWTH_AWARD_BACKDATE_DAYS) return today;
+  return eventDay;
+};
+
 /**
  * The streak transition applied when a task is awarded today (the existing client rule, unchanged):
  *   same day            -> nothing changes

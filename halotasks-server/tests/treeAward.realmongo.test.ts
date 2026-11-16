@@ -270,3 +270,50 @@ describe('real MongoDB: concurrent awards of different tasks, and isolation betw
     expect(JSON.stringify(await raw(bystander))).toBe(bystanderBefore);
   });
 });
+
+describe('real MongoDB: the award day follows the completion event inside the 7-day window (Issue #24, G1)', () => {
+  const WED = new Date('2026-10-07T10:00:00.000Z');
+  const MON = new Date('2026-10-05T09:00:00.000Z');
+  const TUE = new Date('2026-10-06T09:00:00.000Z');
+  const adopted = () => ({ xp: 0, streakDays: 0, lastActiveDate: null, awardedTaskIds: [], activeDays: [] });
+
+  it('Monday, Tuesday and Wednesday completions synced on Wednesday: three days, streak 3, xp 30', async () => {
+    const id = await seed(adopted());
+    await awardTaskCompletion(id, task(1), WED, MON);
+    await awardTaskCompletion(id, task(2), WED, TUE);
+    await awardTaskCompletion(id, task(3), WED, WED);
+    const tree = await rawTree(id);
+    expect([...(tree.activeDays as string[])].sort()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
+    expect(tree.streakDays).toBe(3);
+    expect(tree.lastActiveDate).toBe('2026-10-07');
+    expect(tree.xp).toBe(3 * XP_PER_COMPLETION);
+  });
+
+  it('an event older than 7 days, or in the future, is recorded under the receipt day', async () => {
+    const id = await seed(adopted());
+    await awardTaskCompletion(id, task(1), WED, new Date('2026-09-20T00:00:00.000Z'));
+    await awardTaskCompletion(id, task(2), WED, new Date('2026-10-09T00:00:00.000Z'));
+    expect((await rawTree(id)).activeDays).toEqual(['2026-10-07']);
+  });
+
+  it('concurrent awards of different tasks on different event days keep every XP and every day (retrying a refused derived write)', async () => {
+    const id = await seed(adopted());
+    const jobs: [string, Date][] = [[task(1), MON], [task(2), TUE], [task(3), WED], [task(4), MON], [task(5), TUE], [task(6), WED]];
+    await Promise.allSettled(jobs.map(([t, when]) => awardTaskCompletion(id, t, WED, when)));
+    for (const [t, when] of jobs) await awardTaskCompletion(id, t, WED, when).catch((e: unknown) => {
+      if (!(e instanceof TreeAwardError)) throw e;
+    });
+    const tree = await rawTree(id);
+    expect([...(tree.awardedTaskIds as string[])].sort()).toEqual(jobs.map(([t]) => t).sort());
+    expect(tree.xp).toBe(jobs.length * XP_PER_COMPLETION);
+    expect([...(tree.activeDays as string[])].sort()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
+    expect(tree.streakDays).toBe(3);
+  });
+
+  it('a backdated NEW day is refused when the history is full; a held day is accepted', async () => {
+    const days = Array.from({ length: ACTIVE_DAYS_MAX }, (_, i) => dayN(i)); // 1950-01-01 onwards: none of the Oct 2026 days
+    const id = await seed({ xp: 100, streakDays: 0, lastActiveDate: null, awardedTaskIds: ['old'], activeDays: days });
+    expect(await awardTaskCompletion(id, task(1), WED, MON)).toMatchObject({ awarded: false, reason: 'history_full' });
+    expect(((await rawTree(id)).activeDays as string[]).length).toBe(ACTIVE_DAYS_MAX);
+  });
+});

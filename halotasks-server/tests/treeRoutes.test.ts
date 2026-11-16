@@ -3,6 +3,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_JWT_SECRET as SECRET } from './testConfig';
+import { createCompletionStore, type CompletionStore } from './helpers/completionDoubles';
 import { createTaskStore, createUserStore, loadAppWith, unmockModels, type TaskStore, type UserStore } from './helpers/treeDoubles';
 
 // Issue #24 — the Growth Tree through the REAL app (routes, auth, controllers, treeAward, treeRules) with
@@ -674,5 +675,150 @@ describe('PATCH /api/tree — reward state is not client-writable', () => {
     expect(stale.status).toBe(400);
     expect(xpOf()).toBe(10);
     expect(ledgerOf()).toEqual([String(task._id)]);
+  });
+});
+
+describe('the award day over HTTP: an offline completion keeps the day the user acted (Issue #24, G1)', () => {
+  let records: CompletionStore;
+  const at = (iso: string) => vi.setSystemTime(new Date(iso));
+  const days = (owner = OWNER_A) => [...((users.tree(owner) as { activeDays?: string[] }).activeDays ?? [])].sort();
+  const treeOf = (owner = OWNER_A) => users.tree(owner) as { xp: number; streakDays: number; lastActiveDate: string | null; awardedTaskIds: string[] };
+  const event = (id: string, completedAt: string) => ({ completionId: id, completedAt, utcOffsetMinutes: 0 });
+  const put = (taskId: string, completionEvent?: object, owner = OWNER_A) =>
+    request(app).put(`/api/tasks/${taskId}`).set(as(owner)).send({ completed: true, ...(completionEvent ? { completionEvent } : {}) });
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    at('2026-10-07T10:00:00.000Z'); // Wednesday: the device reconnects
+    records = createCompletionStore();
+    app = await loadAppWith(users, tasks, SECRET, records);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('PUT: Monday, Tuesday and Wednesday completions delivered on Wednesday give streak 3', async () => {
+    const [a, b, c] = [tasks.seed(OWNER_A), tasks.seed(OWNER_A), tasks.seed(OWNER_A)];
+
+    expect((await put(String(a._id), event('c-mon', '2026-10-05T09:00:00.000Z'))).status).toBe(200);
+    expect((await put(String(b._id), event('c-tue', '2026-10-06T09:00:00.000Z'))).status).toBe(200);
+    const last = await put(String(c._id), event('c-wed', '2026-10-07T09:00:00.000Z'));
+
+    expect(days()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
+    expect(last.body.growth).toMatchObject({ awarded: true, xpGained: 10 });
+    expect(last.body.growth.treeState).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07', health: 'healthy' });
+    expect(treeOf()).toMatchObject({ xp: 30, streakDays: 3 });
+  });
+
+  it('PUT: a single Monday completion delivered on Wednesday is recorded under Monday', async () => {
+    const task = tasks.seed(OWNER_A);
+    const res = await put(String(task._id), event('c-mon', '2026-10-05T09:00:00.000Z'));
+    expect(res.status).toBe(200);
+    expect(days()).toEqual(['2026-10-05']);
+    expect(res.body.growth.treeState).toMatchObject({ xp: 10, lastActiveDate: '2026-10-05' });
+  });
+
+  it('PUT: an event older than 7 days is still a valid completion RECORD (90-day window) but is awarded under the receipt day', async () => {
+    const task = tasks.seed(OWNER_A);
+    const res = await put(String(task._id), event('c-old', '2026-09-20T09:00:00.000Z'));
+
+    expect(res.status).toBe(200);
+    expect(records.docs.find((d) => d.completionId === 'c-old')).toMatchObject({ status: 'active', localDate: '2026-09-20' }); // history keeps the real day
+    expect(days()).toEqual(['2026-10-07']); // the Growth Tree does not
+    expect(res.body.growth.treeState).toMatchObject({ xp: 10, streakDays: 1, lastActiveDate: '2026-10-07' });
+  });
+
+  it('PUT: exactly 7 days back is accepted, 8 is not', async () => {
+    const [a, b] = [tasks.seed(OWNER_A), tasks.seed(OWNER_A)];
+    await put(String(a._id), event('c-7', '2026-09-30T00:00:00.000Z'));
+    await put(String(b._id), event('c-8', '2026-09-29T23:59:59.000Z'));
+    expect(days()).toEqual(['2026-09-30', '2026-10-07']);
+  });
+
+  it('PUT: an event a few minutes in the future is today, never a future day', async () => {
+    at('2026-10-07T23:58:00.000Z');
+    const task = tasks.seed(OWNER_A);
+    const res = await put(String(task._id), event('c-skew', '2026-10-08T00:02:00.000Z'));
+    expect(res.status).toBe(200);
+    expect(days()).toEqual(['2026-10-07']);
+  });
+
+  it('PUT: a request with no completion event (legacy client) is recorded under today, as before', async () => {
+    const task = tasks.seed(OWNER_A);
+    const res = await put(String(task._id));
+    expect(res.status).toBe(200);
+    expect(days()).toEqual(['2026-10-07']);
+    expect(res.body.growth).toMatchObject({ awarded: true });
+  });
+
+  it('PUT: a retry of the same completion (same event, then a different timestamp) awards once and adds no day', async () => {
+    const task = tasks.seed(OWNER_A);
+    const id = String(task._id);
+    await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
+
+    const same = await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
+    const other = await put(id, event('c-2', '2026-10-06T09:00:00.000Z'));
+
+    expect(same.status).toBe(200);
+    expect(other.status).toBe(200);
+    expect(treeOf()).toMatchObject({ xp: 10, awardedTaskIds: [id] });
+    expect(days()).toEqual(['2026-10-05']);
+  });
+
+  it('PUT: uncomplete then re-complete with a newer event is the same task: still one award, still Monday', async () => {
+    const task = tasks.seed(OWNER_A);
+    const id = String(task._id);
+    await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
+    await request(app).put(`/api/tasks/${id}`).set(as(OWNER_A)).send({ completed: false, completionEvent: { completionId: 'c-1', revokedAt: '2026-10-05T10:00:00.000Z' } });
+    const again = await put(id, event('c-2', '2026-10-07T09:00:00.000Z'));
+
+    expect(again.body.growth).toMatchObject({ awarded: false, reason: 'already_awarded' });
+    expect(treeOf().xp).toBe(10);
+    expect(days()).toEqual(['2026-10-05']);
+  });
+
+  it('POST: a task created already completed (offline create-then-complete) uses its event day', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .set(as(OWNER_A))
+      .send({ title: 'done on monday', completed: true, completionEvent: event('c-post', '2026-10-05T09:00:00.000Z') });
+
+    expect(res.status).toBe(201);
+    expect(res.body.growth).toMatchObject({ awarded: true, xpGained: 10 });
+    expect(days()).toEqual(['2026-10-05']);
+    expect(res.body.growth.treeState.lastActiveDate).toBe('2026-10-05');
+  });
+
+  it('POST: with no event, or an event older than 7 days, it is today', async () => {
+    const plain = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'x', completed: true });
+    const old = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'y', completed: true, completionEvent: event('c-old', '2026-08-01T09:00:00.000Z') });
+    expect(plain.status).toBe(201);
+    expect(old.status).toBe(201);
+    expect(days()).toEqual(['2026-10-07']);
+    expect(treeOf().xp).toBe(20);
+  });
+
+  it('a refused event (outside the 90-day history window) awards nothing at all, whatever the Growth Tree window says', async () => {
+    const task = tasks.seed(OWNER_A);
+    const res = await put(String(task._id), event('c-ancient', '2026-05-01T09:00:00.000Z'));
+    expect(res.status).toBe(400);
+    expect(treeOf().xp).toBe(0);
+    expect(days()).toEqual([]);
+  });
+
+  it('the standalone orphan endpoint still never awards, and never adds a day', async () => {
+    const res = await request(app)
+      .post('/api/completion-events')
+      .set(as(OWNER_A))
+      .send({ type: 'complete', completionId: 'c-orphan', taskId: 'local-1730000000000-ab12cd', title: 'gone', estimatedMinutes: 0, completedAt: '2026-10-05T09:00:00.000Z', utcOffsetMinutes: 0 });
+    expect(res.status).toBe(201);
+    expect(treeOf()).toMatchObject({ xp: 0, awardedTaskIds: [] });
+    expect(days()).toEqual([]);
+  });
+
+  it("one user's backdated completion never touches another user's tree", async () => {
+    const task = tasks.seed(OWNER_A);
+    const before = JSON.stringify(users.tree(OWNER_B));
+    await put(String(task._id), event('c-1', '2026-10-05T09:00:00.000Z'));
+    expect(JSON.stringify(users.tree(OWNER_B))).toBe(before);
+    expect(days(OWNER_B)).toEqual([]);
   });
 });

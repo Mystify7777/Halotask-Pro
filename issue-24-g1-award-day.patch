@@ -1,0 +1,837 @@
+diff --git a/.logs b/.logs
+index 5de2634..e02649d 100644
+--- a/.logs
++++ b/.logs
+@@ -16,6 +16,24 @@
+     "Accessibility"
+   ],
+   "entries": [
++    {
++      "date": "2026-11-16",
++      "category": "Bugfix",
++      "title": "Growth Tree: an offline completion keeps the day the user acted (Issue #24, G1)",
++      "description": "Issue #24 audit finding G1. The award was recorded under the server's receipt day, so tasks completed offline on Monday and Tuesday and delivered on Wednesday gave one active day and a streak of 1 (XP was right, the streak and health were wrong for exactly the offline-first user). Now `awardDayFor(completedAt, now)` (`utils/treeRules.ts`) picks the UTC day an award is recorded under from the completion event the server has already validated on PUT /api/tasks/:id and POST /api/tasks: the event's own day when it lies from 7 UTC days before today up to today, otherwise today (no event, a future or skewed event, or an event older than the window). The 7-day Growth Tree window is deliberately narrower than the CompletionRecord history window (90 days); a completion outside it is still a valid history record. The day is threaded through `awardTaskCompletion` into the atomic award, the capacity filter, the legacy-adoption reservation and the history_full check. XP (+10), the ledger, the caps, idempotency by task id, the standalone orphan endpoint (never awards) and the client are unchanged (the client's offline preview is computed at completion time, so its day already equals the event day; it stays display-only and the server's answer still replaces it). Documented in docs/context.md: the server-authoritative rule, the bounded window, no daily reward cap, orphaned completions earn no XP. Verification: focused Growth Tree and task tests 463 (43 new), full server suite without the MongoDB suites 49 files / 2325 tests, server typecheck (src and tests) clean, 15 mutation checks all killed. The real-MongoDB suites (a new case block in treeAward.realmongo.test.ts) were typechecked only: MongoDB cannot be downloaded in the sandbox, so run them in CI.",
++      "files": [
++        "halotasks-server/src/utils/treeRules.ts",
++        "halotasks-server/src/utils/treeAward.ts",
++        "halotasks-server/src/controllers/task.controller.ts",
++        "halotasks-server/tests/treeRules.test.ts",
++        "halotasks-server/tests/treeAward.test.ts",
++        "halotasks-server/tests/treeRoutes.test.ts",
++        "halotasks-server/tests/treeAward.realmongo.test.ts",
++        "docs/context.md"
++      ],
++      "priority": "high",
++      "status": "completed"
++    },
+     {
+       "date": "2026-11-15",
+       "category": "Bugfix",
+@@ -261,7 +279,7 @@
+       "date": "2026-11-13",
+       "category": "Frontend",
+       "title": "Issue #11: one clear look for every show/hide control",
+-      "description": "The Filters and Summary buttons were borderless ghost buttons whose state was a ▲/▼ glyph inside the label, while Details and Completed used ▸/▾ with the opposite meaning, so the four show/hide controls looked and read differently and the toolbar ones were easy to miss. They now share one DisclosureToggle control: a bordered pill (Filters, Summary), a full-width bar with a count (Completed) and a quiet inline control (Details), each with a CSS chevron that points right when collapsed and down when expanded, and a label that never changes with state (Details used to switch to 'Hide details' and its accessible name to 'Show/Hide subtasks and description for ...'; it is now 'Details' and 'Details for \"<title>\"'), plus primary-colour emphasis when expanded that suits each variant, so state is never colour alone (the chevron turns and aria-expanded says it). The chevron is hidden from assistive technology and the accessible name no longer contains a glyph; state is announced through aria-expanded, aria-controls is only set while the region exists, and an active filter shows a dot plus 'Filters are active' text for screen readers. A real keyboard bug is fixed on the way: the collapsed filter and sync panels were clipped but their controls stayed in the tab order, they are now inert while collapsed. Filter selections, filtering logic, the open/closed state each caller owns and the layout are unchanged; reduced motion is respected. Client suite 61 files / 1253 tests.",
++      "description": "The Filters and Summary buttons were borderless ghost buttons whose state was a \u25b2/\u25bc glyph inside the label, while Details and Completed used \u25b8/\u25be with the opposite meaning, so the four show/hide controls looked and read differently and the toolbar ones were easy to miss. They now share one DisclosureToggle control: a bordered pill (Filters, Summary), a full-width bar with a count (Completed) and a quiet inline control (Details), each with a CSS chevron that points right when collapsed and down when expanded, and a label that never changes with state (Details used to switch to 'Hide details' and its accessible name to 'Show/Hide subtasks and description for ...'; it is now 'Details' and 'Details for \"<title>\"'), plus primary-colour emphasis when expanded that suits each variant, so state is never colour alone (the chevron turns and aria-expanded says it). The chevron is hidden from assistive technology and the accessible name no longer contains a glyph; state is announced through aria-expanded, aria-controls is only set while the region exists, and an active filter shows a dot plus 'Filters are active' text for screen readers. A real keyboard bug is fixed on the way: the collapsed filter and sync panels were clipped but their controls stayed in the tab order, they are now inert while collapsed. Filter selections, filtering logic, the open/closed state each caller owns and the layout are unchanged; reduced motion is respected. Client suite 61 files / 1253 tests.",
+       "files": [
+         "halotasks-client/src/components/shared/DisclosureToggle.tsx",
+         "halotasks-client/src/components/shared/DisclosureToggle.test.tsx",
+@@ -622,7 +640,7 @@
+       "date": "2026-11-02",
+       "category": "Frontend",
+       "title": "subtasks on tasks: client data layer (Issue #15, phase 2)",
+-      "description": "The client now understands a task’s checklist, with no UI yet. Task, TaskCreatePayload and updates carry optional subtasks; utils/subtasks.ts reads a missing list as [], derives progress, normalizes and validates a list for saving (trim, drop blanks, keep ids, never invent one, cap 20, unique ids), and sets one subtask’s state. New toggleSubtask(taskId, subtaskId) works from the latest tasks (two taps in one tick build on each other), sends or queues the whole list as { subtasks } only, so it can never complete the parent or award XP, does nothing for an unknown id, is optimistic online and local-first offline, and keeps a newer local list when an older response arrives late. Failures undo only what they should: online, a per-subtask tap counter stops a failed request undoing a newer tap; offline, each queued write carries the whole list, so the last write to settle puts the checklist where the queue really is (last queued list, or the list from before the first write) and never overwrites a checklist changed meanwhile; the task's pending flag is set only after a queue write succeeds and is never touched by a rollback, so a concurrent edit or sync keeps its own value. Search also matches subtask titles (never ids or state); copy-selected adds the description and [x]/[ ] subtask lines, unchanged for tasks without them. The offline queue is unchanged: its shallow merge already replaces an array whole, now pinned by tests including create-merge and id stability through the local-id remap and the cache. Tests: new unit, hook and offline-layer suites; mutation checks were run three times and each survivor or review finding led to a fix and a test (a per-subtask tap counter online; settle-time reconciliation of offline queue failures; pendingSync owned by successful queue writes instead of restored by a rollback). Not verified: a real browser or a real IndexedDB. Whole-list last-writer-wins still applies. No user-visible change yet (phase 3 is the UI).",
++      "description": "The client now understands a task\u2019s checklist, with no UI yet. Task, TaskCreatePayload and updates carry optional subtasks; utils/subtasks.ts reads a missing list as [], derives progress, normalizes and validates a list for saving (trim, drop blanks, keep ids, never invent one, cap 20, unique ids), and sets one subtask\u2019s state. New toggleSubtask(taskId, subtaskId) works from the latest tasks (two taps in one tick build on each other), sends or queues the whole list as { subtasks } only, so it can never complete the parent or award XP, does nothing for an unknown id, is optimistic online and local-first offline, and keeps a newer local list when an older response arrives late. Failures undo only what they should: online, a per-subtask tap counter stops a failed request undoing a newer tap; offline, each queued write carries the whole list, so the last write to settle puts the checklist where the queue really is (last queued list, or the list from before the first write) and never overwrites a checklist changed meanwhile; the task's pending flag is set only after a queue write succeeds and is never touched by a rollback, so a concurrent edit or sync keeps its own value. Search also matches subtask titles (never ids or state); copy-selected adds the description and [x]/[ ] subtask lines, unchanged for tasks without them. The offline queue is unchanged: its shallow merge already replaces an array whole, now pinned by tests including create-merge and id stability through the local-id remap and the cache. Tests: new unit, hook and offline-layer suites; mutation checks were run three times and each survivor or review finding led to a fix and a test (a per-subtask tap counter online; settle-time reconciliation of offline queue failures; pendingSync owned by successful queue writes instead of restored by a rollback). Not verified: a real browser or a real IndexedDB. Whole-list last-writer-wins still applies. No user-visible change yet (phase 3 is the UI).",
+       "files": [
+         "halotasks-client/src/types/task.ts",
+         "halotasks-client/src/utils/subtasks.ts",
+@@ -641,7 +659,7 @@
+       "date": "2026-11-02",
+       "category": "Backend",
+       "title": "subtasks on tasks: server contract (Issue #15, phase 1)",
+-      "description": "Tasks can now carry an optional checklist: subtasks [{ id, title, completed }], at most 20, default [] (a task stored before the field reads as []). New parseSubtasks (utils/taskValidators.ts) is strict and shared by create and update: ids 1-64 characters of letters, digits, _ or -, unique per task, titles 1-200 characters after trimming, completed a boolean; malformed input is a 400 naming the entry, never repaired, and the server never invents an id (client-made ids stay stable across edits, syncs and offline remapping). The list is replaced whole by one $set; [] or null stores []; a request that omits the key leaves stored subtasks alone, so an older client can never clear them. Parent and subtasks stay independent: completing every subtask does not complete the parent, completing the parent does not touch subtasks, and only the parent’s own incomplete-to-complete transition awards growth XP (tested by counting award writes). The Task model has a subdocument schema (no _id) and a cap validator as a second line. Known limit, documented: whole-list last-writer-wins applies online as well as offline, and the atomic $set does not prevent a lost update. Tests: validator unit tests, 36 route tests against the real app with an in-memory double (including omitted-key compatibility and no partial writes), 20 model tests with a stubbed driver; a six-mutant check was caught by them. tests/taskSubtasks.realmongo.test.ts was NOT executed in the sandbox (MongoDB cannot be downloaded); run it locally. Server only: no client change yet (phases 2 and 3).",
++      "description": "Tasks can now carry an optional checklist: subtasks [{ id, title, completed }], at most 20, default [] (a task stored before the field reads as []). New parseSubtasks (utils/taskValidators.ts) is strict and shared by create and update: ids 1-64 characters of letters, digits, _ or -, unique per task, titles 1-200 characters after trimming, completed a boolean; malformed input is a 400 naming the entry, never repaired, and the server never invents an id (client-made ids stay stable across edits, syncs and offline remapping). The list is replaced whole by one $set; [] or null stores []; a request that omits the key leaves stored subtasks alone, so an older client can never clear them. Parent and subtasks stay independent: completing every subtask does not complete the parent, completing the parent does not touch subtasks, and only the parent\u2019s own incomplete-to-complete transition awards growth XP (tested by counting award writes). The Task model has a subdocument schema (no _id) and a cap validator as a second line. Known limit, documented: whole-list last-writer-wins applies online as well as offline, and the atomic $set does not prevent a lost update. Tests: validator unit tests, 36 route tests against the real app with an in-memory double (including omitted-key compatibility and no partial writes), 20 model tests with a stubbed driver; a six-mutant check was caught by them. tests/taskSubtasks.realmongo.test.ts was NOT executed in the sandbox (MongoDB cannot be downloaded); run it locally. Server only: no client change yet (phases 2 and 3).",
+       "files": [
+         "halotasks-server/src/utils/taskValidators.ts",
+         "halotasks-server/src/models/Task.model.ts",
+@@ -659,7 +677,7 @@
+       "date": "2026-11-01",
+       "category": "Frontend",
+       "title": "cold-start experience before login, driven by a real backend health check (Issue #12)",
+-      "description": "The login and register pages now show the existing Task Tapper cold-start overlay while the backend wakes, with no session needed. New public GET /api/health answers 200 { status: \"ok\" } when the database is connected and 503 { status: \"unavailable\" } when it is not (no-store, status only). The client probes it (services/healthService.ts, no credentials, not through apiClient) from a new useBackendReadiness hook: the warm-up appears only when the first probe is slow or a probe is not ok, ready comes only from an ok answer, and the check starts fresh on every mount (refresh, direct navigation). Failure is told apart from a cold start: nothing healthy within 90 s is a timeout, 3 consecutive \"unavailable\" answers is an unhealthy backend, each with its own notice and a Check again button that never blocks the form. The overlay is reused unchanged; the dashboard’s own 3 s trigger is untouched. Tests: server tests/health.test.ts (also through the real app), client healthService, hook, BackendWarmup and both auth pages; a six-mutant check was caught by them. Not run against a real sleeping Render host or in a real browser. Deploy the server first: a client against a server without /api/health waits up to 90 s, then shows the timeout notice. Forgot/reset password pages are not wired. Review corrections: the probe requires exact status and body pairs (200 { status: \"ok\" }, 503 { status: \"unavailable\" }; a pair that contradicts itself counts as no answer); tests added for going offline during a probe, an answer that arrives after going offline, one-at-a-time probing, and a failure notice after an early dismiss. Documented: probes run one at a time, so while a host does not answer the effective spacing is up to about 12 s (10 s probe timeout plus a 2 s pause) and a failed wait is reported at about 90 s, at most roughly 102 s; /api/health cannot report startup progress because the server connects to MongoDB before it listens (a sleeping host gives no usable response until then, and 503 is for a database that drops after start); \"proceeds automatically\" means the overlay closes and the form is available, nothing is submitted for the user.",
++      "description": "The login and register pages now show the existing Task Tapper cold-start overlay while the backend wakes, with no session needed. New public GET /api/health answers 200 { status: \"ok\" } when the database is connected and 503 { status: \"unavailable\" } when it is not (no-store, status only). The client probes it (services/healthService.ts, no credentials, not through apiClient) from a new useBackendReadiness hook: the warm-up appears only when the first probe is slow or a probe is not ok, ready comes only from an ok answer, and the check starts fresh on every mount (refresh, direct navigation). Failure is told apart from a cold start: nothing healthy within 90 s is a timeout, 3 consecutive \"unavailable\" answers is an unhealthy backend, each with its own notice and a Check again button that never blocks the form. The overlay is reused unchanged; the dashboard\u2019s own 3 s trigger is untouched. Tests: server tests/health.test.ts (also through the real app), client healthService, hook, BackendWarmup and both auth pages; a six-mutant check was caught by them. Not run against a real sleeping Render host or in a real browser. Deploy the server first: a client against a server without /api/health waits up to 90 s, then shows the timeout notice. Forgot/reset password pages are not wired. Review corrections: the probe requires exact status and body pairs (200 { status: \"ok\" }, 503 { status: \"unavailable\" }; a pair that contradicts itself counts as no answer); tests added for going offline during a probe, an answer that arrives after going offline, one-at-a-time probing, and a failure notice after an early dismiss. Documented: probes run one at a time, so while a host does not answer the effective spacing is up to about 12 s (10 s probe timeout plus a 2 s pause) and a failed wait is reported at about 90 s, at most roughly 102 s; /api/health cannot report startup progress because the server connects to MongoDB before it listens (a sleeping host gives no usable response until then, and 503 is for a database that drops after start); \"proceeds automatically\" means the overlay closes and the form is available, nothing is submitted for the user.",
+       "files": [
+         "halotasks-server/src/routes/health.routes.ts",
+         "halotasks-server/src/app.ts",
+@@ -681,8 +699,8 @@
+     {
+       "date": "2026-11-01",
+       "category": "Backend",
+-      "title": "make a loaded task’s dueTime save conditional on its stored dueDate (Issue #44)",
+-      "description": "Audit of Issue #44 found the dueDate/dueTime invariant already enforced on every supported write path (the controller, update operators, bulkWrite, bulkSave, doc.updateOne, replacements, raw inserts), with one race left: save() of a loaded task given a time wrote $set filtered by _id only, so a date removed by another writer after the load could leave a time with no date. A pre-save hook now sets $where to require the stored dueDate when a loaded task’s dueTime is modified and its dueDate is not; if the date is gone the save rejects (DocumentNotFoundError, or VersionError when that save also bumps the version) and stores nothing. Saves that set or clear the date, or leave the time alone, are unchanged. New DB-less tests record the command save() sends (they fail without the hook); a real-MongoDB test in tests/taskWritePaths.realmongo.test.ts covers the removed-after-load case and was NOT executed in the sandbox because MongoDB cannot be downloaded here. Still unprotected by design: native driver writes, { middleware: false }, shell writes, pre-existing data.",
++      "title": "make a loaded task\u2019s dueTime save conditional on its stored dueDate (Issue #44)",
++      "description": "Audit of Issue #44 found the dueDate/dueTime invariant already enforced on every supported write path (the controller, update operators, bulkWrite, bulkSave, doc.updateOne, replacements, raw inserts), with one race left: save() of a loaded task given a time wrote $set filtered by _id only, so a date removed by another writer after the load could leave a time with no date. A pre-save hook now sets $where to require the stored dueDate when a loaded task\u2019s dueTime is modified and its dueDate is not; if the date is gone the save rejects (DocumentNotFoundError, or VersionError when that save also bumps the version) and stores nothing. Saves that set or clear the date, or leave the time alone, are unchanged. New DB-less tests record the command save() sends (they fail without the hook); a real-MongoDB test in tests/taskWritePaths.realmongo.test.ts covers the removed-after-load case and was NOT executed in the sandbox because MongoDB cannot be downloaded here. Still unprotected by design: native driver writes, { middleware: false }, shell writes, pre-existing data.",
+       "files": [
+         "halotasks-server/src/models/Task.model.ts",
+         "halotasks-server/tests/taskModel.writePaths.test.ts",
+@@ -1816,5 +1834,5 @@
+       "status": "completed"
+     }
+   ],
+-  "lastUpdated": "2026-11-15T23:13:10.000Z"
++  "lastUpdated": "2026-11-16T05:59:56.694Z"
+ }
+diff --git a/docs/context.md b/docs/context.md
+index 1e104f3..f0bdbcf 100644
+--- a/docs/context.md
++++ b/docs/context.md
+@@ -148,6 +148,17 @@ XP and the awarded-task ledger are created **only by the server**. The client ca
+ 
+ **Award triggers.** `PUT /api/tasks/:id` on an incomplete -> complete transition, and `POST /api/tasks` when the task is created already `completed:true` (an offline create-then-complete arrives this way). Both return an additive `growth` block: `{ taskId, awarded, xpGained, reason?, treeState }` (`treeState` = the tree without the ledger). No other request changes XP. `XP_PER_COMPLETION = 10`; there is deliberately no daily cap, rate limiter or anti-cheat layer.
+ 
++**Award day (Issue #24, G1).** The UTC day an award is recorded under (`activeDays`, and so the streak and health) is the day the user acted, not the day the server heard about it, but only inside a small window. `awardDayFor(completedAt, now)` in `utils/treeRules.ts` is the one rule; `completedAt` is the instant of the completion event the server has ALREADY validated and accepted on `PUT /api/tasks/:id` or `POST /api/tasks` (no other input is read):
++
++| Event | Award day |
++| --- | --- |
++| no accepted completion event (a legacy client) | today (the server's UTC day), as before |
++| event day from 7 days before today up to today | the event's own UTC day |
++| event day in the future (clock skew; the history window allows 5 minutes) | today, never a future day |
++| event day more than 7 UTC days before today | today: the completion is too old to claim its own day |
++
++Days are whole UTC calendar days (the unit the streak already uses); exactly 7 days before today is inside the window, 8 is not. `GROWTH_AWARD_BACKDATE_DAYS = 7` is deliberately **not** the CompletionRecord window (90 days back): history may keep an old completion exactly, whereas here the timestamp is a client-influenced input to progression, so it gets much less authority. A completion outside the Growth Tree window is still a valid history record; it just counts for today. Example: tasks completed offline on Monday and Tuesday and on Wednesday, all delivered on Wednesday, give `activeDays` Monday, Tuesday, Wednesday and a streak of 3 (before this change: Wednesday only, streak 1). The streak is a pure fold of the SET of days, so the order in which days arrive does not matter (Wednesday first, then Monday and Tuesday, gives the same streak). Only the day changes: XP (+10), the ledger (`awardedTaskIds`, idempotent by task id), the caps (`ledger_full`, `history_full`, `xp_ceiling`) and the refusal rules are exactly as below, and the day chosen is the one the capacity checks and the legacy-adoption reservation use. A retry or re-completion of an already-awarded task never adds a day, whatever timestamp it carries. A backdated day claimed for a task the server has validated is the most a client can influence; a client still cannot create XP, tasks it does not own, or days outside the window.
++
+ **Atomic award** (`awardTaskCompletion`). Step 1 is one conditional update on the user document:
+ 
+ ```
+@@ -155,7 +166,7 @@ filter  { _id, 'treeState.awardedTaskIds': { $ne: taskId },
+           'treeState.awardedTaskIds.19999': { $exists: false },      // ledger not full
+           'treeState.xp': { $gte: 0, $lte: MAX_SAFE_INTEGER - 10 }, // xp is a usable number
+           'treeState.activeDays': { $type: 'array' },                // history adopted ...
+-          $or: [ { 'treeState.activeDays': <today> },                // ... and today already in it,
++          $or: [ { 'treeState.activeDays': <award day> },            // ... and the award day already in it,
+                  { 'treeState.activeDays.19999': { $exists: false } } ] } // or room for it
+ update  { $inc: { 'treeState.xp': 10 },
+           $push: { 'treeState.awardedTaskIds': taskId },
+@@ -199,7 +210,7 @@ So a damaged tree is shown repaired immediately and is repaired in storage the f
+ 
+ **Client behaviour.** `initTreeStorage()` adopts the server tree (the stored IndexedDB copy is used only if the server is unreachable, and is never pushed). `applyServerGrowth(growth)` adopts the tree from a task response and ignores a response with lower XP than the cache (bulk requests can finish out of order). Online completions show the server's `growth`; offline completions show a +10 **preview in React state only** (never stored or sent), which the server's answer replaces after the queued request is replayed (`processSyncQueue({ onGrowth })`). Local `local-...` ids are never awarded locally, so they cannot double-count. `treeService` has no write method. `growth/treeLogic.ts` is now display/preview logic; its constants are pinned against the server copy by `growth/treeRules.parity.test.ts`.
+ 
+-**Known limitations.** An offline preview is not persisted: reloading while offline shows the last server-confirmed tree until the queue syncs. `GET /api/tree` still returns the whole ledger (up to roughly 0.5 MB at the cap). Streak/health reset rules are defined in "Growth Tree reset and recovery rules (Issue #16)" below.
++**Known limitations.** There is no daily reward cap and no rate limit on task routes: a client may legitimately create many tasks and complete them, each new task id earns +10 (a product decision, not an integrity hole; the 20,000-id ledger bounds one account). A completion of an orphaned task (created offline, completed and deleted before it ever synced) reaches the server only as a standalone `POST /api/completion-events`, which records history but never awards Growth Tree progression, so it earns no XP. An offline preview is not persisted: reloading while offline shows the last server-confirmed tree until the queue syncs. `GET /api/tree` still returns the whole ledger (up to roughly 0.5 MB at the cap). Streak/health reset rules are defined in "Growth Tree reset and recovery rules (Issue #16)" below.
+ 
+ ### Growth Tree reset and recovery rules (Issue #16)
+ 
+diff --git a/docs/logs.md b/docs/logs.md
+index a996ad5..d0151de 100644
+--- a/docs/logs.md
++++ b/docs/logs.md
+@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
+ 
+ ### November 2026
+ 
++#### Growth Tree: an offline completion keeps the day the user acted (Issue #24, G1)
++
++**2026-11-16 · Bugfix · completed · Priority: high**
++
++Issue #24 audit finding G1. The award was recorded under the server's receipt day, so tasks completed offline on Monday and Tuesday and delivered on Wednesday gave one active day and a streak of 1 (XP was right, the streak and health were wrong for exactly the offline-first user). Now `awardDayFor(completedAt, now)` (`utils/treeRules.ts`) picks the UTC day an award is recorded under from the completion event the server has already validated on PUT /api/tasks/:id and POST /api/tasks: the event's own day when it lies from 7 UTC days before today up to today, otherwise today (no event, a future or skewed event, or an event older than the window). The 7-day Growth Tree window is deliberately narrower than the CompletionRecord history window (90 days); a completion outside it is still a valid history record. The day is threaded through `awardTaskCompletion` into the atomic award, the capacity filter, the legacy-adoption reservation and the history_full check. XP (+10), the ledger, the caps, idempotency by task id, the standalone orphan endpoint (never awards) and the client are unchanged (the client's offline preview is computed at completion time, so its day already equals the event day; it stays display-only and the server's answer still replaces it). Documented in docs/context.md: the server-authoritative rule, the bounded window, no daily reward cap, orphaned completions earn no XP. Verification: focused Growth Tree and task tests 463 (43 new), full server suite without the MongoDB suites 49 files / 2325 tests, server typecheck (src and tests) clean, 15 mutation checks all killed. The real-MongoDB suites (a new case block in treeAward.realmongo.test.ts) were typechecked only: MongoDB cannot be downloaded in the sandbox, so run them in CI.
++
+ #### Cold-start game on the sign-in pages opens only on request
+ 
+ **2026-11-15 · Bugfix · completed · Priority: high**
+diff --git a/halotasks-server/src/controllers/task.controller.ts b/halotasks-server/src/controllers/task.controller.ts
+index 1f772c1..5044e74 100644
+--- a/halotasks-server/src/controllers/task.controller.ts
++++ b/halotasks-server/src/controllers/task.controller.ts
+@@ -388,7 +388,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
+       }
+ 
+       try {
+-        growth = await awardTaskCompletion(req.user.id, taskId);
++        growth = await awardTaskCompletion(req.user.id, taskId, new Date(), payload.completionEvent?.kind === 'complete' ? payload.completionEvent.completedAt : undefined);
+       } catch (awardError) {
+         if (awardError instanceof TreeAwardError && awardError.kind === 'derived_unpersisted') {
+           growth = await readPersistedGrowth(req.user.id, taskId);
+@@ -496,7 +496,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
+         titleSnapshot: payload.title ?? currentTask.title,
+         estimatedMinutesSnapshot: payload.estimatedMinutes ?? currentTask.estimatedMinutes ?? 0,
+       },
+-      award: async () => awardTaskCompletion(req.user.id, String(currentTask._id)),
++      award: async () => awardTaskCompletion(req.user.id, String(currentTask._id), new Date(), event?.kind === 'complete' ? event.completedAt : undefined),
+       awardPending: async () => awardPending(req.user.id, String(currentTask._id)),
+       write: (extraFilter, completionSet) => {
+         const fullSet = { ...set, ...completionSet };
+diff --git a/halotasks-server/src/utils/treeAward.ts b/halotasks-server/src/utils/treeAward.ts
+index 7c2fa6a..04267de 100644
+--- a/halotasks-server/src/utils/treeAward.ts
++++ b/halotasks-server/src/utils/treeAward.ts
+@@ -4,6 +4,7 @@ import {
+   AWARDED_TASK_IDS_MAX,
+   MAX_XP,
+   XP_PER_COMPLETION,
++  awardDayFor,
+   deriveTreeStatus,
+   effectiveFold,
+   getTodayUtc,
+@@ -50,6 +51,10 @@ import {
+ //   Losing the race is harmless: the streak is a pure function of the retained history (below), so everyone
+ //   computes the same answer.
+ //
++// AWARD DAY (Issue #24, G1). "The award's UTC day" below is `awardDayFor(completedAt, now)`: the UTC day of the validated
++//   completion event when it lies within GROWTH_AWARD_BACKDATE_DAYS (7) before today, otherwise today. An offline completion
++//   therefore keeps the day the user acted. Only the day changes: XP, the ledger, the caps and the idempotency below are the same.
++//
+ // RETAINED HISTORY (Issue #16 AC8). Step 1 also adds the award's UTC day to `treeState.activeDays` ($addToSet,
+ //   one entry per distinct day) in the SAME atomic update as the XP and the ledger entry. That history is the
+ //   CANONICAL source of the streak and last-active date: `replayAwardDays` over it, from nothing, is the one
+@@ -127,23 +132,22 @@ const assertHistoryIntact = (rawActiveDays: unknown): void => {
+ // eslint-disable-next-line @typescript-eslint/no-explicit-any
+ const pin = (value: unknown): any => (value === undefined ? null : value);
+ 
+-const attemptAward = (userId: string, taskId: string, now: Date) => {
+-  const today = getTodayUtc(now);
++const attemptAward = (userId: string, taskId: string, awardDay: string) => {
+   return User.findOneAndUpdate(
+     {
+       _id: userId,
+       'treeState.awardedTaskIds': { $ne: taskId },
+       [`treeState.awardedTaskIds.${AWARDED_TASK_IDS_MAX - 1}`]: { $exists: false },
+       'treeState.xp': { $gte: 0, $lte: MAX_XP - XP_PER_COMPLETION },
+-      // The history must have been adopted (an array), and have room for today unless today is already in it.
++      // The history must have been adopted (an array), and have room for the award day unless it is already in it.
+       'treeState.activeDays': { $type: 'array' },
+-      $or: [{ 'treeState.activeDays': today }, { [`treeState.activeDays.${ACTIVE_DAYS_MAX - 1}`]: { $exists: false } }],
++      $or: [{ 'treeState.activeDays': awardDay }, { [`treeState.activeDays.${ACTIVE_DAYS_MAX - 1}`]: { $exists: false } }],
+     },
+     {
+       $inc: { 'treeState.xp': XP_PER_COMPLETION },
+       $push: { 'treeState.awardedTaskIds': taskId },
+       // The award day joins the retained history in the same atomic write (a set: one entry per UTC day).
+-      $addToSet: { 'treeState.activeDays': today },
++      $addToSet: { 'treeState.activeDays': awardDay },
+     },
+     { returnDocument: 'after', select: 'treeState' },
+   ).lean();
+@@ -266,12 +270,19 @@ export async function readPersistedGrowth(userId: string, taskId: string, now: D
+   }
+ }
+ 
++/**
++ * `completedAt` is the instant of an ACCEPTED, server-validated completion event, or undefined when the request carried
++ * none (a legacy client). It only selects the UTC day the award is recorded under (`awardDayFor`: the event's own day
++ * inside a 7-day window, otherwise today); it never changes the XP, the ledger, or whether the task is awarded.
++ */
+ export async function awardTaskCompletion(
+   userId: string,
+   taskId: string,
+   now: Date = new Date(),
++  completedAt?: Date,
+ ): Promise<GrowthResult> {
+   if (!isValidAwardedTaskId(taskId)) throw new TreeAwardError('invalid_task_id');
++  const awardDay = awardDayFor(completedAt, now);
+ 
+   // ── Pre-flight: integrity of the stored history (one lean read, nothing written) ──
+   const preflight = await User.findById(userId).select('treeState.activeDays').lean();
+@@ -281,7 +292,7 @@ export async function awardTaskCompletion(
+   // ── Step 1: the atomic, idempotent award ──────────────────────────────────────
+   let awarded: unknown = null;
+   for (let attempt = 0; attempt < MAX_AWARD_ATTEMPTS && !awarded; attempt += 1) {
+-    awarded = await attemptAward(userId, taskId, now);
++    awarded = await attemptAward(userId, taskId, awardDay);
+     if (awarded) break;
+ 
+     // Matched nothing: find out why. (A concurrent duplicate may have won between our attempts.)
+@@ -309,14 +320,14 @@ export async function awardTaskCompletion(
+     }
+     if (ledger.length >= AWARDED_TASK_IDS_MAX) return refused(taskId, 'ledger_full', stored, now);
+     if (normalizeXp(stored.xp) > MAX_XP - XP_PER_COMPLETION) return refused(taskId, 'xp_ceiling', stored, now);
+-    if (!legacy && (stored.activeDays as unknown[]).length >= ACTIVE_DAYS_MAX && !(stored.activeDays as unknown[]).includes(getTodayUtc(now))) {
++    if (!legacy && (stored.activeDays as unknown[]).length >= ACTIVE_DAYS_MAX && !(stored.activeDays as unknown[]).includes(awardDay)) {
+       return refused(taskId, 'history_full', stored, now);
+     }
+ 
+     // A legacy tree: validate the complete adopted set (with room for today), then adopt it in one pinned
+     // write and try the award again. A set that cannot fit is refused and the record is left untouched.
+     if (legacy) {
+-      const plan = planLegacyAdoption(stored, now, getTodayUtc(now));
++      const plan = planLegacyAdoption(stored, now, awardDay);
+       if (plan === null) return refused(taskId, 'history_full', stored, now);
+       await adopt(userId, stored, plan);
+       continue;
+diff --git a/halotasks-server/src/utils/treeRules.ts b/halotasks-server/src/utils/treeRules.ts
+index 257b31f..487afd4 100644
+--- a/halotasks-server/src/utils/treeRules.ts
++++ b/halotasks-server/src/utils/treeRules.ts
+@@ -183,6 +183,39 @@ export const getHealthForStreak = (
+   today: string,
+ ): TreeHealth => deriveTreeStatus(streakDays, lastActiveDate, 1, today).health;
+ 
++// ── The award day (Issue #24, G1) ───────────────────────────────────────────────
++//
++// `activeDays` records the UTC day an award is FOR. Normally that is the day the server receives the completion. An
++// offline completion is delivered later, so the day the user really acted (the validated completion event's
++// `completedAt`) is used instead, but only inside a deliberately SMALL window. This window is NOT the CompletionRecord
++// window (90 days back for history): history may keep an old completion exactly, whereas here the timestamp is a
++// client-influenced input to progression (streak, health), so it gets much less authority.
++//
++//   event day in [today - GROWTH_AWARD_BACKDATE_DAYS, today]   the event's UTC day
++//   event day in the future (clock skew, 5 minute allowance)    today
++//   event day older than the window                             today (the completion is too old to claim its own day)
++//   no accepted completion event (legacy client, no timestamp)  today
++//
++// Days are whole UTC calendar days, the same unit as the streak rule. A day exactly GROWTH_AWARD_BACKDATE_DAYS before
++// today is inside the window; one more day back is not.
++
++/** How many UTC days before today a completion event may still claim its own day for the Growth Tree. */
++export const GROWTH_AWARD_BACKDATE_DAYS = 7;
++
++/**
++ * The UTC calendar day (YYYY-MM-DD) an award is recorded under. Pure: `completedAt` must be the instant of a completion
++ * event the server has already validated (undefined when there is none), `now` is the server clock.
++ */
++export const awardDayFor = (completedAt: Date | undefined, now: Date): string => {
++  const today = getTodayUtc(now);
++  if (!(completedAt instanceof Date) || !Number.isFinite(completedAt.getTime())) return today;
++  const eventDay = getTodayUtc(completedAt);
++  if (!isValidCalendarDate(eventDay)) return today;
++  if (eventDay > today) return today;
++  if (daysBetween(eventDay, today) > GROWTH_AWARD_BACKDATE_DAYS) return today;
++  return eventDay;
++};
++
+ /**
+  * The streak transition applied when a task is awarded today (the existing client rule, unchanged):
+  *   same day            -> nothing changes
+diff --git a/halotasks-server/tests/treeAward.realmongo.test.ts b/halotasks-server/tests/treeAward.realmongo.test.ts
+index 6c90dda..12bff14 100644
+--- a/halotasks-server/tests/treeAward.realmongo.test.ts
++++ b/halotasks-server/tests/treeAward.realmongo.test.ts
+@@ -270,3 +270,50 @@ describe('real MongoDB: concurrent awards of different tasks, and isolation betw
+     expect(JSON.stringify(await raw(bystander))).toBe(bystanderBefore);
+   });
+ });
++
++describe('real MongoDB: the award day follows the completion event inside the 7-day window (Issue #24, G1)', () => {
++  const WED = new Date('2026-10-07T10:00:00.000Z');
++  const MON = new Date('2026-10-05T09:00:00.000Z');
++  const TUE = new Date('2026-10-06T09:00:00.000Z');
++  const adopted = () => ({ xp: 0, streakDays: 0, lastActiveDate: null, awardedTaskIds: [], activeDays: [] });
++
++  it('Monday, Tuesday and Wednesday completions synced on Wednesday: three days, streak 3, xp 30', async () => {
++    const id = await seed(adopted());
++    await awardTaskCompletion(id, task(1), WED, MON);
++    await awardTaskCompletion(id, task(2), WED, TUE);
++    await awardTaskCompletion(id, task(3), WED, WED);
++    const tree = await rawTree(id);
++    expect([...(tree.activeDays as string[])].sort()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
++    expect(tree.streakDays).toBe(3);
++    expect(tree.lastActiveDate).toBe('2026-10-07');
++    expect(tree.xp).toBe(3 * XP_PER_COMPLETION);
++  });
++
++  it('an event older than 7 days, or in the future, is recorded under the receipt day', async () => {
++    const id = await seed(adopted());
++    await awardTaskCompletion(id, task(1), WED, new Date('2026-09-20T00:00:00.000Z'));
++    await awardTaskCompletion(id, task(2), WED, new Date('2026-10-09T00:00:00.000Z'));
++    expect((await rawTree(id)).activeDays).toEqual(['2026-10-07']);
++  });
++
++  it('concurrent awards of different tasks on different event days keep every XP and every day (retrying a refused derived write)', async () => {
++    const id = await seed(adopted());
++    const jobs: [string, Date][] = [[task(1), MON], [task(2), TUE], [task(3), WED], [task(4), MON], [task(5), TUE], [task(6), WED]];
++    await Promise.allSettled(jobs.map(([t, when]) => awardTaskCompletion(id, t, WED, when)));
++    for (const [t, when] of jobs) await awardTaskCompletion(id, t, WED, when).catch((e: unknown) => {
++      if (!(e instanceof TreeAwardError)) throw e;
++    });
++    const tree = await rawTree(id);
++    expect([...(tree.awardedTaskIds as string[])].sort()).toEqual(jobs.map(([t]) => t).sort());
++    expect(tree.xp).toBe(jobs.length * XP_PER_COMPLETION);
++    expect([...(tree.activeDays as string[])].sort()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
++    expect(tree.streakDays).toBe(3);
++  });
++
++  it('a backdated NEW day is refused when the history is full; a held day is accepted', async () => {
++    const days = Array.from({ length: ACTIVE_DAYS_MAX }, (_, i) => dayN(i)); // 1950-01-01 onwards: none of the Oct 2026 days
++    const id = await seed({ xp: 100, streakDays: 0, lastActiveDate: null, awardedTaskIds: ['old'], activeDays: days });
++    expect(await awardTaskCompletion(id, task(1), WED, MON)).toMatchObject({ awarded: false, reason: 'history_full' });
++    expect(((await rawTree(id)).activeDays as string[]).length).toBe(ACTIVE_DAYS_MAX);
++  });
++});
+diff --git a/halotasks-server/tests/treeAward.test.ts b/halotasks-server/tests/treeAward.test.ts
+index 11bee43..166f2da 100644
+--- a/halotasks-server/tests/treeAward.test.ts
++++ b/halotasks-server/tests/treeAward.test.ts
+@@ -1056,3 +1056,224 @@ describe('property: storage matches the log of atomic award records (Issue #16 r
+     expect(stats.recordedAwards).toBeGreaterThanOrEqual(200);
+   });
+ });
++
++describe('the award day: an offline completion keeps the day the user acted (Issue #24, G1)', () => {
++  const MON = new Date('2026-10-05T09:00:00.000Z');
++  const TUE = new Date('2026-10-06T09:00:00.000Z');
++  const WED = new Date('2026-10-07T10:00:00.000Z'); // the device reconnects, the server clock
++  const activeDaysOf = () => (users.tree(USER) as { activeDays?: string[] }).activeDays;
++  const consecutive = (count: number, end: string) => Array.from({ length: count }, (_, i) => addDays(end, i - count + 1));
++
++  it('Monday completion synced Wednesday: Monday is the award day', async () => {
++    users.seed(USER, fresh());
++
++    const result = await award(USER, taskIdOf(1), WED, MON);
++
++    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
++    expect(activeDaysOf()).toEqual(['2026-10-05']);
++    expect(result.treeState).toMatchObject({ xp: 10, streakDays: 0, lastActiveDate: '2026-10-05', status: 'wilting', health: 'wilting' });
++  });
++
++  it('Monday + Tuesday + Wednesday completed offline, all synced Wednesday: streak 3, active today', async () => {
++    users.seed(USER, fresh());
++
++    await award(USER, taskIdOf(1), WED, MON);
++    await award(USER, taskIdOf(2), WED, TUE);
++    const result = await award(USER, taskIdOf(3), WED, WED);
++
++    expect(activeDaysOf()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
++    expect(result.treeState).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07', health: 'healthy', status: 'active' });
++    expect(users.tree(USER)).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07' });
++  });
++
++  it('the same days arriving in ANY order give the same tree (award-day insertion is order-independent)', async () => {
++    const orders: [number, Date][][] = [
++      [[1, MON], [2, TUE], [3, WED]],
++      [[3, WED], [2, TUE], [1, MON]],
++      [[2, TUE], [3, WED], [1, MON]],
++      [[3, WED], [1, MON], [2, TUE]],
++    ];
++    const outcomes: unknown[] = [];
++    for (const order of orders) {
++      users.seed(USER, fresh());
++      for (const [n, when] of order) await award(USER, taskIdOf(n), WED, when);
++      const t = users.tree(USER);
++      outcomes.push({ xp: t.xp, streakDays: t.streakDays, lastActiveDate: t.lastActiveDate, activeDays: [...(t.activeDays as string[])].sort(), health: t.health }); // storage order is insertion order; the history is a SET
++    }
++    for (const outcome of outcomes) expect(outcome).toEqual(outcomes[0]);
++    expect(outcomes[0]).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07' });
++  });
++
++  it('a day with a gap still resets: Monday and Wednesday (no Tuesday) is streak 1', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, MON);
++    const result = await award(USER, taskIdOf(2), WED, WED);
++    expect(result.treeState).toMatchObject({ xp: 20, streakDays: 1, lastActiveDate: '2026-10-07' });
++  });
++
++  it('exactly on the 7-day boundary the event day is used; one day older falls back to the receipt day', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, new Date('2026-09-30T00:00:00.000Z')); // 7 UTC days before Wednesday 10-07
++    expect(activeDaysOf()).toEqual(['2026-09-30']);
++
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, new Date('2026-09-29T23:59:59.999Z')); // 8 days
++    expect(activeDaysOf()).toEqual(['2026-10-07']);
++  });
++
++  it('an event older than the window (even a valid 90-day history event) is recorded under the receipt day', async () => {
++    users.seed(USER, fresh());
++    const result = await award(USER, taskIdOf(1), WED, new Date('2026-07-20T12:00:00.000Z'));
++    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
++    expect(activeDaysOf()).toEqual(['2026-10-07']);
++    expect(result.treeState).toMatchObject({ streakDays: 1, lastActiveDate: '2026-10-07' });
++  });
++
++  it('a future event never records a future day', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, new Date('2026-10-08T00:00:00.000Z'));
++    await award(USER, taskIdOf(2), WED, new Date('2027-06-01T00:00:00.000Z'));
++    expect(activeDaysOf()).toEqual(['2026-10-07']);
++    expect(users.tree(USER)).toMatchObject({ xp: 20, lastActiveDate: '2026-10-07' });
++  });
++
++  it('no completion event: the existing current-day behaviour, byte for byte the same write as before', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED);
++
++    const write = users.applied.find((o) => o.update?.$inc);
++    expect(write?.update).toEqual({
++      $inc: { 'treeState.xp': 10 },
++      $push: { 'treeState.awardedTaskIds': taskIdOf(1) },
++      $addToSet: { 'treeState.activeDays': '2026-10-07' },
++    });
++  });
++
++  it('the XP and the ledger do not depend on the day: +10 per task whatever day it is recorded under', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, MON);
++    await award(USER, taskIdOf(2), WED, new Date('2026-01-01T00:00:00.000Z'));
++    await award(USER, taskIdOf(3), WED);
++    expect(users.tree(USER)).toMatchObject({ xp: 30, awardedTaskIds: [taskIdOf(1), taskIdOf(2), taskIdOf(3)] });
++  });
++
++  it('the same task retried many times, with the same or different timestamps, is awarded once and adds no day', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, MON);
++    const mark = users.applied.length;
++
++    const again = await award(USER, taskIdOf(1), WED, MON);
++    const other = await award(USER, taskIdOf(1), WED, TUE);
++    const later = await award(USER, taskIdOf(1), WED, WED);
++    const none = await award(USER, taskIdOf(1), WED);
++
++    for (const r of [again, other, later, none]) expect(r).toMatchObject({ awarded: false, xpGained: 0, reason: 'already_awarded' });
++    expect(users.tree(USER)).toMatchObject({ xp: 10, awardedTaskIds: [taskIdOf(1)] });
++    expect(activeDaysOf()).toEqual(['2026-10-05']); // a later event time cannot add a day to an awarded task
++    expect(writesSince(mark).some((o) => o.update?.$inc)).toBe(false);
++  });
++
++  it('concurrent duplicates of one task with different event days: one award, one day', async () => {
++    users.seed(USER, fresh());
++    const when = [MON, TUE, WED, MON, TUE, WED, MON, TUE];
++    const results = await Promise.all(when.map((w) => award(USER, taskIdOf(1), WED, w)));
++    expect(results.filter((r) => r.awarded)).toHaveLength(1);
++    expect(users.tree(USER).xp).toBe(10);
++    expect((activeDaysOf() ?? []).length).toBe(1);
++  });
++
++  it('a backdated day does not bypass the ledger cap', async () => {
++    const ids = Array.from({ length: AWARDED_TASK_IDS_MAX }, (_, i) => `id-${i}`);
++    users.seed(USER, fresh({ xp: 1000, awardedTaskIds: ids, activeDays: ['2026-10-07'] }));
++
++    const result = await award(USER, taskIdOf(1), WED, MON);
++
++    expect(result).toMatchObject({ awarded: false, reason: 'ledger_full', xpGained: 0 });
++    expect(activeDaysOf()).toEqual(['2026-10-07']);
++    expect(users.tree(USER).xp).toBe(1000);
++  });
++
++  it('a backdated day does not bypass the history cap: a NEW backdated day is refused, a held one is accepted', async () => {
++    const days = consecutive(ACTIVE_DAYS_MAX, '2026-10-05'); // holds 10-05 and earlier, not 10-06 or 10-07
++    users.seed(USER, fresh({ xp: 100, streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['old'], activeDays: days }));
++
++    const refused = await award(USER, taskIdOf(1), WED, TUE); // 10-06 would be a new day
++    expect(refused).toMatchObject({ awarded: false, reason: 'history_full', xpGained: 0 });
++    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
++    expect(users.tree(USER).xp).toBe(100);
++
++    const accepted = await award(USER, taskIdOf(2), WED, MON); // 10-05 is already held
++    expect(accepted).toMatchObject({ awarded: true });
++    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
++    expect(users.tree(USER).xp).toBe(110);
++  });
++
++  it('a full history that holds the award day still repairs an unusable xp and awards (the refusal reason is judged on the award day)', async () => {
++    const days = consecutive(ACTIVE_DAYS_MAX, '2026-10-05'); // holds the award day 10-05, not today (10-07)
++    users.seed(USER, fresh({ xp: 'junk', streakDays: 3, lastActiveDate: '2026-10-05', awardedTaskIds: ['old'], activeDays: days }));
++
++    const result = await award(USER, taskIdOf(1), WED, MON);
++
++    expect(result).toMatchObject({ awarded: true, xpGained: 10 });
++    expect(users.tree(USER).xp).toBe(10);
++    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
++  });
++
++  it('legacy adoption reserves the slot for the AWARD day, not for today', async () => {
++    // 19,000 streak days ending 10-05 + 1,000 old marker days = 20,000 distinct. Awarding the held day 10-05 fits; a NEW day does not.
++    const legacy = () =>
++      fresh({
++        xp: 100,
++        streakDays: 19_000,
++        lastActiveDate: '2026-10-05',
++        awardedTaskIds: ['old'],
++        pendingDerivedDays: Array.from({ length: 1_000 }, (_, i) => addDays('1900-01-01', i)),
++      });
++
++    users.seed(USER, legacy());
++    expect(await award(USER, taskIdOf(1), WED, MON)).toMatchObject({ awarded: true }); // award day 10-05: already in the set
++    expect(activeDaysOf()).toHaveLength(ACTIVE_DAYS_MAX);
++
++    users.seed(USER, legacy());
++    const before = users.get(USER);
++    expect(await award(USER, taskIdOf(1), WED, TUE)).toMatchObject({ awarded: false, reason: 'history_full' }); // 10-06 would be a new day
++    expect(users.get(USER)).toEqual(before);
++  });
++
++  it('a legacy tree adopts its implied days and then records the backdated day', async () => {
++    users.seed(USER, fresh({ xp: 40, streakDays: 3, lastActiveDate: '2026-10-04', awardedTaskIds: ['old'] })); // days 10-02..10-04
++    const result = await award(USER, taskIdOf(1), WED, MON); // 10-05 continues the streak
++    expect(activeDaysOf()).toEqual(['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05']);
++    expect(result.treeState).toMatchObject({ xp: 50, lastActiveDate: '2026-10-05' });
++  });
++
++  it('a backdated award never moves a LATER stored last-active date backwards', async () => {
++    users.seed(USER, fresh());
++    await award(USER, taskIdOf(1), WED, WED);
++    const result = await award(USER, taskIdOf(2), WED, MON);
++    expect(users.tree(USER)).toMatchObject({ lastActiveDate: '2026-10-07', xp: 20 });
++    expect(result.treeState.lastActiveDate).toBe('2026-10-07');
++  });
++
++  it('a recorded award whose derived write failed keeps its backdated day, and the retry repairs the copy from it', async () => {
++    users.seed(USER, fresh());
++    users.faults.push({ op: 'findOneAndUpdate', count: 1, when: isDerivedWrite });
++    await expect(award(USER, taskIdOf(1), WED, MON)).rejects.toMatchObject({ kind: 'derived_unpersisted' });
++    expect(users.tree(USER)).toMatchObject({ xp: 10, streakDays: 0, activeDays: ['2026-10-05'] });
++
++    const retry = await award(USER, taskIdOf(1), WED, new Date('2026-10-07T09:00:00.000Z')); // a different timestamp on the retry
++    expect(retry).toMatchObject({ awarded: false, reason: 'already_awarded' });
++    expect(users.tree(USER)).toMatchObject({ xp: 10, lastActiveDate: '2026-10-05', activeDays: ['2026-10-05'] });
++  });
++
++  it("another user's tree is never touched by a backdated award", async () => {
++    users.seed(USER, fresh());
++    users.seed('user-2', fresh({ xp: 50, awardedTaskIds: ['x'], activeDays: ['2026-10-01'] }));
++    const before = users.get('user-2');
++
++    await award(USER, taskIdOf(1), WED, MON);
++
++    expect(users.get('user-2')).toEqual(before);
++    expect(activeDaysOf()).toEqual(['2026-10-05']);
++  });
++});
+diff --git a/halotasks-server/tests/treeRoutes.test.ts b/halotasks-server/tests/treeRoutes.test.ts
+index 81d3f66..9b97b9d 100644
+--- a/halotasks-server/tests/treeRoutes.test.ts
++++ b/halotasks-server/tests/treeRoutes.test.ts
+@@ -3,6 +3,7 @@ import request from 'supertest';
+ import type { Express } from 'express';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { TEST_JWT_SECRET as SECRET } from './testConfig';
++import { createCompletionStore, type CompletionStore } from './helpers/completionDoubles';
+ import { createTaskStore, createUserStore, loadAppWith, unmockModels, type TaskStore, type UserStore } from './helpers/treeDoubles';
+ 
+ // Issue #24 — the Growth Tree through the REAL app (routes, auth, controllers, treeAward, treeRules) with
+@@ -676,3 +677,148 @@ describe('PATCH /api/tree — reward state is not client-writable', () => {
+     expect(ledgerOf()).toEqual([String(task._id)]);
+   });
+ });
++
++describe('the award day over HTTP: an offline completion keeps the day the user acted (Issue #24, G1)', () => {
++  let records: CompletionStore;
++  const at = (iso: string) => vi.setSystemTime(new Date(iso));
++  const days = (owner = OWNER_A) => [...((users.tree(owner) as { activeDays?: string[] }).activeDays ?? [])].sort();
++  const treeOf = (owner = OWNER_A) => users.tree(owner) as { xp: number; streakDays: number; lastActiveDate: string | null; awardedTaskIds: string[] };
++  const event = (id: string, completedAt: string) => ({ completionId: id, completedAt, utcOffsetMinutes: 0 });
++  const put = (taskId: string, completionEvent?: object, owner = OWNER_A) =>
++    request(app).put(`/api/tasks/${taskId}`).set(as(owner)).send({ completed: true, ...(completionEvent ? { completionEvent } : {}) });
++
++  beforeEach(async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    at('2026-10-07T10:00:00.000Z'); // Wednesday: the device reconnects
++    records = createCompletionStore();
++    app = await loadAppWith(users, tasks, SECRET, records);
++  });
++  afterEach(() => vi.useRealTimers());
++
++  it('PUT: Monday, Tuesday and Wednesday completions delivered on Wednesday give streak 3', async () => {
++    const [a, b, c] = [tasks.seed(OWNER_A), tasks.seed(OWNER_A), tasks.seed(OWNER_A)];
++
++    expect((await put(String(a._id), event('c-mon', '2026-10-05T09:00:00.000Z'))).status).toBe(200);
++    expect((await put(String(b._id), event('c-tue', '2026-10-06T09:00:00.000Z'))).status).toBe(200);
++    const last = await put(String(c._id), event('c-wed', '2026-10-07T09:00:00.000Z'));
++
++    expect(days()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07']);
++    expect(last.body.growth).toMatchObject({ awarded: true, xpGained: 10 });
++    expect(last.body.growth.treeState).toMatchObject({ xp: 30, streakDays: 3, lastActiveDate: '2026-10-07', health: 'healthy' });
++    expect(treeOf()).toMatchObject({ xp: 30, streakDays: 3 });
++  });
++
++  it('PUT: a single Monday completion delivered on Wednesday is recorded under Monday', async () => {
++    const task = tasks.seed(OWNER_A);
++    const res = await put(String(task._id), event('c-mon', '2026-10-05T09:00:00.000Z'));
++    expect(res.status).toBe(200);
++    expect(days()).toEqual(['2026-10-05']);
++    expect(res.body.growth.treeState).toMatchObject({ xp: 10, lastActiveDate: '2026-10-05' });
++  });
++
++  it('PUT: an event older than 7 days is still a valid completion RECORD (90-day window) but is awarded under the receipt day', async () => {
++    const task = tasks.seed(OWNER_A);
++    const res = await put(String(task._id), event('c-old', '2026-09-20T09:00:00.000Z'));
++
++    expect(res.status).toBe(200);
++    expect(records.docs.find((d) => d.completionId === 'c-old')).toMatchObject({ status: 'active', localDate: '2026-09-20' }); // history keeps the real day
++    expect(days()).toEqual(['2026-10-07']); // the Growth Tree does not
++    expect(res.body.growth.treeState).toMatchObject({ xp: 10, streakDays: 1, lastActiveDate: '2026-10-07' });
++  });
++
++  it('PUT: exactly 7 days back is accepted, 8 is not', async () => {
++    const [a, b] = [tasks.seed(OWNER_A), tasks.seed(OWNER_A)];
++    await put(String(a._id), event('c-7', '2026-09-30T00:00:00.000Z'));
++    await put(String(b._id), event('c-8', '2026-09-29T23:59:59.000Z'));
++    expect(days()).toEqual(['2026-09-30', '2026-10-07']);
++  });
++
++  it('PUT: an event a few minutes in the future is today, never a future day', async () => {
++    at('2026-10-07T23:58:00.000Z');
++    const task = tasks.seed(OWNER_A);
++    const res = await put(String(task._id), event('c-skew', '2026-10-08T00:02:00.000Z'));
++    expect(res.status).toBe(200);
++    expect(days()).toEqual(['2026-10-07']);
++  });
++
++  it('PUT: a request with no completion event (legacy client) is recorded under today, as before', async () => {
++    const task = tasks.seed(OWNER_A);
++    const res = await put(String(task._id));
++    expect(res.status).toBe(200);
++    expect(days()).toEqual(['2026-10-07']);
++    expect(res.body.growth).toMatchObject({ awarded: true });
++  });
++
++  it('PUT: a retry of the same completion (same event, then a different timestamp) awards once and adds no day', async () => {
++    const task = tasks.seed(OWNER_A);
++    const id = String(task._id);
++    await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
++
++    const same = await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
++    const other = await put(id, event('c-2', '2026-10-06T09:00:00.000Z'));
++
++    expect(same.status).toBe(200);
++    expect(other.status).toBe(200);
++    expect(treeOf()).toMatchObject({ xp: 10, awardedTaskIds: [id] });
++    expect(days()).toEqual(['2026-10-05']);
++  });
++
++  it('PUT: uncomplete then re-complete with a newer event is the same task: still one award, still Monday', async () => {
++    const task = tasks.seed(OWNER_A);
++    const id = String(task._id);
++    await put(id, event('c-1', '2026-10-05T09:00:00.000Z'));
++    await request(app).put(`/api/tasks/${id}`).set(as(OWNER_A)).send({ completed: false, completionEvent: { completionId: 'c-1', revokedAt: '2026-10-05T10:00:00.000Z' } });
++    const again = await put(id, event('c-2', '2026-10-07T09:00:00.000Z'));
++
++    expect(again.body.growth).toMatchObject({ awarded: false, reason: 'already_awarded' });
++    expect(treeOf().xp).toBe(10);
++    expect(days()).toEqual(['2026-10-05']);
++  });
++
++  it('POST: a task created already completed (offline create-then-complete) uses its event day', async () => {
++    const res = await request(app)
++      .post('/api/tasks')
++      .set(as(OWNER_A))
++      .send({ title: 'done on monday', completed: true, completionEvent: event('c-post', '2026-10-05T09:00:00.000Z') });
++
++    expect(res.status).toBe(201);
++    expect(res.body.growth).toMatchObject({ awarded: true, xpGained: 10 });
++    expect(days()).toEqual(['2026-10-05']);
++    expect(res.body.growth.treeState.lastActiveDate).toBe('2026-10-05');
++  });
++
++  it('POST: with no event, or an event older than 7 days, it is today', async () => {
++    const plain = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'x', completed: true });
++    const old = await request(app).post('/api/tasks').set(as(OWNER_A)).send({ title: 'y', completed: true, completionEvent: event('c-old', '2026-08-01T09:00:00.000Z') });
++    expect(plain.status).toBe(201);
++    expect(old.status).toBe(201);
++    expect(days()).toEqual(['2026-10-07']);
++    expect(treeOf().xp).toBe(20);
++  });
++
++  it('a refused event (outside the 90-day history window) awards nothing at all, whatever the Growth Tree window says', async () => {
++    const task = tasks.seed(OWNER_A);
++    const res = await put(String(task._id), event('c-ancient', '2026-05-01T09:00:00.000Z'));
++    expect(res.status).toBe(400);
++    expect(treeOf().xp).toBe(0);
++    expect(days()).toEqual([]);
++  });
++
++  it('the standalone orphan endpoint still never awards, and never adds a day', async () => {
++    const res = await request(app)
++      .post('/api/completion-events')
++      .set(as(OWNER_A))
++      .send({ type: 'complete', completionId: 'c-orphan', taskId: 'local-1730000000000-ab12cd', title: 'gone', estimatedMinutes: 0, completedAt: '2026-10-05T09:00:00.000Z', utcOffsetMinutes: 0 });
++    expect(res.status).toBe(201);
++    expect(treeOf()).toMatchObject({ xp: 0, awardedTaskIds: [] });
++    expect(days()).toEqual([]);
++  });
++
++  it("one user's backdated completion never touches another user's tree", async () => {
++    const task = tasks.seed(OWNER_A);
++    const before = JSON.stringify(users.tree(OWNER_B));
++    await put(String(task._id), event('c-1', '2026-10-05T09:00:00.000Z'));
++    expect(JSON.stringify(users.tree(OWNER_B))).toBe(before);
++    expect(days(OWNER_B)).toEqual([]);
++  });
++});
+diff --git a/halotasks-server/tests/treeRules.test.ts b/halotasks-server/tests/treeRules.test.ts
+index 03c86b5..ccb12c1 100644
+--- a/halotasks-server/tests/treeRules.test.ts
++++ b/halotasks-server/tests/treeRules.test.ts
+@@ -1,13 +1,16 @@
+ import { describe, expect, it } from 'vitest';
++import { MAX_EVENT_AGE_MS } from '../src/utils/completionValidators';
+ import {
+   ACTIVE_DAYS_MAX,
+   AWARDED_TASK_IDS_MAX,
++  GROWTH_AWARD_BACKDATE_DAYS,
+   AWARDED_TASK_ID_MAX_LENGTH,
+   MAX_XP,
+   STAGE_THRESHOLDS,
+   TREE_REWARD_FIELDS,
+   XP_PER_COMPLETION,
+   XP_PER_LEAF,
++  awardDayFor,
+   deriveTreeStatus,
+   effectiveFold,
+   impliedStreakDays,
+@@ -523,3 +526,67 @@ describe('normalizeTreeState', () => {
+     expect(summary).toEqual(everythingElse);
+   });
+ });
++
++describe('awardDayFor: the UTC day an award is recorded under (Issue #24, G1)', () => {
++  // NOW is Tuesday 2026-10-06 10:00Z. The window is whole UTC days: today and the 7 days before it.
++  const day = (iso: string | undefined) => awardDayFor(iso === undefined ? undefined : new Date(iso), NOW);
++
++  it('keeps the window deliberately small and separate from the CompletionRecord history window', () => {
++    expect(GROWTH_AWARD_BACKDATE_DAYS).toBe(7);
++    expect(GROWTH_AWARD_BACKDATE_DAYS).toBeLessThan(MAX_EVENT_AGE_MS / 86_400_000); // 90 days for history
++  });
++
++  it('no accepted event: today (the existing behaviour)', () => {
++    expect(day(undefined)).toBe('2026-10-06');
++  });
++
++  it('an event today, or earlier today, is today', () => {
++    expect(day('2026-10-06T10:00:00.000Z')).toBe('2026-10-06');
++    expect(day('2026-10-06T00:00:00.000Z')).toBe('2026-10-06');
++  });
++
++  it('an event on an earlier day inside the window keeps its OWN UTC day', () => {
++    expect(day('2026-10-05T09:00:00.000Z')).toBe('2026-10-05');
++    expect(day('2026-10-04T23:59:59.999Z')).toBe('2026-10-04');
++  });
++
++  it('the day boundary is UTC midnight, not the device or server local day', () => {
++    expect(day('2026-10-05T23:59:59.999Z')).toBe('2026-10-05');
++    expect(day('2026-10-06T00:00:00.000Z')).toBe('2026-10-06');
++  });
++
++  it('exactly on the boundary: 7 days before today is inside the window (first and last instant of that day)', () => {
++    expect(day('2026-09-29T00:00:00.000Z')).toBe('2026-09-29');
++    expect(day('2026-09-29T23:59:59.999Z')).toBe('2026-09-29');
++  });
++
++  it('one day older than the boundary falls back to today (the completion is too old to claim its own day)', () => {
++    expect(day('2026-09-28T23:59:59.999Z')).toBe('2026-10-06');
++    expect(day('2026-09-28T00:00:00.000Z')).toBe('2026-10-06');
++    expect(day('2026-07-08T12:00:00.000Z')).toBe('2026-10-06'); // 90 days is valid HISTORY but not a valid award day
++  });
++
++  it('a future event never produces a future award day', () => {
++    expect(day('2026-10-06T10:04:59.000Z')).toBe('2026-10-06'); // inside the 5 minute skew, same day
++    expect(day('2026-10-07T00:00:00.000Z')).toBe('2026-10-06'); // tomorrow
++    expect(day('2027-01-01T00:00:00.000Z')).toBe('2026-10-06');
++  });
++
++  it('skew across midnight: an event a few minutes ahead that lands on the next UTC day is today, not tomorrow', () => {
++    const late = new Date('2026-10-06T23:58:00.000Z');
++    expect(awardDayFor(new Date('2026-10-07T00:02:00.000Z'), late)).toBe('2026-10-06');
++  });
++
++  it('an invalid or non-Date value is today', () => {
++    expect(awardDayFor(new Date('not a date'), NOW)).toBe('2026-10-06');
++    expect(awardDayFor('2026-10-05T00:00:00Z' as unknown as Date, NOW)).toBe('2026-10-06');
++    expect(awardDayFor(null as unknown as Date, NOW)).toBe('2026-10-06');
++    expect(awardDayFor(new Date(8.64e15), NOW)).toBe('2026-10-06'); // largest Date: its ISO year is not a plain 4 digits
++  });
++
++  it('works across month and year boundaries', () => {
++    const jan = new Date('2027-01-03T12:00:00.000Z');
++    expect(awardDayFor(new Date('2026-12-27T08:00:00.000Z'), jan)).toBe('2026-12-27'); // 7 days back
++    expect(awardDayFor(new Date('2026-12-26T08:00:00.000Z'), jan)).toBe('2027-01-03'); // 8 days back
++  });
++});

@@ -388,7 +388,7 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
       }
 
       try {
-        growth = await awardTaskCompletion(req.user.id, taskId);
+        growth = await awardTaskCompletion(req.user.id, taskId, new Date(), payload.completionEvent?.kind === 'complete' ? payload.completionEvent.completedAt : undefined);
       } catch (awardError) {
         if (awardError instanceof TreeAwardError && awardError.kind === 'derived_unpersisted') {
           growth = await readPersistedGrowth(req.user.id, taskId);
@@ -496,7 +496,7 @@ export const updateTask = async (req: AuthenticatedRequest, res: Response, next:
         titleSnapshot: payload.title ?? currentTask.title,
         estimatedMinutesSnapshot: payload.estimatedMinutes ?? currentTask.estimatedMinutes ?? 0,
       },
-      award: async () => awardTaskCompletion(req.user.id, String(currentTask._id)),
+      award: async () => awardTaskCompletion(req.user.id, String(currentTask._id), new Date(), event?.kind === 'complete' ? event.completedAt : undefined),
       awardPending: async () => awardPending(req.user.id, String(currentTask._id)),
       write: (extraFilter, completionSet) => {
         const fullSet = { ...set, ...completionSet };

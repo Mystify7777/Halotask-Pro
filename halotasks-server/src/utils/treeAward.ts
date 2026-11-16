@@ -4,6 +4,7 @@ import {
   AWARDED_TASK_IDS_MAX,
   MAX_XP,
   XP_PER_COMPLETION,
+  awardDayFor,
   deriveTreeStatus,
   effectiveFold,
   getTodayUtc,
@@ -49,6 +50,10 @@ import {
 //   (xp, streakDays, lastActiveDate). If another request changed any of them first, re-read and recompute.
 //   Losing the race is harmless: the streak is a pure function of the retained history (below), so everyone
 //   computes the same answer.
+//
+// AWARD DAY (Issue #24, G1). "The award's UTC day" below is `awardDayFor(completedAt, now)`: the UTC day of the validated
+//   completion event when it lies within GROWTH_AWARD_BACKDATE_DAYS (7) before today, otherwise today. An offline completion
+//   therefore keeps the day the user acted. Only the day changes: XP, the ledger, the caps and the idempotency below are the same.
 //
 // RETAINED HISTORY (Issue #16 AC8). Step 1 also adds the award's UTC day to `treeState.activeDays` ($addToSet,
 //   one entry per distinct day) in the SAME atomic update as the XP and the ledger entry. That history is the
@@ -127,23 +132,22 @@ const assertHistoryIntact = (rawActiveDays: unknown): void => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pin = (value: unknown): any => (value === undefined ? null : value);
 
-const attemptAward = (userId: string, taskId: string, now: Date) => {
-  const today = getTodayUtc(now);
+const attemptAward = (userId: string, taskId: string, awardDay: string) => {
   return User.findOneAndUpdate(
     {
       _id: userId,
       'treeState.awardedTaskIds': { $ne: taskId },
       [`treeState.awardedTaskIds.${AWARDED_TASK_IDS_MAX - 1}`]: { $exists: false },
       'treeState.xp': { $gte: 0, $lte: MAX_XP - XP_PER_COMPLETION },
-      // The history must have been adopted (an array), and have room for today unless today is already in it.
+      // The history must have been adopted (an array), and have room for the award day unless it is already in it.
       'treeState.activeDays': { $type: 'array' },
-      $or: [{ 'treeState.activeDays': today }, { [`treeState.activeDays.${ACTIVE_DAYS_MAX - 1}`]: { $exists: false } }],
+      $or: [{ 'treeState.activeDays': awardDay }, { [`treeState.activeDays.${ACTIVE_DAYS_MAX - 1}`]: { $exists: false } }],
     },
     {
       $inc: { 'treeState.xp': XP_PER_COMPLETION },
       $push: { 'treeState.awardedTaskIds': taskId },
       // The award day joins the retained history in the same atomic write (a set: one entry per UTC day).
-      $addToSet: { 'treeState.activeDays': today },
+      $addToSet: { 'treeState.activeDays': awardDay },
     },
     { returnDocument: 'after', select: 'treeState' },
   ).lean();
@@ -266,12 +270,19 @@ export async function readPersistedGrowth(userId: string, taskId: string, now: D
   }
 }
 
+/**
+ * `completedAt` is the instant of an ACCEPTED, server-validated completion event, or undefined when the request carried
+ * none (a legacy client). It only selects the UTC day the award is recorded under (`awardDayFor`: the event's own day
+ * inside a 7-day window, otherwise today); it never changes the XP, the ledger, or whether the task is awarded.
+ */
 export async function awardTaskCompletion(
   userId: string,
   taskId: string,
   now: Date = new Date(),
+  completedAt?: Date,
 ): Promise<GrowthResult> {
   if (!isValidAwardedTaskId(taskId)) throw new TreeAwardError('invalid_task_id');
+  const awardDay = awardDayFor(completedAt, now);
 
   // ── Pre-flight: integrity of the stored history (one lean read, nothing written) ──
   const preflight = await User.findById(userId).select('treeState.activeDays').lean();
@@ -281,7 +292,7 @@ export async function awardTaskCompletion(
   // ── Step 1: the atomic, idempotent award ──────────────────────────────────────
   let awarded: unknown = null;
   for (let attempt = 0; attempt < MAX_AWARD_ATTEMPTS && !awarded; attempt += 1) {
-    awarded = await attemptAward(userId, taskId, now);
+    awarded = await attemptAward(userId, taskId, awardDay);
     if (awarded) break;
 
     // Matched nothing: find out why. (A concurrent duplicate may have won between our attempts.)
@@ -309,14 +320,14 @@ export async function awardTaskCompletion(
     }
     if (ledger.length >= AWARDED_TASK_IDS_MAX) return refused(taskId, 'ledger_full', stored, now);
     if (normalizeXp(stored.xp) > MAX_XP - XP_PER_COMPLETION) return refused(taskId, 'xp_ceiling', stored, now);
-    if (!legacy && (stored.activeDays as unknown[]).length >= ACTIVE_DAYS_MAX && !(stored.activeDays as unknown[]).includes(getTodayUtc(now))) {
+    if (!legacy && (stored.activeDays as unknown[]).length >= ACTIVE_DAYS_MAX && !(stored.activeDays as unknown[]).includes(awardDay)) {
       return refused(taskId, 'history_full', stored, now);
     }
 
     // A legacy tree: validate the complete adopted set (with room for today), then adopt it in one pinned
     // write and try the award again. A set that cannot fit is refused and the record is left untouched.
     if (legacy) {
-      const plan = planLegacyAdoption(stored, now, getTodayUtc(now));
+      const plan = planLegacyAdoption(stored, now, awardDay);
       if (plan === null) return refused(taskId, 'history_full', stored, now);
       await adopt(userId, stored, plan);
       continue;

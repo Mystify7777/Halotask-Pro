@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Growth Tree: an offline completion keeps the day the user acted (Issue #24, G1)
+
+**2026-11-16 · Bugfix · completed · Priority: high**
+
+Issue #24 audit finding G1. The award was recorded under the server's receipt day, so tasks completed offline on Monday and Tuesday and delivered on Wednesday gave one active day and a streak of 1 (XP was right, the streak and health were wrong for exactly the offline-first user). Now `awardDayFor(completedAt, now)` (`utils/treeRules.ts`) picks the UTC day an award is recorded under from the completion event the server has already validated on PUT /api/tasks/:id and POST /api/tasks: the event's own day when it lies from 7 UTC days before today up to today, otherwise today (no event, a future or skewed event, or an event older than the window). The 7-day Growth Tree window is deliberately narrower than the CompletionRecord history window (90 days); a completion outside it is still a valid history record. The day is threaded through `awardTaskCompletion` into the atomic award, the capacity filter, the legacy-adoption reservation and the history_full check. XP (+10), the ledger, the caps, idempotency by task id, the standalone orphan endpoint (never awards) and the client are unchanged (the client's offline preview is computed at completion time, so its day already equals the event day; it stays display-only and the server's answer still replaces it). Documented in docs/context.md: the server-authoritative rule, the bounded window, no daily reward cap, orphaned completions earn no XP. Verification: focused Growth Tree and task tests 463 (43 new), full server suite without the MongoDB suites 49 files / 2325 tests, server typecheck (src and tests) clean, 15 mutation checks all killed. The real-MongoDB suites (a new case block in treeAward.realmongo.test.ts) were typechecked only: MongoDB cannot be downloaded in the sandbox, so run them in CI.
+
 #### Cold-start game on the sign-in pages opens only on request
 
 **2026-11-15 · Bugfix · completed · Priority: high**
