@@ -433,7 +433,7 @@ Both fields are optional and independent of the legacy `dueDate`.
 - Offline 409 (Issue #43): when an update sets `dueTime` against the stored date and the date was removed first, the server answers `409 { message, code: "TASK_DUE_DATE_REMOVED" }`, in the same `{ message, code }` shape other endpoints use. The code is specific to that conflict: a task deleted in between, or a date that is back by the time the conflict is re-read, gets the plain `409 { message }`. The queue recovers only from a 409 whose body is an object with `code` strictly equal to that string and an edit that carries a `dueTime`; message text and payload shape are never used to decide. Recovery sends the edit once more with `dueTime: null`, adopts the server task and tells the user the due time was not kept: one extra request per run, never a loop; if that request fails transiently the original entry is kept. Every other 409 (no body, wrong or malformed code, create/delete) takes the normal path and is discarded as a permanent 4xx.
 - Reminder identity: a task created offline keeps a client-only `clientKey` (its first `local-…` id) after sync, and the scheduler key and notification tag use `clientKey ?? _id`. This keeps an already-fired reminder from re-arming when the id changes. It holds within the persisted cache and the browser session; it does not cover another device, a cleared cache or a new session.
 - "Start now" names a clock time only for a task with a `dueTime`; date-only tasks get the generic message.
-- Known limits: reminders are client-side only (the only server email is for authentication, so there is no task email scheduling to feed).
+- Known limits: browser reminders are client-side; email reminders are a separate server channel (see "Email Delivery (Issue #29)").
 
 ## Time Zone Preference (Issue #41)
 
@@ -1669,6 +1669,73 @@ deliberately explicit rather than left to Express/Node defaults:
   from the same middleware/resolver, avoiding the Mongoose
   model-registration issue that comes from re-importing `src/app.ts`
   under different env vars in the same test run).
+
+## Email Delivery (Issue #29)
+
+Email is a server-side delivery channel for task reminders and an optional daily digest, next to (not instead of) the browser reminders. Browser notifications, the push relay and the client scheduler are unchanged; email is off for every account until the user turns it on.
+
+### Architecture
+
+`external cron → POST /api/internal/email-reminders/run → pure engine → delivery decision → ledger claim → emailService (SMTP → Brevo) → ledger settle`
+
+- `utils/emailReminderEngine.ts` is pure: `computeReminderEvents(tasks, prefs, zone, now)` and `computeDigest(...)`. It reuses the browser's semantics (due-soon window 60 min, start-time/smart-start windows, date-only tasks are "due today" and "overdue" the next day only). `reminders/emailParity.test.ts` (client) and `emailReminderParity.test.ts` (server) pin the same vectors on both sides; `utils/zonedTime.ts` is a server port of the client zone helpers (the zone is always a parameter, never a global).
+- `services/emailReminderRun.ts` is the only orchestrator. It reads opted-in users and their open tasks, applies preferences, quiet hours and the per-user daily cap, claims each event in the ledger, sends, and settles. It never writes tasks, and no task CRUD file imports an email module (source guard in `emailReminderBoundaries.test.ts`), so an email failure cannot affect task writes.
+- There is no in-process scheduler (no `setInterval`/cron in the server). Render's free tier sleeps, so the trigger is an external cron.
+
+### Trigger and auth
+
+`POST /api/internal/email-reminders/run` with `Authorization: Bearer <EMAIL_REMINDER_CRON_SECRET>`.
+- Secret unset → the route answers 404 (the endpoint does not exist). Set but shorter than 32 characters → the server refuses to start.
+- The secret is compared as SHA-256 digests with `timingSafeEqual`; failures are rate limited (30 per 15 min per IP). Body and query are ignored; the server clock is the only clock.
+- 503 when no email provider is configured; 409 if a run is already in progress in the process. The response contains counts only (never addresses, titles or errors).
+- Safe to call repeatedly and to replay: idempotency lives in the ledger, not in the caller. Run about every 5 minutes. Use `curl --max-time` with a retry because a sleeping instance needs time to wake. Example: `docs/ops/email-reminder-cron.md`.
+- Bounds: 50 s run budget, 500 tasks per user per run, users processed sequentially.
+
+### Delivery, fallback and idempotency
+
+- `services/emailService.ts` has two providers: SMTP (`SMTP_HOST/PORT/USER/PASS`, all four required; `secure` only on port 465) and Brevo (`BREVO_API_KEY`, `POST https://api.brevo.com/v3/smtp/email`, 201 with a `messageId`). Environment is read at call time. Resend is no longer used.
+- Each failure is classified **definite** (provably not accepted: SMTP EAUTH/EENVELOPE/EDNS/ECONNREFUSED/ENOTFOUND/EHOSTUNREACH/ENETUNREACH/ECONFIG, a rejection before DATA, a 4xx/5xx SMTP response code; Brevo HTTP 4xx or an unreachable host) or **ambiguous** (everything else: timeouts, drops, Brevo 5xx, thrown errors, a 201 without `messageId`).
+- Policy `definite-only` (task reminders and the digest): a definite failure falls through to Brevo; an ambiguous one stops with result `unknown`, with no fallback and no retry. A missed reminder is preferred to a duplicate. Policy `any-failure` (password reset): always falls through, as before.
+- Results: `sent | failed | unknown | unconfigured`. Provider error text is never logged or returned, only a short code and the masked recipient.
+- Ledger (`EmailDelivery`, unique `(userId, eventKey)`): `claimed → sent | failed | unknown`. A claim is an atomic upsert, so two concurrent runs cannot both send. A `failed` event is retried up to 3 attempts. A claim whose 2-minute lease expired (a crash mid-send) becomes `unknown` and is never resent. The ledger stores no address, subject, body or task title; a TTL index removes rows after 30 days.
+- Event keys: `task:<type>:<taskId>:<dueDay>[:t<dueTime>@<zone>][:s<startISO>]`, `day:<type>:<taskId>:<dueDay>` (date-only), `digest:<localDay>`.
+
+### Preferences and time
+
+- `GET/PUT /api/user/email-reminders` (auth required). Stored server-side in `User.emailReminders` (no defaults in the schema; `resolveEmailPrefs` fills them): `enabled` (default false), per-type toggles (due soon, overdue, start, work-session), `bufferMinutes` (15/30/60/90), quiet hours (default 22:30–07:00), `digestEnabled` (default false), `digestTime` (default 07:30), `timeZone` (null = follow the account zone).
+- Effective zone: the email override, else the account's saved zone (Issue #41), else UTC. It is never taken from the browser at run time. Quiet hours and the digest time use that zone. Events inside quiet hours are deferred, not dropped.
+- The recipient is always the account email read server-side; no endpoint accepts an address.
+- Digest: opt-in, separate from reminders, deterministic, at most 10 items per section and 3 upcoming days. A digest enabled after its time today is sent at the next run.
+- Client: `EmailReminderSettings` on the Reminders page. The first enable copies the browser reminder settings once, only if the mirrored fields are still at their defaults.
+
+### Delivery contract
+
+Guaranteed:
+- One durable claim per `(userId, eventKey)`; no concurrent duplicate attempt (atomic upsert plus the unique index).
+- At most one delivery attempt after an ambiguous provider outcome: an `unknown` event, including one left by a lost response, a timeout or a process that died mid-send, is never attempted again.
+- No duplicate after a process restart.
+- The per-user daily cap holds across instances (see "Safety limits").
+
+Not guaranteed:
+- Exactly-once delivery. A definite failure may be retried (up to 3 attempts) and may fall through to Brevo; if a provider wrongly reports a definite failure for a message it did accept, the fallback can produce a second message. The classification is a heuristic and cannot remove provider-side uncertainty.
+- Delivery after a provider accepted the message (spam filtering, bounces).
+
+### Safety limits
+
+- A per-user rolling-24 h cap (`EMAIL_REMINDER_DAILY_CAP`, 1–200, default 20) exists because sign-up has no email verification, so a user can enter anyone's address. It is enforced against the durable ledger: an event is claimed first, then the user's claimed/sent/unknown rows in the last 24 h are counted; if that is over the cap the claim is released unsent (`failed`, attempt not spent) and the event stays due. A sender never releases, so the senders in any window never exceed the cap, even with several server instances running (racing instances may both release, so the cap can under-send slightly; it never over-sends).
+- Content: titles are flattened and cut to 80 characters and HTML-escaped. Emails carry no reset token and no credentials; the footer links to `/dashboard/reminders` built from `APP_BASE_URL`.
+- Divergences from the browser, deliberate: a timed-overdue email is sent only within 24 h of the deadline, and a zone change does not suppress both the due-today and overdue emails.
+
+### Production configuration
+
+`SMTP_*` (primary), `BREVO_API_KEY` (fallback) with `EMAIL_FROM` set to a sender verified in Brevo, `EMAIL_REMINDER_CRON_SECRET` (≥32 random characters), optional `EMAIL_REMINDER_DAILY_CAP`, and `APP_BASE_URL`. Moving from Resend to Brevo needs a new `BREVO_API_KEY` and a verified sender before the old key is removed. Never commit real values.
+
+### Known limits
+
+- Real SMTP and Brevo delivery, and the real-MongoDB ledger suite (`emailDelivery.realmongo.test.ts`), need CI or staging; they were not run locally.
+- Cron cadence is the delivery resolution (GitHub Actions can delay scheduled runs); the sequential run and the 500-task cap bound scale.
+- An `unknown` event is never resent, by design.
+- No email verification at sign-up (the cap limits the damage). `docs/DUAL_EMAIL_TRANSPORT.md` was referenced by earlier docs but never existed; this section replaces it.
 
 ## Documentation System
 

@@ -71,7 +71,7 @@ async function loadApp(env: Record<string, string | undefined> = {}): Promise<Ex
   process.env.VAPID_PRIVATE_KEY = 'priv';
   delete process.env.TRUST_PROXY_HOPS;
   delete process.env.SMTP_HOST;
-  delete process.env.RESEND_API_KEY;
+  delete process.env.BREVO_API_KEY;
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

@@ -14,7 +14,7 @@ This index replaces the scattered root, ops, product, and helper docs that were 
 ### API and Integration
 - `06_API_Contract.md` - endpoint shapes, auth/task payloads, and client-server contract details.
 - `CORS.md` - allowed origin rules, local dev configuration, and CORS validation notes.
-- `DUAL_EMAIL_TRANSPORT.md` - primary SMTP delivery with Resend fallback behavior and operational expectations.
+- `context.md` ("Email Delivery (Issue #29)") and `ops/email-reminder-cron.md` - SMTP primary with Brevo fallback, email reminders, the cron trigger and operational expectations.
 - `PASSWORD_RESET_FLOW.md` - token-based reset flow, expiration behavior, and security considerations.
 
 ### Deployment

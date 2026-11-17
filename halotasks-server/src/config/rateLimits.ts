@@ -42,6 +42,10 @@ export const RATE_LIMITS = {
   // push relay fans one call out to every device a user registered. The client calls it once per
   // due reminder (scheduler tick: 60s), so this leaves room for bursts of due tasks and many devices.
   pushRelayUser: { windowMs: 5 * MINUTE, max: 60 },
+
+  // The external scheduler's trigger (Issue #29): one call every few minutes from a fixed source. This only blunts
+  // guessing of the shared secret; the secret's length and constant-time comparison are the real protection.
+  internalRunIp: { windowMs: 15 * MINUTE, max: 30 },
 } as const satisfies Record<string, RateLimitRule>;
 
 /** The one response body every limiter uses; it names no limiter, key or counter. */

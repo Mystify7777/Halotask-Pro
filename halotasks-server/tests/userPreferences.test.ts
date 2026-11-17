@@ -50,7 +50,7 @@ async function loadApp(): Promise<Express> {
   process.env.JWT_SECRET = SECRET;
   process.env.CLIENT_ORIGIN = 'http://localhost:5173';
   delete process.env.TRUST_PROXY_HOPS;
-  delete process.env.RESEND_API_KEY;
+  delete process.env.BREVO_API_KEY;
   delete process.env.SMTP_HOST;
 
   const project = (row: Row | undefined, fields: string[]) => {

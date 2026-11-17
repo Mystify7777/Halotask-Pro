@@ -2,7 +2,14 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app';
 import { connectDB } from './config/db';
-import { getGroqApiKey, getMongoConfig, getResetTokenTtlMinutes, getTrustProxyHops } from './config/env';
+import {
+  getEmailReminderCronSecret,
+  getEmailReminderDailyCap,
+  getGroqApiKey,
+  getMongoConfig,
+  getResetTokenTtlMinutes,
+  getTrustProxyHops,
+} from './config/env';
 import { createGracefulShutdown, exitWithFatalError } from './utils/processLifecycle';
 
 // ── Startup validation ─────────────────────────────────────────────────────
@@ -28,6 +35,17 @@ try {
   getMongoConfig();
 } catch (error) {
   exitWithFatalError('Invalid MongoDB configuration', error);
+}
+
+// Email reminders (Issue #29) are optional: without EMAIL_REMINDER_CRON_SECRET the trigger route is disabled and nothing is
+// ever emailed except password reset. A secret that is set but too short, or a malformed cap, is refused here.
+try {
+  getEmailReminderDailyCap();
+  if (!getEmailReminderCronSecret()) {
+    console.warn('[EmailReminders] EMAIL_REMINDER_CRON_SECRET not configured. Email reminders and digests will not run.');
+  }
+} catch (error) {
+  exitWithFatalError('Invalid email reminder configuration', error);
 }
 
 // AI task creation is optional: without GROQ_API_KEY the endpoint answers 503 and the rest of the app

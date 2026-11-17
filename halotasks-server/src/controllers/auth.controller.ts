@@ -2,11 +2,10 @@ import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import nodemailer from 'nodemailer';
-import { Resend } from 'resend';
 import User from '../models/User.model';
 import { getResetTokenTtlMinutes } from '../config/env';
 import { JWT_ALGORITHM } from '../utils/authToken';
+import { getEmailService, maskEmail } from '../services/emailService';
 import { readRequiredStrings } from '../utils/requestBody';
 import {
   PASSWORD_MIN_LENGTH,
@@ -19,33 +18,6 @@ import {
 
 const neutralForgotMessage = 'If an account exists for this email, a reset link has been sent.';
 const resetEmailSubject = 'Reset your HaloTaskPro password';
-
-const resendApiKey = process.env.RESEND_API_KEY;
-const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
-
-// Initialize SMTP transporter if env vars are available
-const createSmtpTransporter = () => {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = process.env.SMTP_PORT;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-
-  if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host: smtpHost,
-    port: Number(smtpPort),
-    secure: smtpPort === '465', // Use TLS for port 465
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-  });
-};
-
-const smtpTransporter = createSmtpTransporter();
 
 // `tokenVersion` must come from the SAME document read that authenticated the caller (the password
 // check at login), never from a second read: a reset bumps the version in the same atomic write as
@@ -79,20 +51,6 @@ const hashResetCode = (code: string) => {
   return crypto.createHash('sha256').update(code).digest('hex');
 };
 
-const maskEmail = (email: string) => {
-  const [local, domain] = email.split('@');
-
-  if (!local || !domain) {
-    return '[invalid-email]';
-  }
-
-  if (local.length <= 2) {
-    return `**@${domain}`;
-  }
-
-  return `${local.slice(0, 2)}***@${domain}`;
-};
-
 const buildResetEmailText = (resetCode: string, ttlMinutes: number) =>
   [
     'We received a request to reset your password.',
@@ -115,68 +73,37 @@ const buildResetEmailHtml = (resetCode: string, ttlMinutes: number) => `
   </div>
 `;
 
+// Delivery goes through the shared email service (Issue #29). Password reset keeps the policy it always had: SMTP first,
+// then Brevo after ANY failure ('any-failure'), so a lost code is never traded for a possible duplicate.
 const sendResetPasswordEmail = async (toEmail: string, resetCode: string, ttlMinutes: number): Promise<void> => {
-  const emailText = buildResetEmailText(resetCode, ttlMinutes);
-  const emailHtml = buildResetEmailHtml(resetCode, ttlMinutes);
-  const fromAddress = process.env.EMAIL_FROM || 'noreply@halotaskpro.com';
+  const result = await getEmailService().send(
+    {
+      to: toEmail,
+      subject: resetEmailSubject,
+      text: buildResetEmailText(resetCode, ttlMinutes),
+      html: buildResetEmailHtml(resetCode, ttlMinutes),
+    },
+    'any-failure',
+  );
 
-  // Try SMTP first (primary transport)
-  if (smtpTransporter) {
-    try {
-      const info = await smtpTransporter.sendMail({
-        from: fromAddress,
-        to: toEmail,
-        subject: resetEmailSubject,
-        text: emailText,
-        html: emailHtml,
-      });
-
-      if (info.messageId) {
-        console.info(`[Auth] Email delivered via SMTP. Recipient: ${maskEmail(toEmail)}`);
-        return;
-      }
-    } catch (smtpError) {
-      const msg = smtpError instanceof Error ? smtpError.message : 'Unknown SMTP error';
-      console.error(`[Auth] SMTP delivery failed for ${maskEmail(toEmail)}: ${msg}`);
-    }
+  if (result.status === 'sent') {
+    return;
   }
 
-  // Fallback to Resend (secondary transport)
-  if (resendClient) {
-    try {
-      const result = await resendClient.emails.send({
-        from: fromAddress,
-        to: toEmail,
-        subject: resetEmailSubject,
-        text: emailText,
-        html: emailHtml,
-      });
-
-      if (result.error) {
-        console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}: ${result.error.message}`);
-      } else if (result.data?.id) {
-        console.info(`[Auth] Email delivered via Resend. Recipient: ${maskEmail(toEmail)}`);
-        return;
-      }
-    } catch (resendError) {
-      const msg = resendError instanceof Error ? resendError.message : 'Unknown Resend error';
-      console.error(`[Auth] Resend delivery failed for ${maskEmail(toEmail)}: ${msg}`);
-    }
-  }
-
-  if (!smtpTransporter && !resendClient) {
+  if (result.status === 'unconfigured') {
     // Genuine demo/dev mode — no transports configured at all.
     // Logging the code here is intentional so developers can test the flow locally.
     console.warn('[Auth] No email transport configured. Running in demo mode.');
     console.info(`[Auth] DEMO MODE — reset code for ${maskEmail(toEmail)}: ${resetCode}`);
-  } else {
-    // Transports were configured but both failed — do NOT log the code.
-    // Logging a live reset code to server logs is a security risk.
-    console.error(
-      `[Auth] All email transports failed for ${maskEmail(toEmail)}. ` +
-      'User will receive the neutral response. Code NOT logged for security.',
-    );
+    return;
   }
+
+  // Transports were configured but all failed — do NOT log the code.
+  // Logging a live reset code to server logs is a security risk.
+  console.error(
+    `[Auth] All email transports failed for ${maskEmail(toEmail)}. ` +
+    'User will receive the neutral response. Code NOT logged for security.',
+  );
 };
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {

@@ -5,6 +5,7 @@ import {
   ReminderSettings,
   BufferMinutes,
 } from '../reminders/settings';
+import EmailReminderSettings from '../components/settings/EmailReminderSettings';
 import {
   getNotificationPermissionStatus,
   isNotificationSupported,
@@ -268,6 +269,9 @@ export default function RemindersPage() {
           </label>
         </div>
       </section>
+
+      {/* ── Email reminders (server-side, Issue #29) ───────────── */}
+      <EmailReminderSettings />
 
     </div>
   );

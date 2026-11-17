@@ -1,5 +1,6 @@
 import { Schema, model } from 'mongoose';
 import { isValidTimeZone } from '../utils/timeZone';
+import { BUFFER_MINUTES, HH_MM_PATTERN } from '../utils/emailReminderPrefs';
 
 const pushSubscriptionSchema = new Schema(
   {
@@ -77,6 +78,28 @@ const userSchema = new Schema(
       type: [pushSubscriptionSchema],
       default: [],
     },
+    // Email reminder preferences (Issue #29). Every field is optional with NO default: absent reads as the default in
+    // utils/emailReminderPrefs.ts (email off), so existing accounts need no migration. Only the email-reminders
+    // route writes it. Reminders are only ever sent to `email` above, never to an address from a request.
+    emailReminders: {
+      enabled: { type: Boolean },
+      dueSoonEnabled: { type: Boolean },
+      overdueEnabled: { type: Boolean },
+      workSessionSoonEnabled: { type: Boolean },
+      startNowEnabled: { type: Boolean },
+      bufferMinutes: { type: Number, enum: BUFFER_MINUTES },
+      quietHoursStart: { type: String, match: HH_MM_PATTERN },
+      quietHoursEnd: { type: String, match: HH_MM_PATTERN },
+      digestEnabled: { type: Boolean },
+      digestTime: { type: String, match: HH_MM_PATTERN },
+      timeZone: {
+        type: String,
+        validate: {
+          validator: (value: unknown) => value === undefined || value === null || isValidTimeZone(value),
+          message: 'timeZone must be a valid IANA time zone identifier',
+        },
+      },
+    },
     treeState: {
       xp:               { type: Number,  default: 0 },
       leaves:           { type: Number,  default: 0 },
@@ -102,6 +125,9 @@ const userSchema = new Schema(
     timestamps: true,
   },
 );
+
+// The reminder run's only lookup: the accounts that opted in.
+userSchema.index({ 'emailReminders.enabled': 1 }, { partialFilterExpression: { 'emailReminders.enabled': true } });
 
 const User = model('User', userSchema);
 

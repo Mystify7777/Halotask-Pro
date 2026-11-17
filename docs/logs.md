@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Email reminders and digest as a server delivery channel (Issue #29)
+
+**2026-11-17 · Feature · completed · Priority: high**
+
+Issue #29. Opt-in email reminders (start-time, due-soon, overdue, work-session) and an opt-in daily digest, delivered by an external cron calling an authenticated, replay-safe POST /api/internal/email-reminders/run (EMAIL_REMINDER_CRON_SECRET, 32+ chars; unset = 404). Flow: pure engine (same semantics as the browser, parity vectors on both sides) -> preferences, quiet hours and a per-user 24 h cap -> durable EmailDelivery ledger claim -> emailService (SMTP -> Brevo) -> settle. Delivery is at-most-once after an ambiguous outcome (not exactly-once): a fallback happens only after a definite pre-acceptance failure; an ambiguous failure or an expired lease is recorded as unknown and never resent. Resend is replaced by Brevo; password reset keeps its any-failure fallback. Preferences are server-side (GET/PUT /api/user/email-reminders) with the account time zone by default and an explicit email zone override. Email never touches task CRUD (source-guarded) and logs carry only masked recipients and short codes. Client: EmailReminderSettings on the Reminders page. Fixed on the way: the EmailDelivery model re-registered when tests reload the app. Verification: full server suite without the MongoDB suites 61 files / 2596 tests, client suite 79 files / 1722 tests, both typechecks clean, 19 mutation checks, all killed (one survivor, the empty-messageId case, got a test). Review corrective: the daily cap is now enforced after the claim against the durable ledger (over-cap claims are released unsent, so the cap holds across server instances and never over-sends), and the delivery contract is worded as at-most-once after an ambiguous outcome, not exactly-once, with a Guaranteed / Not guaranteed list in docs/context.md. Not run here: the real-MongoDB ledger suite (typechecked only), real SMTP and Brevo delivery; run both in CI and staging.
+
 #### Growth Tree: an offline completion keeps the day the user acted (Issue #24, G1)
 
 **2026-11-16 · Bugfix · completed · Priority: high**

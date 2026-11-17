@@ -176,3 +176,38 @@ export function getMongoConfig(env: NodeJS.ProcessEnv = process.env): MongoConfi
 
   return { uri, srv, serverSelectionTimeoutMS, dnsFallbackServers };
 }
+
+export const EMAIL_REMINDER_CRON_SECRET_MIN_LENGTH = 32;
+
+/**
+ * The shared secret that authenticates the external scheduler calling POST /api/internal/email-reminders/run
+ * (EMAIL_REMINDER_CRON_SECRET, Issue #29). Unset or blank means the trigger is DISABLED (the route answers 404): email
+ * reminders then never run. A value that is set but shorter than 32 characters throws, so a guessable secret fails fast
+ * at startup instead of protecting an endpoint that sends mail. The value never appears in a message.
+ */
+export function getEmailReminderCronSecret(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.EMAIL_REMINDER_CRON_SECRET;
+  if (raw === undefined || raw.trim() === '') return null;
+  const secret = raw.trim();
+  if (secret.length < EMAIL_REMINDER_CRON_SECRET_MIN_LENGTH) {
+    throw new Error(`EMAIL_REMINDER_CRON_SECRET must be at least ${EMAIL_REMINDER_CRON_SECRET_MIN_LENGTH} characters`);
+  }
+  return secret;
+}
+
+export const DEFAULT_EMAIL_REMINDER_DAILY_CAP = 20;
+
+/**
+ * The most reminder/digest emails one account can be sent in any rolling 24 hours (EMAIL_REMINDER_DAILY_CAP, 1-200,
+ * default 20), enforced against the durable ledger after each claim, so it holds across server instances. There is no email verification at sign-up, so this bounds what an account that names someone else's address
+ * can cause. A malformed value fails fast at startup.
+ */
+export function getEmailReminderDailyCap(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.EMAIL_REMINDER_DAILY_CAP;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_EMAIL_REMINDER_DAILY_CAP;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+    throw new Error(`EMAIL_REMINDER_DAILY_CAP must be a whole number from 1 to 200 (got "${raw}")`);
+  }
+  return parsed;
+}
