@@ -8,7 +8,7 @@ export type TaskReadFilter = {
   search?: string;
 };
 
-const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const MAX_SUMMARY_TASKS = 10_000;
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^$\\{}()|[\\]\\]/g, '\\$&');
