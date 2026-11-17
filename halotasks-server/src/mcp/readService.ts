@@ -9,8 +9,6 @@ export type TaskReadFilter = {
 };
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const MAX_SUMMARY_TASKS = 10_000;
-
 const escapeRegex = (value: string): string => value.replace(/[.*+?^$\\{}()|[\\]\\]/g, '\\$&');
 
 const taskProjection = {
