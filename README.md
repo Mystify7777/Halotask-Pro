@@ -119,7 +119,7 @@ A gentle, persistent reminder that habits grow the same way trees do: slowly, th
 - Token-based reset codes (6-digit)
 - Single-use reset tokens (stored as hash)
 - Rate-limited recovery requests (abuse protection)
-- Dual email delivery: SMTP primary + Resend fallback
+- Dual email delivery: SMTP primary + Brevo fallback (password reset and opt-in task reminder emails)
 
 Forgetting a password is human. Suffering to recover shouldn't be.
 
@@ -130,7 +130,7 @@ Forgetting a password is human. Suffering to recover shouldn't be.
 **Frontend:** React + TypeScript + Vite + Zustand + Axios  
 **Backend:** Node.js + Express + TypeScript + MongoDB + Mongoose + JWT  
 **Offline:** IndexedDB via `idb`  
-**Email:** Nodemailer (SMTP) + Resend fallback  
+**Email:** Nodemailer (SMTP) + Brevo fallback
 
 ---
 
@@ -227,8 +227,9 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=noreply@yourdomain.com
 SMTP_PASS=<16-char-app-password>
-RESEND_API_KEY=re_XXXXXXXXX
-EMAIL_FROM=noreply@yourdomain.com
+BREVO_API_KEY=xkeysib-XXXXXXXX
+EMAIL_FROM=noreply@yourdomain.com   # must be a sender verified in Brevo
+EMAIL_REMINDER_CRON_SECRET=<32+ random chars>   # enables POST /api/internal/email-reminders/run
 RESET_TOKEN_TTL_MINUTES=20
 
 # Local dev only — logs the reset code when no email transport is configured.
@@ -261,7 +262,7 @@ VITE_API_BASE_URL=http://localhost:5000
 2. [docs/CORS.md](docs/CORS.md) - Cross-origin configuration and troubleshooting
 3. [docs/06_API_Contract.md](docs/06_API_Contract.md) - Backend request/response contract
 4. [docs/PASSWORD_RESET_FLOW.md](docs/PASSWORD_RESET_FLOW.md) - Token reset flow and security model
-5. [docs/DUAL_EMAIL_TRANSPORT.md](docs/DUAL_EMAIL_TRANSPORT.md) - SMTP primary, Resend fallback behavior
+5. [docs/context.md](docs/context.md) ("Email Delivery") and [docs/ops/email-reminder-cron.md](docs/ops/email-reminder-cron.md) - SMTP primary, Brevo fallback, email reminders
 
 - Product docs in [docs/product/](docs/product/) directory
 - Operational docs in [docs/ops/](docs/ops/) directory
@@ -288,7 +289,6 @@ VITE_API_BASE_URL=http://localhost:5000
 - Analytics & usage insights
 - Cloud sync for Growth Tree state
 - Shared/team productivity mode
-- Email reminder expansion
 - Dark mode theme
 
 ---

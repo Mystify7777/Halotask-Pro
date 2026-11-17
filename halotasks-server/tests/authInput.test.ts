@@ -62,7 +62,7 @@ async function loadApp(env: Record<string, string | undefined> = {}): Promise<Ex
   process.env.CLIENT_ORIGIN = 'http://localhost:5173';
   delete process.env.TRUST_PROXY_HOPS;
   delete process.env.RESET_TOKEN_TTL_MINUTES;
-  delete process.env.RESEND_API_KEY;
+  delete process.env.BREVO_API_KEY;
   delete process.env.SMTP_HOST;
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) delete process.env[k];
@@ -383,10 +383,10 @@ describe('forgot-password', () => {
 
   it('never writes a reset code to the log when a mail transport IS configured but fails', async () => {
     // Transports configured => the demo-mode log line (which does print the code, by design, for local
-    // development only) must not run. Resend is "configured" here; its network call is replaced to fail.
+    // development only) must not run. Brevo is "configured" here; its network call is replaced to fail.
     fixCodes(777777);
-    vi.doMock('resend', () => ({ Resend: class { emails = { send: async () => ({ error: { message: 'provider down' } }) }; } }));
-    const app = await loadApp({ RESEND_API_KEY: 're_test_placeholder' });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 400, json: async () => ({ message: 'provider down' }) })));
+    const app = await loadApp({ BREVO_API_KEY: 'brevo_test_placeholder' });
     makeUser('a@x.test');
 
     const res = await forgot(app, 'a@x.test');
@@ -395,7 +395,7 @@ describe('forgot-password', () => {
     expect(res.body).toEqual(NEUTRAL);
     const logged = [...info.mock.calls, ...warn.mock.calls, ...(console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls].flat().join(' ');
     expect(logged).not.toContain('777777');
-    vi.doUnmock('resend');
+    vi.unstubAllGlobals();
   });
 
   it('end to end: the code it issues resets the password, once, and the new password logs in', async () => {

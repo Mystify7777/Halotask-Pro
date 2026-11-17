@@ -15,6 +15,31 @@ export type UserPreferences = {
   timeZone: string | null;
 };
 
+/**
+ * What GET /api/user/email-reminders returns (Issue #29). Email reminders are OFF until the user turns them on. `timeZone`
+ * is the email-only override (null = follow the account's time zone); `effectiveTimeZone` is the zone email scheduling
+ * actually reads in. `available` says whether this server can send email at all.
+ */
+export type EmailReminderPreferences = {
+  enabled: boolean;
+  dueSoonEnabled: boolean;
+  overdueEnabled: boolean;
+  workSessionSoonEnabled: boolean;
+  startNowEnabled: boolean;
+  bufferMinutes: 15 | 30 | 60 | 90;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  digestEnabled: boolean;
+  digestTime: string;
+  timeZone: string | null;
+  accountTimeZone: string | null;
+  effectiveTimeZone: string;
+  available: boolean;
+};
+
+/** What PUT /api/user/email-reminders accepts: any subset of the editable fields. `timeZone: null` clears the override. */
+export type EmailReminderUpdate = Partial<Omit<EmailReminderPreferences, 'accountTimeZone' | 'effectiveTimeZone' | 'available'>>;
+
 export type AuthResponse = {
   token: string;
   user: AuthUser;

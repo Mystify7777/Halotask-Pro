@@ -29,3 +29,6 @@ export const aiLimiter = createRateLimiter([
 ]);
 
 export const pushRelayLimiter = createRateLimiter([{ ...RATE_LIMITS.pushRelayUser, key: userKey }]);
+
+// Mounted BEFORE the secret check on the internal scheduler route, so wrong-secret guesses are counted per source.
+export const internalRunLimiter = createRateLimiter([{ ...RATE_LIMITS.internalRunIp, key: ipKey }]);

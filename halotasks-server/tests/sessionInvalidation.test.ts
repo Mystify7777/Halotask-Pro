@@ -122,7 +122,7 @@ async function loadApp(): Promise<Express> {
   vi.resetModules();
   process.env.JWT_SECRET = SECRET;
   delete process.env.SMTP_HOST;
-  delete process.env.RESEND_API_KEY;
+  delete process.env.BREVO_API_KEY;
   delete process.env.TRUST_PROXY_HOPS;
 
   vi.doMock('../src/models/User.model', () => ({
