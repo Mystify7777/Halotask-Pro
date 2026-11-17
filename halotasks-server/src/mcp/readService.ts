@@ -13,6 +13,24 @@ const MAX_SUMMARY_TASKS = 10_000;
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^$\\{}()|[\\]\\]/g, '\\$&');
 
+const taskProjection = {
+  _id: 1,
+  title: 1,
+  description: 1,
+  completed: 1,
+  priority: 1,
+  tags: 1,
+  subtasks: 1,
+  dueDate: 1,
+  dueTime: 1,
+  startTime: 1,
+  estimatedMinutes: 1,
+  reminderSent: 1,
+  completedAt: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 const baseFilter = (userId: string): Record<string, unknown> => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid authenticated user id');
@@ -50,7 +68,7 @@ export const listTasksForUser = async (
   const filter = buildFilter(userId, options);
 
   const [tasks, total] = await Promise.all([
-    Task.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Task.find(filter).select(taskProjection).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Task.countDocuments(filter),
   ]);
 
@@ -65,7 +83,7 @@ export const listTasksForUser = async (
 
 export const getTaskForUser = async (userId: string, taskId: string) => {
   if (!mongoose.Types.ObjectId.isValid(taskId)) return null;
-  return Task.findOne({ _id: taskId, userId: baseFilter(userId).userId }).lean();
+  return Task.findOne({ _id: taskId, userId: baseFilter(userId).userId }).select(taskProjection).lean();
 };
 
 export const listSubtasksForUser = async (userId: string, taskId: string) => {
