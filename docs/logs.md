@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### One notification per task for simultaneous browser reminders (Issue #14)
+
+**2026-11-18 · Feature · completed · Priority: medium**
+
+Issue #14. The scheduler now collects each poll's timed reminders and merges those of the same task (never across tasks) into one notification, one relay and one tray entry. Lead by fixed precedence start-now > due-soon > work-session-soon > overdue, followed by one fixed clause per merged type, so the text depends only on the task and the set of types. Every merged reminder is marked fired, so none repeats on its own. Timed notifications use the tag halotask-task-<reminderIdentity> with renotify, so a later one replaces the earlier one in the tray; date-only calendar-day reminders (Issue #42) keep their own tags, receipts and retry budget. A timed overdue notification is limited to 24 h after the deadline (same bound as email), so reopening the app no longer announces tasks that went overdue days ago. No server change; email untouched. Cross-tab duplicate timed reminders are deferred to a follow-up issue. Verification: client suite 82 files / 1758 tests, server suite without the MongoDB suites 61 files / 2596 tests, client and server typechecks clean, 13 mutation checks all caught. Not run: real browser/OS notification rendering, tray replacement and multi-device push (needs a real-device check).
+
 #### Email reminders and digest as a server delivery channel (Issue #29)
 
 **2026-11-17 · Feature · completed · Priority: high**

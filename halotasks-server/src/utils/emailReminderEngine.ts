@@ -18,9 +18,9 @@ import { dateKeyInZone, dateKeyOffsetInZone, wallClockAt, zonedWallClockToInstan
  * tests/emailReminderParity.test.ts pins this module and the client's to the same vectors.
  *
  * Differences from the browser, and why (each is documented in docs/context.md "Email delivery"):
- *   - an exact-deadline 'overdue' email is only sent in the first OVERDUE_EMAIL_WINDOW_MS after the deadline. The browser
- *     sends it once per session, which is bounded by the session; a server run has no session, so without a bound,
- *     turning email on would mail every old overdue task.
+ *   - the 24 h bound on an exact-deadline 'overdue' email (OVERDUE_EMAIL_WINDOW_MS) is shared: since Issue #14 the browser
+ *     bounds its timed-overdue notification the same way (OVERDUE_NOTIFICATION_WINDOW_MS), so this is no longer a
+ *     difference. A server run has no session, so the bound is what stops it mailing every old overdue task.
  *   - the browser's rule that a time zone change must not produce BOTH the due-today and the overdue reminder of one
  *     date-only task is not ported. Both can be emailed if the zone is changed in between (at most one extra email).
  *

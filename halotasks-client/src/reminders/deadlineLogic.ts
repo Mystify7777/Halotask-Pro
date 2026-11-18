@@ -88,7 +88,15 @@ export const getTasksDueInNextHour = (tasks: Task[], nowTime = Date.now(), windo
   });
 };
 
-export const getTasksOverdueNow = (tasks: Task[], nowTime = Date.now()) => {
+/**
+ * How long after its deadline a timed task still earns an "overdue" NOTIFICATION (Issue #14), the same bound the email
+ * channel uses. The task itself stays overdue on its card; only the alert is limited, so reopening the app does not
+ * announce every old overdue task at once.
+ */
+export const OVERDUE_NOTIFICATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Tasks past their exact deadline; with `maxAgeMs`, only those whose deadline passed at most that long ago. */
+export const getTasksOverdueNow = (tasks: Task[], nowTime = Date.now(), maxAgeMs?: number) => {
   return tasks.filter((task) => {
     if (task.completed) {
       return false;
@@ -99,7 +107,7 @@ export const getTasksOverdueNow = (tasks: Task[], nowTime = Date.now()) => {
       return false;
     }
 
-    return dueTime <= nowTime;
+    return dueTime <= nowTime && (maxAgeMs === undefined || nowTime - dueTime <= maxAgeMs);
   });
 };
 
