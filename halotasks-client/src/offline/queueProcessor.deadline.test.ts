@@ -87,9 +87,9 @@ describe('queued writes carry the time fields', () => {
 
     const result = await processSyncQueue(cb);
 
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(vi.mocked(taskService.createTask).mock.calls[0][0]).toEqual(TIMED);
-    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', expect.objectContaining({ _id: 'srv-1', dueTime: '17:30' }));
+    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', expect.objectContaining({ _id: 'srv-1', dueTime: '17:30' }), { stale: false });
   });
 
   it('a queued update that sets or clears the times is sent as is (null clears)', async () => {
@@ -152,7 +152,7 @@ describe('merging queued edits does not erase time fields', () => {
     await enqueueSyncAction({ type: 'update', taskId: 'local-9', payload: { dueDate: '2026-10-22', dueTime: '08:00' } });
     // Nothing maps local-9 to a server id in this run, so the update is deferred, not sent and not lost.
     const first = await processSyncQueue(callbacks());
-    expect(first).toEqual({ processed: 0, failed: 1, remaining: 1 });
+    expect(first).toMatchObject({ processed: 0, failed: 1, remaining: 1 });
     expect((await queue())[0].payload).toEqual({ dueDate: '2026-10-22', dueTime: '08:00' });
     expect(taskService.updateTask).not.toHaveBeenCalled();
   });
@@ -165,11 +165,11 @@ describe('retries and synchronization', () => {
     vi.mocked(taskService.updateTask).mockRejectedValueOnce(httpError(500)).mockResolvedValueOnce(serverTask('srv-1'));
 
     const failed = await processSyncQueue(callbacks());
-    expect(failed).toEqual({ processed: 0, failed: 1, remaining: 1 });
+    expect(failed).toMatchObject({ processed: 0, failed: 1, remaining: 1 });
     expect(await queue()).toEqual(original);
 
     const retried = await processSyncQueue(callbacks());
-    expect(retried).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(retried).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(vi.mocked(taskService.updateTask).mock.calls.map((call) => call[1])).toEqual([
       { dueDate: '2026-10-22', dueTime: '08:00', startTime: '2026-10-22T07:00:00.000Z' },
       { dueDate: '2026-10-22', dueTime: '08:00', startTime: '2026-10-22T07:00:00.000Z' },
@@ -185,7 +185,7 @@ describe('retries and synchronization', () => {
     const third = await processSyncQueue(callbacks()); // nothing left to send
 
     expect(vi.mocked(taskService.createTask)).toHaveBeenCalledTimes(2); // the failed try and its retry; never a third
-    expect(third).toEqual({ processed: 0, failed: 0, remaining: 0 });
+    expect(third).toMatchObject({ processed: 0, failed: 0, remaining: 0 });
   });
 });
 
@@ -202,7 +202,7 @@ describe('legacy queue entries (queued before these fields existed)', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 3, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 3, failed: 0, remaining: 0 });
     expect(vi.mocked(taskService.createTask).mock.calls[0][0]).toEqual({ title: 'old', priority: 'medium', dueDate: '2026-04-21' });
     expect(vi.mocked(taskService.updateTask).mock.calls.map((call) => call[1])).toEqual([
       { title: 'old edit', dueDate: null },
@@ -234,9 +234,9 @@ describe('409 TASK_DUE_DATE_REMOVED: a due-time edit whose due date was removed 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(2);
     expect(lastCall(0)[1]).toEqual({ title: 'Renamed', dueTime: '09:00' });
     expect(lastCall(1)[1]).toEqual({ title: 'Renamed', dueTime: null });
-    expect(cb.onTaskUpdated).toHaveBeenCalledWith('srv-1', expect.objectContaining({ title: 'Renamed' }));
+    expect(cb.onTaskUpdated).toHaveBeenCalledWith('srv-1', expect.objectContaining({ title: 'Renamed' }), { stale: false });
     expect(cb.onDueTimeConflict).toHaveBeenCalledWith('srv-1', '09:00');
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(await queue()).toEqual([]);
   });
 
@@ -259,7 +259,7 @@ describe('409 TASK_DUE_DATE_REMOVED: a due-time edit whose due date was removed 
     const result = await processSyncQueue(cb);
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ processed: 0, failed: 1, remaining: 1 });
+    expect(result).toMatchObject({ processed: 0, failed: 1, remaining: 1 });
     expect((await queue())[0].payload).toEqual({ title: 'Renamed', dueTime: '09:00' });
     expect(cb.onTaskUpdated).not.toHaveBeenCalled();
     expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
@@ -279,7 +279,7 @@ describe('409 TASK_DUE_DATE_REMOVED: a due-time edit whose due date was removed 
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(2);
     expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 }); // handled by the normal permanent-4xx path
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 }); // handled by the normal permanent-4xx path
   });
 
   it('if the reconciling request is rejected with a 401 the entry and everything after it are kept', async () => {
@@ -321,7 +321,7 @@ describe('every other 409 takes the normal error path (no recovery, no extra req
     const result = await processSyncQueue(cb);
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(cb.onTaskUpdated).not.toHaveBeenCalled();
     expect(cb.onDueTimeConflict).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Discarding permanently failed entry'), 'update', 'srv-1', expect.anything());
@@ -334,7 +334,7 @@ describe('every other 409 takes the normal error path (no recovery, no extra req
     const result = await processSyncQueue(callbacks());
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ processed: 0, failed: 1, remaining: 1 });
+    expect(result).toMatchObject({ processed: 0, failed: 1, remaining: 1 });
   });
 
   it('the right code on an edit with no due time is not recovered (there is nothing to clear)', async () => {
@@ -344,7 +344,7 @@ describe('every other 409 takes the normal error path (no recovery, no extra req
     const result = await processSyncQueue(callbacks());
 
     expect(vi.mocked(taskService.updateTask)).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
   });
 
   it('the right code on a due-time CLEAR (null) is not recovered either', async () => {

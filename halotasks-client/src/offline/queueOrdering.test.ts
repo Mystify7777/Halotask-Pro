@@ -123,7 +123,7 @@ describe('ordering', () => {
 
     const result = await processSyncQueue(cbs());
 
-    expect(result).toEqual({ processed: 1, failed: 1, remaining: 1 });
+    expect(result).toMatchObject({ processed: 1, failed: 1, remaining: 1 });
     expect((await queue()).map((q) => q.taskId)).toEqual(['srv-1']);
   });
 });
@@ -250,7 +250,7 @@ describe('what is merged into an entry while it is in flight', () => {
 
   it('with nothing queued meanwhile, a finished run leaves an empty queue and reports it', async () => {
     await enqueueSyncAction({ type: 'update', taskId: 'srv-1', payload: { title: 'one' } });
-    expect(await processSyncQueue(cbs())).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(await processSyncQueue(cbs())).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(await queue()).toEqual([]);
   });
 
@@ -273,7 +273,7 @@ describe('what is merged into an entry while it is in flight', () => {
       return ok(id);
     });
 
-    expect(await processSyncQueue(cbs())).toEqual({ processed: 2, failed: 0, remaining: 0 });
+    expect(await processSyncQueue(cbs())).toMatchObject({ processed: 2, failed: 0, remaining: 0 });
     expect(await queue()).toEqual([]);
   });
 });

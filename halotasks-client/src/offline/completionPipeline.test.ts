@@ -22,6 +22,21 @@ vi.mock('./db', () => ({
     remove: async (key: string) => {
       db.store.delete(key);
     },
+    // The hook's local-first commit (Issue #57): reads and writes are staged and applied together only if `fn` succeeds.
+    transaction: async <T,>(fn: (tx: { get: <V>(key: string) => Promise<V | undefined>; put: (key: string, value: unknown) => Promise<void> }) => Promise<T>) => {
+      const staged = new Map<string, unknown>();
+      const result = await fn({
+        get: async <V,>(key: string) => {
+          const source = staged.has(key) ? staged : db.store;
+          return source.has(key) ? (structuredClone(source.get(key)) as V) : undefined;
+        },
+        put: async (key: string, value: unknown) => {
+          staged.set(key, structuredClone(value));
+        },
+      });
+      staged.forEach((value, key) => db.store.set(key, value));
+      return result;
+    },
   },
 }));
 
@@ -528,7 +543,9 @@ describe('replay details', () => {
 describe('an online completion whose request fails', () => {
   const setStatusError = vi.fn();
   const setStatusInfo = vi.fn();
+  const requestSync = vi.fn();
 
+  // Since Issue #57 the dashboard commits the completion locally FIRST, online or not, and the drain (`run`) sends it.
   const mountDashboard = (initial: Task[]) =>
     renderHook(() => {
       const [tasks, setTasks] = useState<Task[]>(initial);
@@ -536,9 +553,8 @@ describe('an online completion whose request fails', () => {
         tasks,
         setTasks,
         isOnline: true,
-        syncBridgeRef: { current: { setSyncStatus: vi.fn(), refreshPendingQueueCount: vi.fn(async () => 0) } },
+        syncBridgeRef: { current: { setSyncStatus: vi.fn(), refreshPendingQueueCount: vi.fn(async () => 0), requestSync } },
         previewGrowthForCompletion: vi.fn(),
-        applyServerGrowth: vi.fn(),
         setStatusError,
         setStatusInfo,
       });
@@ -554,20 +570,38 @@ describe('an online completion whose request fails', () => {
   beforeEach(() => {
     setStatusError.mockClear();
     setStatusInfo.mockClear();
+    requestSync.mockClear();
   });
 
-  it('the server stored the completion but the answer was lost: the SAME event is queued, the retry sends the same id, and the server ends with exactly one record', async () => {
+  it('the tap commits ONE event and sends nothing itself; the drain sends it', async () => {
     const server = seedTask();
     const m = mountDashboard([localOf(server)]);
+    await act(() => m.result.current.hook.handleToggleTask(m.result.current.tasks[0]));
+
+    expect(taskWrites()).toHaveLength(0); // nothing was sent by the tap
+    expect(requestSync).toHaveBeenCalledTimes(1);
+    expect(await getSyncQueue()).toHaveLength(1);
+
+    expect((await run()).remaining).toBe(0);
+    expect(records()).toHaveLength(1);
+    expect(sentEventIds()).toEqual([records()[0].completionId]);
+  });
+
+  it('the server stored the completion but the answer was lost: the SAME event stays queued, the retry sends the same id, and the server ends with exactly one record', async () => {
+    const server = seedTask();
+    const m = mountDashboard([localOf(server)]);
+    await act(() => m.result.current.hook.handleToggleTask(m.result.current.tasks[0]));
+    const queuedBefore = await queuedIds();
     loseTaskPutResponses = true;
 
-    await act(() => m.result.current.hook.handleToggleTask(m.result.current.tasks[0]));
+    expect((await run()).remaining).toBe(1);
 
     // the first request reached the server and was applied
     expect(records()).toHaveLength(1);
     const original = records()[0].completionId;
     expect(sentEventIds()).toEqual([original]);
     // the client kept exactly that event
+    expect(await queuedIds()).toEqual(queuedBefore);
     expect(await queuedIds()).toEqual([original]);
     expect(m.result.current.tasks[0]).toMatchObject({ completed: true, pendingSync: true, completionId: original });
     expect(setStatusError).not.toHaveBeenCalledWith(expect.any(String)); // (null is the hook clearing the status)
@@ -584,7 +618,7 @@ describe('an online completion whose request fails', () => {
     expect(state('user-a').tasks.get(server._id)).toMatchObject({ completed: true, completionId: original });
   });
 
-  it('the same holds for a re-open: the lost revocation is queued with the id it names, and the record ends revoked exactly once', async () => {
+  it('the same holds for a re-open: the lost revocation stays queued with the id it names, and the record ends revoked exactly once', async () => {
     const server = seedTask();
     const first = makeCompletionTransition(localOf(server));
     await taskServiceComplete(server._id, first.event);
@@ -592,8 +626,9 @@ describe('an online completion whose request fails', () => {
     expect(completed.completionId).toBe((first.event as { completionId: string }).completionId);
 
     const m = mountDashboard([completed]);
-    loseTaskPutResponses = true;
     await act(() => m.result.current.hook.handleToggleTask(m.result.current.tasks[0]));
+    loseTaskPutResponses = true;
+    await run();
 
     expect((await getSyncQueue()).map((q) => [q.payload?.kind, q.payload?.completionId])).toEqual([['revoke', completed.completionId]]);
     expect(m.result.current.tasks[0]).toMatchObject({ completed: false, pendingSync: true });
@@ -603,25 +638,26 @@ describe('an online completion whose request fails', () => {
     expect(records().map((r) => r.status)).toEqual(['revoked']);
   });
 
-  it('a transient server error (503) queues the event too; a permanent refusal (400) does not', async () => {
+  it('a transient server error (503) keeps the event queued; a permanent refusal (400) is REPORTED as rejected and removed, not silently dropped', async () => {
     const a = seedTask();
     const transient = mountDashboard([localOf(a)]);
-    refuseTaskPutsWith = 503;
     await act(() => transient.result.current.hook.handleToggleTask(transient.result.current.tasks[0]));
+    refuseTaskPutsWith = 503;
+    const t = await run();
+    expect(t.rejected).toEqual([]);
     expect(await getSyncQueue()).toHaveLength(1);
     expect(transient.result.current.tasks[0]).toMatchObject({ completed: true, pendingSync: true });
 
-    await getSyncQueue();
     db.store.clear();
     resetSyncQueueState();
 
     const b = seedTask();
     const permanent = mountDashboard([localOf(b)]);
-    refuseTaskPutsWith = 400;
     await act(() => permanent.result.current.hook.handleToggleTask(permanent.result.current.tasks[0]));
+    refuseTaskPutsWith = 400;
+    const p = await run();
+    expect(p.rejected).toEqual([expect.objectContaining({ type: 'completion', taskId: b._id, status: 400 })]);
     expect(await getSyncQueue()).toHaveLength(0);
-    expect(permanent.result.current.tasks[0].completed).toBe(false); // untouched
-    expect(setStatusError).toHaveBeenCalledWith(expect.any(String));
   });
 
   it('bulk complete: every task whose answer was lost keeps its OWN event (distinct ids), and the retry gives one record each', async () => {
@@ -630,9 +666,9 @@ describe('an online completion whose request fails', () => {
     const m = mountDashboard([localOf(a), localOf(b)]);
     act(() => m.result.current.hook.toggleSelect(a._id));
     act(() => m.result.current.hook.toggleSelect(b._id));
-    loseTaskPutResponses = true;
-
     await act(() => m.result.current.hook.handleMarkSelectedComplete());
+    loseTaskPutResponses = true;
+    await run();
 
     const original = records().map((r) => r.completionId).sort();
     expect(original).toHaveLength(2);
@@ -647,17 +683,17 @@ describe('an online completion whose request fails', () => {
     expect(records().every((r) => r.status === 'active')).toBe(true);
   });
 
-  it('bulk complete with a permanent refusal queues nothing and keeps the tasks selected for another try', async () => {
+  it('bulk complete with a permanent refusal: the drain reports each refused completion and the queue is empty', async () => {
     const a = seedTask();
     const m = mountDashboard([localOf(a)]);
     act(() => m.result.current.hook.toggleSelect(a._id));
+    await act(() => m.result.current.hook.handleMarkSelectedComplete());
     refuseTaskPutsWith = 400;
 
-    await act(() => m.result.current.hook.handleMarkSelectedComplete());
+    const result = await run();
 
+    expect(result.rejected).toHaveLength(1);
     expect(await getSyncQueue()).toHaveLength(0);
-    expect(m.result.current.tasks[0].completed).toBe(false);
-    expect(setStatusError).toHaveBeenCalledWith(expect.any(String));
   });
 });
 

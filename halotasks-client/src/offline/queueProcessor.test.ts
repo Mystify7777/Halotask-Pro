@@ -85,7 +85,7 @@ describe('a 401 keeps the account’s queue', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 0, failed: 3, remaining: 3 });
+    expect(result).toMatchObject({ processed: 0, failed: 3, remaining: 3 });
     expect(stored(USER_A.id)).toEqual(original);
     // Stopped: nothing after the first refused request was attempted.
     expect(taskService.updateTask).toHaveBeenCalledTimes(1);
@@ -107,7 +107,7 @@ describe('a 401 keeps the account’s queue', () => {
 
     const result = await processSyncQueue(cb);
 
-    expect(result).toEqual({ processed: 2, failed: 2, remaining: 2 });
+    expect(result).toMatchObject({ processed: 2, failed: 2, remaining: 2 });
     expect(idsOf(USER_A.id)).toEqual(['c', 'd']);
     expect(cb.onTaskUpdated).toHaveBeenCalledTimes(2);
     expect(taskService.deleteTask).not.toHaveBeenCalled();
@@ -166,7 +166,7 @@ describe('the queue stays with the account that made it', () => {
     signIn(USER_B);
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 0, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 0, failed: 0, remaining: 0 });
     expect(taskService.createTask).not.toHaveBeenCalled();
     expect(taskService.updateTask).not.toHaveBeenCalled();
     expect(taskService.deleteTask).not.toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe('the queue stays with the account that made it', () => {
     signIn(USER_B);
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 1, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 1, failed: 0, remaining: 0 });
     expect(taskService.updateTask).toHaveBeenCalledTimes(1);
     // ...with B's own session bound to the request (account + token), not whatever is current later.
     expect(taskService.updateTask).toHaveBeenCalledWith(
@@ -204,9 +204,9 @@ describe('the queue stays with the account that made it', () => {
     const cb = callbacks();
     const result = await processSyncQueue(cb);
 
-    expect(result).toEqual({ processed: 2, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 2, failed: 0, remaining: 0 });
     expect(stored(USER_A.id)).toEqual([]);
-    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', { _id: 'srv-1' });
+    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', { _id: 'srv-1' }, { stale: false });
   });
 
   it('with both accounts holding entries, each run sends only the signed-in account’s own', async () => {
@@ -239,7 +239,7 @@ describe('the queue stays with the account that made it', () => {
 
     expect(taskService.updateTask).toHaveBeenCalledTimes(1); // a2 and a3 were NOT sent under B's token
     expect(cb.onTaskUpdated).not.toHaveBeenCalled(); // and A's result is not fed into B's screen
-    expect(result).toEqual({ processed: 1, failed: 2, remaining: 2 });
+    expect(result).toMatchObject({ processed: 1, failed: 2, remaining: 2 });
     expect(idsOf(USER_A.id)).toEqual(['a2', 'a3']); // kept for A
     expect(idsOf(USER_B.id)).toEqual(['b1']); // B's queue untouched
   });
@@ -250,7 +250,7 @@ describe('the queue stays with the account that made it', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 0, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 0, failed: 0, remaining: 0 });
     expect(taskService.updateTask).not.toHaveBeenCalled();
     expect(idsOf(USER_A.id)).toEqual(['a1']);
   });
@@ -265,7 +265,7 @@ describe('other failures (unchanged behaviour)', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 2, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 2, failed: 0, remaining: 0 });
     expect(stored(USER_A.id)).toEqual([]);
     expect(taskService.updateTask).toHaveBeenCalledTimes(2);
   });
@@ -278,7 +278,7 @@ describe('other failures (unchanged behaviour)', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 1, failed: 1, remaining: 1 });
+    expect(result).toMatchObject({ processed: 1, failed: 1, remaining: 1 });
     expect(idsOf(USER_A.id)).toEqual(['a']);
     expect(taskService.updateTask).toHaveBeenCalledTimes(2);
   });

@@ -74,8 +74,8 @@ describe('overlapping sync runs for one account', () => {
 
     const [first, second] = await Promise.all([processSyncQueue(cbs()), processSyncQueue(cbs())]);
 
-    expect(first).toEqual({ processed: 0, failed: 1, remaining: 1 });
-    expect(second).toEqual({ processed: 1, failed: 0, remaining: 0 }); // the retry succeeded
+    expect(first).toMatchObject({ processed: 0, failed: 1, remaining: 1 });
+    expect(second).toMatchObject({ processed: 1, failed: 0, remaining: 0 }); // the retry succeeded
     expect(taskService.updateTask).toHaveBeenCalledTimes(2);
   });
 
@@ -89,7 +89,7 @@ describe('overlapping sync runs for one account', () => {
 
   it('with nobody signed in a run does nothing and does not wait', async () => {
     useAuthStore.setState({ token: null, user: null });
-    expect(await processSyncQueue(cbs())).toEqual({ processed: 0, failed: 0, remaining: 0 });
+    expect(await processSyncQueue(cbs())).toMatchObject({ processed: 0, failed: 0, remaining: 0 });
   });
 
   it('different accounts are not serialized against each other', async () => {

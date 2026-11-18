@@ -94,9 +94,12 @@ export default function DashboardPage() {
   const syncBridgeRef = useRef<{
     setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
     refreshPendingQueueCount: () => Promise<number>;
+    /** Starts sending what was just committed locally (no-op offline; never two drains at once). */
+    requestSync: () => void;
   }>({
     setSyncStatus: () => undefined,
     refreshPendingQueueCount: async () => 0,
+    requestSync: () => undefined,
   });
 
   const location = useLocation();
@@ -191,6 +194,8 @@ export default function DashboardPage() {
 
   syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;
   syncBridgeRef.current.refreshPendingQueueCount = sync.refreshPendingQueueCount;
+  syncBridgeRef.current.requestSync = sync.requestSync;
+  sync.setTitleLookup((taskId) => tasksRef.current.find((task) => task._id === taskId)?.title ?? null);
 
   const reminders = useDashboardReminders({
     getTasks: () => tasksRef.current,

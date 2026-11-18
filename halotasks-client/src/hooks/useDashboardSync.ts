@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { AxiosError } from 'axios';
 import { useServerRecoveries } from '../launch/launchContext';
 import { looksLikeServerTrouble } from '../launch/serverTrouble';
-import { getCachedTasks, getLastSyncTimestamp, setCachedTasks, setLastSyncTimestamp } from '../offline/cache';
-import { processSyncQueue } from '../offline/queueProcessor';
+import { getCachedTasks, getLastSyncTimestamp, setLastSyncTimestamp } from '../offline/cache';
+import { reconcileServerTasks, settleRejectedLocalState } from '../offline/localMutations';
+import { describeRejections } from '../offline/rejections';
+import { processSyncQueue, type RejectedMutation } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
 import { taskService } from '../services/taskService';
 import type { Task } from '../types/task';
@@ -57,19 +59,26 @@ export function useDashboardSync({
     if (queued.length === 0) {
       return {
         remaining: 0,
+        rejected: [] as RejectedMutation[],
+        reconciled: false,
       };
     }
 
     setSyncStatus('syncing');
 
     const result = await processSyncQueue({
-      onTaskCreated: (localTaskId, serverTask) => {
+      onTaskCreated: (localTaskId, serverTask, { stale }) => {
         persistTasks((current) =>
-          current.map((task) =>
-            task._id === localTaskId ? { ...keepReminderIdentity(serverTask, task, localTaskId), pendingSync: false } : task,
-          ),
+          current.map((task) => {
+            if (task._id !== localTaskId) return task;
+            const adopted = keepReminderIdentity(serverTask, task, localTaskId);
+            // The user changed the task after it was sent (Issue #57): those changes are still queued, so the local copy
+            // stays as it is and only takes the server's identity, which the queue's later entries are remapped to.
+            return stale ? { ...task, _id: adopted._id, clientKey: adopted.clientKey, pendingSync: true } : { ...adopted, pendingSync: false };
+          }),
         );
       },
+      // Stale answers never reach this callback: the processor holds them back while newer local work for the task exists.
       onTaskUpdated: (taskId, serverTask) => {
         persistTasks((current) =>
           current.map((task) => (task._id === taskId ? { ...keepReminderIdentity(serverTask, task), pendingSync: false } : task)),
@@ -93,18 +102,71 @@ export function useDashboardSync({
       setSyncStatus('synced');
     }
 
-    return result;
+    // True when the server's state was already read back because of a refusal: callers must not fetch it a second time.
+    const reconciled = result.rejected.length > 0;
+    if (reconciled) await reportRejections(result.rejected);
+
+    return { ...result, reconciled };
+  };
+
+  /**
+   * The server refused changes that were already shown (Issue #57). They are not pending any more and they were not saved,
+   * so: say so, stop showing those tasks as pending, and read the server's state back ONCE (no retry loop; whether to retry
+   * is not decided here). Nothing about the refusal is persisted: the message is this session's.
+   */
+  const reportRejections = async (rejected: RejectedMutation[]) => {
+    const titleOf = (taskId: string) => latestTitleRef.current(taskId);
+    setStatusError(describeRejections(rejected, titleOf));
+    try {
+      setTasks(await settleRejectedLocalState());
+      await fetchFreshTasks();
+    } catch {
+      // Offline or the server is down: the tasks no longer claim to be pending, and the message above stays.
+    }
+  };
+
+  // Titles of tasks as the app last showed them, for a rejection whose queue entry carried none (set by the page's list).
+  const latestTitleRef = useRef<(taskId: string) => string | null>(() => null);
+
+  /**
+   * Starts a drain of the queue for work that was just committed locally (Issue #57). Never blocks the caller and never
+   * runs two drains at once: a request made while one is running makes it go round once more when it finishes, so the
+   * newest commit is always sent without a second concurrent run. Offline, it does nothing: the entry waits.
+   */
+  const drainRef = useRef({ running: false, again: false });
+  const requestSync = () => {
+    if (!isOnlineRef.current) return;
+    const drain = drainRef.current;
+    if (drain.running) {
+      drain.again = true;
+      return;
+    }
+    drain.running = true;
+    void (async () => {
+      try {
+        do {
+          drain.again = false;
+          try {
+            await processPendingQueue();
+          } catch {
+            setSyncStatus('errors-pending'); // the entries are still queued; #58 owns what this state means
+          }
+        } while (drain.again && isOnlineRef.current);
+      } finally {
+        drain.running = false;
+      }
+    })();
   };
 
   const fetchFreshTasks = async () => {
     setSyncStatus('syncing');
 
     const response = await taskService.getTasks();
-    // The server does not know the local id a task was created under; carry it over from the cached copy.
-    const cachedById = new Map((await getCachedTasks()).map((task) => [task._id, task]));
-    const freshTasks = response.tasks.map((task) => ({ ...keepReminderIdentity(task, cachedById.get(task._id)), pendingSync: false }));
-    setTasks(freshTasks);
-    await setCachedTasks(freshTasks);
+    // Read, merge and store happen in ONE transaction (Issue #57): a task with work still queued keeps its local copy, so a
+    // list fetched while the user was editing can never wipe out a change they already saw. The server does not know the
+    // local id a task was created under; keepReminderIdentity carries it over from the stored copy.
+    const merged = await reconcileServerTasks(response.tasks, (serverTask, local) => keepReminderIdentity(serverTask, local));
+    setTasks(merged);
 
     const syncedAt = new Date().toISOString();
     await setLastSyncTimestamp(syncedAt);
@@ -146,7 +208,7 @@ export function useDashboardSync({
         return;
       }
 
-      await fetchFreshTasks();
+      if (!queueResult.reconciled) await fetchFreshTasks();
 
       // The calm "server unreachable" note was ours; once a load succeeds it is no longer true.
       if (unreachableNoticeRef.current) {
@@ -213,8 +275,8 @@ export function useDashboardSync({
         return;
       }
 
-      await fetchFreshTasks();
-      setStatusInfo('Pending sync actions completed successfully.');
+      if (!queueResult.reconciled) await fetchFreshTasks();
+      if (queueResult.rejected.length === 0) setStatusInfo('Pending sync actions completed successfully.');
     } catch {
       const remaining = await refreshPendingQueueCount();
       setSyncStatus(remaining > 0 ? 'errors-pending' : 'cached');
@@ -231,6 +293,10 @@ export function useDashboardSync({
     pendingQueueCount,
     retryingSync,
     refreshPendingQueueCount,
+    requestSync,
+    setTitleLookup: (lookup: (taskId: string) => string | null) => {
+      latestTitleRef.current = lookup;
+    },
     handleRetrySync,
   };
 }

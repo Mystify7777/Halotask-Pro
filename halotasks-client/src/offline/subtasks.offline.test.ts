@@ -95,7 +95,7 @@ describe('the processor sends the checklist untouched', () => {
     await processSyncQueue(cb);
 
     expect(vi.mocked(taskService.createTask).mock.calls[0][0]).toEqual({ title: 'Trip', priority: 'low', subtasks });
-    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', expect.objectContaining({ _id: 'srv-1', subtasks }));
+    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1', expect.objectContaining({ _id: 'srv-1', subtasks }), { stale: false });
   });
 
   it('a queued update is sent with the whole list and no `completed` key', async () => {

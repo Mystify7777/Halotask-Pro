@@ -9,8 +9,14 @@ vi.mock('../offline/cache', () => ({
   setLastSyncTimestamp: vi.fn(async () => undefined),
 }));
 
+vi.mock('../offline/localMutations', () => ({
+  // The real merge runs in one IndexedDB transaction (localMutations.test.ts); here the server's list is what is adopted.
+  reconcileServerTasks: vi.fn(async (fresh: unknown[]) => fresh),
+  settleRejectedLocalState: vi.fn(async () => []),
+}));
+
 vi.mock('../offline/queueProcessor', () => ({
-  processSyncQueue: vi.fn(async () => ({ processed: 0, failed: 0, remaining: 0 })),
+  processSyncQueue: vi.fn(async () => ({ processed: 0, failed: 0, remaining: 0, rejected: [] })),
 }));
 
 vi.mock('../offline/syncQueue', () => ({

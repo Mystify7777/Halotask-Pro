@@ -175,7 +175,7 @@ describe('the account switches between the ownership check and the request', () 
 
       expect(sent).toEqual([]); // not sent at all — in particular not as B
       expect(sent.some((r) => r.authorization === `Bearer ${TOKEN_B}`)).toBe(false);
-      expect(result).toEqual({ processed: 0, failed: 2, remaining: 2 });
+      expect(result).toMatchObject({ processed: 0, failed: 2, remaining: 2 });
       expect(idsOf(USER_A.id)).toEqual(['k1', 'k2']); // all kept for A
       expect(idsOf(USER_B.id)).toEqual(['b1']); // B's queue untouched
       expect(cb[callback]).not.toHaveBeenCalled();
@@ -192,7 +192,7 @@ describe('the account switches between the ownership check and the request', () 
     signIn(USER_A);
     const result = await processSyncQueue(callbacks());
 
-    expect(result).toEqual({ processed: 2, failed: 0, remaining: 0 });
+    expect(result).toMatchObject({ processed: 2, failed: 0, remaining: 0 });
     expect(sent.map((r) => r.authorization)).toEqual([`Bearer ${TOKEN_A}`, `Bearer ${TOKEN_A}`]);
   });
 
@@ -249,7 +249,7 @@ describe('the account switches while a request is in flight', () => {
       const result = await processSyncQueue(cb);
 
       expect(sent).toEqual([{ method, url, authorization: `Bearer ${TOKEN_A}` }]);
-      expect(result).toEqual({ processed: 1, failed: 2, remaining: 2 });
+      expect(result).toMatchObject({ processed: 1, failed: 2, remaining: 2 });
       expect(idsOf(USER_A.id)).toEqual(['k2', 'k3']);
       expect(idsOf(USER_B.id)).toEqual(['b1']);
       expect(cb[callback]).not.toHaveBeenCalled(); // the result belongs to A, who is no longer on screen

@@ -1,5 +1,7 @@
 import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
+import { applyActionToQueue, newQueueId, type QueueActionInput } from './queueActions';
+import { resetStoreLock, withStoreLock } from './storeLock';
 
 /**
  * `completion` (Issue #47, Phase 2E) is one completion event: the user completed or re-opened a task. It is its own entry
@@ -32,26 +34,16 @@ const SYNC_QUEUE_KEY_PREFIX = 'sync_queue:';
 // or handed to whoever logs in next; it is removed once. Same rule as history (Issue #31).
 const LEGACY_SYNC_QUEUE_KEY = 'sync_queue';
 
-const keyFor = (userId: string): string => `${SYNC_QUEUE_KEY_PREFIX}${userId}`;
+export const queueKeyFor = (userId: string): string => `${SYNC_QUEUE_KEY_PREFIX}${userId}`;
+const keyFor = queueKeyFor;
 
-const getId = () =>
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-let operationChain: Promise<unknown> = Promise.resolve();
-
-function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
-  const result = operationChain.then(fn);
-  operationChain = result.catch(() => {});
-  return result;
-}
+const withQueueLock = withStoreLock;
 
 /** The account whose queue the app is operating on right now; null when nobody is signed in. */
 export const getCurrentQueueOwner = (): string | null => useAuthStore.getState().user?.id || null;
 
 let legacyPurged = false;
-const purgeLegacySyncQueueOnce = async (): Promise<void> => {
+export const purgeLegacySyncQueueOnce = async (): Promise<void> => {
   if (legacyPurged) return;
   legacyPurged = true;
   try {
@@ -96,13 +88,6 @@ export type SettledEntry =
   | { outcome: 'sent'; payload: QueuePayload | undefined; serverTaskId: string | null }
   /** Permanently refused by the server: dropped, never retried (the pre-existing rule for 4xx answers). */
   | { outcome: 'discarded' };
-
-/** Identity of a completion entry for de-duplication: `kind:completionId`. null when it names no completion (an id-less revoke). */
-const completionKeyOf = (entry: { payload?: QueuePayload }): string | null => {
-  const kind = entry.payload?.kind;
-  const id = entry.payload?.completionId;
-  return typeof kind === 'string' && typeof id === 'string' ? `${kind}:${id}` : null;
-};
 
 const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
@@ -160,7 +145,7 @@ export const settleSyncQueue = (
 
     for (const [entryId, serverTaskId] of sentCreates) {
       if (!stillQueued.has(entryId)) {
-        next.push({ id: getId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now() });
+        next.push({ id: newQueueId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now() });
       }
     }
 
@@ -171,12 +156,10 @@ export const settleSyncQueue = (
 /** resetSyncQueueState — for testing only. */
 export const resetSyncQueueState = (): void => {
   legacyPurged = false;
-  operationChain = Promise.resolve();
+  resetStoreLock();
 };
 
-export const enqueueSyncAction = (
-  action: Omit<SyncQueueRecord, 'id' | 'createdAt'>,
-): Promise<SyncQueueRecord[]> => {
+export const enqueueSyncAction = (action: QueueActionInput): Promise<SyncQueueRecord[]> => {
   // The action belongs to whoever is signed in when it is made — not to whoever is signed in by the
   // time the lock frees up.
   const ownerId = getCurrentQueueOwner();
@@ -186,86 +169,7 @@ export const enqueueSyncAction = (
 
   return withQueueLock(async () => {
     const queue = await getSyncQueue(ownerId);
-
-    const nextAction: SyncQueueRecord = {
-      ...action,
-      id: getId(),
-      createdAt: Date.now(),
-    };
-
-    if (nextAction.type === 'completion') {
-      // Idempotent enqueue: the same event (kind + completionId) is stored once, wherever it already is in the queue.
-      const key = completionKeyOf(nextAction);
-      if (key !== null && queue.some((item) => item.type === 'completion' && completionKeyOf(item) === key)) {
-        return queue;
-      }
-      const nextQueue = [...queue, nextAction];
-      await setSyncQueue(nextQueue, ownerId);
-      return nextQueue;
-    }
-
-    if (nextAction.type === 'update' && nextAction.taskId) {
-      const createIndex = queue.findIndex((item) => item.type === 'create' && item.taskId === nextAction.taskId);
-      if (createIndex >= 0) {
-        queue[createIndex] = {
-          ...queue[createIndex],
-          payload: {
-            ...(queue[createIndex].payload ?? {}),
-            ...(nextAction.payload ?? {}),
-          },
-          createdAt: nextAction.createdAt,
-        };
-
-        await setSyncQueue(queue, ownerId);
-        return queue;
-      }
-
-      const updateIndex = queue.findIndex((item) => item.type === 'update' && item.taskId === nextAction.taskId);
-      if (updateIndex >= 0) {
-        queue[updateIndex] = {
-          ...queue[updateIndex],
-          payload: {
-            ...(queue[updateIndex].payload ?? {}),
-            ...(nextAction.payload ?? {}),
-          },
-          createdAt: nextAction.createdAt,
-        };
-
-        await setSyncQueue(queue, ownerId);
-        return queue;
-      }
-    }
-
-    if (nextAction.type === 'delete' && nextAction.taskId) {
-      const withoutRelatedUpdates = queue.filter(
-        (item) => !(item.type === 'update' && item.taskId === nextAction.taskId),
-      );
-
-      const createIndex = withoutRelatedUpdates.findIndex(
-        (item) => item.type === 'create' && item.taskId === nextAction.taskId,
-      );
-
-      if (createIndex >= 0) {
-        withoutRelatedUpdates.splice(createIndex, 1);
-        await setSyncQueue(withoutRelatedUpdates, ownerId);
-        return withoutRelatedUpdates;
-      }
-
-      const hasDeleteAlready = withoutRelatedUpdates.some(
-        (item) => item.type === 'delete' && item.taskId === nextAction.taskId,
-      );
-
-      if (hasDeleteAlready) {
-        await setSyncQueue(withoutRelatedUpdates, ownerId);
-        return withoutRelatedUpdates;
-      }
-
-      const nextQueue = [...withoutRelatedUpdates, nextAction];
-      await setSyncQueue(nextQueue, ownerId);
-      return nextQueue;
-    }
-
-    const nextQueue = [...queue, nextAction];
+    const nextQueue = applyActionToQueue(queue, action);
     await setSyncQueue(nextQueue, ownerId);
     return nextQueue;
   });

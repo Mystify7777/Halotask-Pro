@@ -1318,3 +1318,11 @@ No TypeScript errors or warnings.
 - `.logs` — Machine-readable JSON changelog with full metadata
 - `CHANGELOG_GUIDE.md` — Complete documentation and best practices
 - `.githooks/post-commit` — Optional git hook for auto-logging commits
+
+### November 2026
+
+#### Local-first task mutations with optimistic UI (Issue #57)
+
+**2026-11-18 · Feature · completed · Priority: high**
+
+Issue #57. Every dashboard task mutation (create, edit, complete/re-open, delete, subtasks, clear completed, mark selected complete, delete selected) now validates locally, commits the task list AND the sync-queue entries in ONE IndexedDB transaction (read, derive and write all inside it), renders only after that commit resolves, then drains the queue in the background when online (coalesced; never two drains at once). The old server-first online branches are gone. Queue merge policy and completion-event semantics are unchanged (the policy moved to a pure applyActionToQueue); per-task ordering is preserved. Other cache writers (sync adoption, AI-created tasks) run on the stored list in the same transaction model, and a fresh server fetch no longer overwrites tasks with queued work. A fresh server list that omits a task with queued work no longer erases it. A server answer that is stale by the time it arrives is not adopted. A permanently refused entry is now reported (Not saved: the server rejected ...), its task stops showing as pending, and the server is read back once; nothing is persisted (#58). Out of scope: Insights toggle, AI task creation, Syncing badge, coalescing (#59). Tested locally on the real idb layer over fake-indexeddb (new dev dependency); client suite 87 files / 1789 tests, tsc clean, vite build ok; real-Chromium IndexedDB check run once (atomic rollback, two tabs, reload). Not proven: crash durability, Safari/Firefox, real server round trip.
