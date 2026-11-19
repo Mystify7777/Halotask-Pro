@@ -8,6 +8,22 @@ export type TaskReadFilter = {
   search?: string;
 };
 
+const MAX_PAGE_SIZE = 100;
+const MAX_SUMMARY_TASKS = 5;
+
+type TaskFilterDocument = {
+  userId: mongoose.Types.ObjectId;
+  title: string;
+  description: string;
+  completed: boolean;
+  priority: 'low' | 'medium' | 'high';
+  tags: string[];
+  dueDate?: Date;
+  updatedAt?: Date;
+};
+
+type TaskFilter = mongoose.QueryFilter<TaskFilterDocument>;
+
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const taskProjection = {
@@ -28,15 +44,15 @@ const taskProjection = {
   updatedAt: 1,
 };
 
-const baseFilter = (userId: string): Record<string, unknown> => {
+const baseFilter = (userId: string): TaskFilter => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid authenticated user id');
   }
-  return { userId };
+  return { userId: new mongoose.Types.ObjectId(userId) };
 };
 
-const buildFilter = (userId: string, filter: TaskReadFilter = {}) => {
-  const query: Record<string, unknown> = baseFilter(userId);
+const buildFilter = (userId: string, filter: TaskReadFilter = {}): TaskFilter => {
+  const query: TaskFilter = baseFilter(userId);
 
   if (filter.completed !== undefined) query.completed = filter.completed;
   if (filter.priority !== undefined) query.priority = filter.priority;
@@ -153,7 +169,7 @@ export const getProjectSummaryForUser = async (userId: string) => {
       completed: false,
       dueDate: { $lt: now },
     }),
-    Task.find(filter).sort({ updatedAt: -1 }).limit(5).select('_id title completed priority dueDate updatedAt').lean(),
+    Task.find(filter).sort({ updatedAt: -1 }).limit(MAX_SUMMARY_TASKS).select('_id title completed priority dueDate updatedAt').lean(),
   ]);
 
   const total = counts.reduce((sum, entry) => sum + entry.count, 0);
