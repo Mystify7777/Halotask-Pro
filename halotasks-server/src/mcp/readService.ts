@@ -9,7 +9,6 @@ export type TaskReadFilter = {
 };
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const escapeRegex = (value: string): string => value.replace(/[.*+?^$\\{}()|[\\]\\]/g, '\\$&');
 
 const taskProjection = {
   _id: 1,

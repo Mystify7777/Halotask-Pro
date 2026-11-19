@@ -17,6 +17,18 @@
   ],
   "entries": [
     {
+      "date": "2026-11-19",
+      "category": "Bugfix",
+      "title": "Hardened MCP task search regex handling and synchronized MCP dependencies",
+      "description": "Removed the duplicate regex escaping helper from the MCP read service and synchronized the server lockfile with the MCP node/server and Zod dependencies used by the Phase 1 MCP integration.",
+      "files": [
+        "halotasks-server/src/mcp/readService.ts",
+        "halotasks-server/package-lock.json"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-11-16",
       "category": "Bugfix",
       "title": "Growth Tree: an offline completion keeps the day the user acted (Issue #24, G1)",
@@ -1834,5 +1846,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-16T05:59:56.694Z"
+  "lastUpdated": "2026-11-19T18:29:41.417Z"
 }
