@@ -1,158 +1,144 @@
-import { act, renderHook } from '@testing-library/react';
-import { useState } from 'react';
+import { act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeTask } from '../test/taskFactory';
-import type { Task } from '../types/task';
+import { mountTasks, queuedEntries, storedTasks } from '../test/dashboardTasksHarness';
 
-// Issue #47, Phase 2E: what the dashboard writers send and queue when a task is completed or re-opened. The HTTP service, the
-// queue and the cache are doubles: this proves what the hook builds, that ONE event is made per transition, and that it is
-// the same event whether it goes out now or waits in the queue. The delivery itself is proven in completionPipeline.test.ts.
+// Issue #47, Phase 2E + Issue #57: what the dashboard writers commit when a task is completed or re-opened. Every
+// completion is local-first: ONE `completion` entry is committed together with the task, whether the device is online
+// (the entry is then sent by the background drain) or offline (it waits). The offline layer is real (fake-indexeddb); only
+// the drain (`requestSync`) is a double. Delivery of the entry is proven in completionPipeline.test.ts.
 
-vi.mock('../services/taskService', () => ({
-  taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn() },
-}));
-vi.mock('../offline/syncQueue', () => ({ enqueueSyncAction: vi.fn(async () => []) }));
-vi.mock('../offline/cache', () => ({ setCachedTasks: vi.fn(async () => undefined) }));
 vi.mock('../offline/history', () => ({ updateTodaySnapshot: vi.fn(async () => undefined) }));
 
-import { enqueueSyncAction } from '../offline/syncQueue';
-import { taskService } from '../services/taskService';
-import { useDashboardTasks } from './useDashboardTasks';
+beforeEach(() => vi.clearAllMocks());
 
-const growth = vi.fn();
-const preview = vi.fn();
-
-const mount = (initial: Task[], isOnline: boolean) =>
-  renderHook(() => {
-    const [tasks, setTasks] = useState<Task[]>(initial);
-    const hook = useDashboardTasks({
-      tasks,
-      setTasks,
-      isOnline,
-      syncBridgeRef: { current: { setSyncStatus: vi.fn(), refreshPendingQueueCount: vi.fn(async () => 0) } },
-      previewGrowthForCompletion: preview,
-      applyServerGrowth: growth,
-      setStatusError: vi.fn(),
-      setStatusInfo: vi.fn(),
-    });
-    return { hook, tasks };
-  });
-
-const queued = () => vi.mocked(enqueueSyncAction).mock.calls.map((c) => c[0]);
-const sentUpdates = () => vi.mocked(taskService.updateTask).mock.calls;
-
-beforeEach(() => {
-  vi.mocked(taskService.updateTask).mockReset();
-  vi.mocked(enqueueSyncAction).mockReset().mockResolvedValue([]);
-  growth.mockClear();
-  preview.mockClear();
-  vi.mocked(taskService.updateTask).mockImplementation(async (id, payload) => ({
-    task: makeTask({ _id: id, completed: payload.completed === true, completionId: payload.completed ? (payload.completionEvent as { completionId: string }).completionId : 'c-old' }),
-  }));
-});
+type Payload = { kind: string; completionId?: string };
 
 describe('completing from the dashboard checkbox', () => {
-  it('online: ONE task write carries the completion event, and nothing is queued', async () => {
+  it('online: ONE completion entry is committed with the task, the drain is kicked, and nothing is sent from here', async () => {
     const task = makeTask({ _id: 'srv-1', completed: false });
-    const m = mount([task], true);
+    const m = await mountTasks([task], true);
 
     await act(() => m.result.current.hook.handleToggleTask(task));
 
-    expect(sentUpdates()).toHaveLength(1);
-    expect(sentUpdates()[0][1]).toEqual({
-      completed: true,
-      completionEvent: { completionId: expect.any(String), completedAt: expect.any(String), utcOffsetMinutes: expect.any(Number) },
-    });
-    expect(queued()).toEqual([]);
-    expect(m.result.current.tasks[0]).toMatchObject({ completed: true, completionId: (sentUpdates()[0][1].completionEvent as { completionId: string }).completionId });
+    const entries = await queuedEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ type: 'completion', taskId: 'srv-1', payload: { kind: 'complete', completionId: expect.any(String), completedAt: expect.any(String), utcOffsetMinutes: expect.any(Number) } });
+    expect(m.bridge.requestSync).toHaveBeenCalledTimes(1);
+    const completionId = (entries[0].payload as Payload).completionId;
+    expect(m.result.current.tasks[0]).toMatchObject({ completed: true, pendingSync: true, completionId });
+    expect((await storedTasks())[0]).toMatchObject({ completed: true, completionId }); // committed, not just rendered
   });
 
-  it('offline: ONE completion entry is queued, no request is sent, and the local task shows it completed and pending', async () => {
+  it('offline: the same entry is committed, the drain is NOT kicked, and the preview growth is shown', async () => {
     const task = makeTask({ _id: 'srv-1', completed: false });
-    const m = mount([task], false);
+    const m = await mountTasks([task], false);
 
     await act(() => m.result.current.hook.handleToggleTask(task));
 
-    expect(sentUpdates()).toEqual([]);
-    expect(queued()).toHaveLength(1);
-    expect(queued()[0]).toMatchObject({ type: 'completion', taskId: 'srv-1', payload: { kind: 'complete', completionId: expect.any(String), completedAt: expect.any(String), utcOffsetMinutes: expect.any(Number) } });
-    expect(m.result.current.tasks[0]).toMatchObject({ completed: true, pendingSync: true, completionId: (queued()[0].payload as { completionId: string }).completionId });
-    expect(preview).toHaveBeenCalledWith('srv-1');
+    expect(await queuedEntries()).toHaveLength(1);
+    expect(m.bridge.requestSync).not.toHaveBeenCalled();
+    expect(m.result.current.tasks[0]).toMatchObject({ completed: true, pendingSync: true });
+    expect(m.preview).toHaveBeenCalledWith('srv-1');
   });
 
-  it('a task that has not reached the server yet is queued even while online', async () => {
+  it('a task that has not reached the server yet is committed against its local id', async () => {
     const task = makeTask({ _id: 'local-9', completed: false });
-    const m = mount([task], true);
-
+    const m = await mountTasks([task], true);
     await act(() => m.result.current.hook.handleToggleTask(task));
-
-    expect(sentUpdates()).toEqual([]);
-    expect(queued()[0]).toMatchObject({ type: 'completion', taskId: 'local-9' });
+    expect((await queuedEntries())[0]).toMatchObject({ type: 'completion', taskId: 'local-9' });
   });
 
-  it('re-opening names the completion the task holds, online and offline', async () => {
+  it('re-opening names the completion the task holds, online and offline, and earns no Growth', async () => {
     const task = makeTask({ _id: 'srv-1', completed: true, completionId: 'c-held' });
-
-    const online = mount([task], true);
-    await act(() => online.result.current.hook.handleToggleTask(task));
-    expect(sentUpdates()[0][1]).toEqual({ completed: false, completionEvent: { completionId: 'c-held', revokedAt: expect.any(String) } });
-
-    const offline = mount([task], false);
-    await act(() => offline.result.current.hook.handleToggleTask(task));
-    expect(queued()[0]).toMatchObject({ type: 'completion', payload: { kind: 'revoke', completionId: 'c-held' } });
-    expect(preview).not.toHaveBeenCalled(); // no Growth for a re-open
+    for (const online of [true, false]) {
+      const m = await mountTasks([task], online);
+      await act(() => m.result.current.hook.handleToggleTask(task));
+      expect((await queuedEntries())[0]).toMatchObject({ type: 'completion', payload: { kind: 'revoke', completionId: 'c-held' } });
+      expect(m.preview).not.toHaveBeenCalled();
+    }
   });
 
-  it('is built from the LATEST task, not the stale object a render captured: a double tap offline is a completion then a revocation of that same completion', async () => {
+  it('is built from the STORED task, not the stale object a render captured: a double tap is a completion then a revocation of that same completion', async () => {
     const stale = makeTask({ _id: 'srv-1', completed: false });
-    const m = mount([stale], false);
+    const m = await mountTasks([stale], false);
 
     await act(async () => {
       await m.result.current.hook.handleToggleTask(stale);
       await m.result.current.hook.handleToggleTask(stale); // the same stale object again
     });
 
-    const [first, second] = queued().map((q) => q.payload as { kind: string; completionId?: string });
+    const [first, second] = (await queuedEntries()).map((q) => q.payload as Payload);
     expect(first.kind).toBe('complete');
     expect(second).toMatchObject({ kind: 'revoke', completionId: first.completionId });
   });
 
-  it('a storage failure while queueing leaves the task as it was (no optimistic flip without an event behind it)', async () => {
-    vi.mocked(enqueueSyncAction).mockRejectedValue(new Error('quota'));
+  it('two taps fired in the same tick (not awaited one after the other) are both kept, in order', async () => {
     const task = makeTask({ _id: 'srv-1', completed: false });
-    const m = mount([task], false);
+    const m = await mountTasks([task], false);
+
+    await act(async () => {
+      await Promise.all([m.result.current.hook.handleToggleTask(task), m.result.current.hook.handleToggleTask(task)]);
+    });
+
+    expect((await queuedEntries()).map((q) => (q.payload as Payload).kind)).toEqual(['complete', 'revoke']);
+    expect((await storedTasks())[0].completed).toBe(false);
+  });
+
+  it('a storage failure leaves the task as it was and says so (no optimistic flip without an event behind it)', async () => {
+    const task = makeTask({ _id: 'srv-1', completed: false });
+    const m = await mountTasks([task], false);
+    const { offlineDb } = await import('../offline/db');
+    const spy = vi.spyOn(offlineDb, 'transaction').mockRejectedValueOnce(new Error('quota'));
 
     await act(() => m.result.current.hook.handleToggleTask(task));
+    spy.mockRestore();
 
     expect(m.result.current.tasks[0].completed).toBe(false);
+    expect(await queuedEntries()).toEqual([]);
+    expect(m.setStatusError).toHaveBeenCalledWith(expect.stringMatching(/storage unavailable/));
+  });
+
+  it('a task that no longer exists is refused with a message, and nothing is written', async () => {
+    const task = makeTask({ _id: 'srv-1', completed: false });
+    const m = await mountTasks([], false);
+    await act(() => m.result.current.hook.handleToggleTask(task));
+    expect(await queuedEntries()).toEqual([]);
+    expect(m.setStatusError).toHaveBeenCalledWith(expect.stringMatching(/no longer exists/i));
+  });
+
+  it('completing an already-completed task is NOT refused: completion semantics are the existing ones (it re-opens)', async () => {
+    const task = makeTask({ _id: 'srv-1', completed: true, completionId: 'c1' });
+    const m = await mountTasks([task], false);
+    await act(() => m.result.current.hook.handleToggleTask(task));
+    expect(m.setStatusError).not.toHaveBeenCalledWith(expect.any(String));
+    expect((await queuedEntries())).toHaveLength(1);
   });
 });
 
 describe('bulk "mark complete"', () => {
-  const select = async (m: ReturnType<typeof mount>, ids: string[]) => {
+  const select = async (m: Awaited<ReturnType<typeof mountTasks>>, ids: string[]) => {
     for (const id of ids) act(() => m.result.current.hook.toggleSelect(id));
   };
 
-  it('online: one write and one distinct event per task', async () => {
-    const tasks = [makeTask({ _id: 'srv-1' }), makeTask({ _id: 'srv-2' })];
-    const m = mount(tasks, true);
+  it.each([true, false])('online=%s: one completion entry and one distinct event per task, committed together', async (online) => {
+    const m = await mountTasks([makeTask({ _id: 'srv-1' }), makeTask({ _id: 'srv-2' })], online);
     await select(m, ['srv-1', 'srv-2']);
 
     await act(() => m.result.current.hook.handleMarkSelectedComplete());
 
-    expect(sentUpdates().map((c) => c[0]).sort()).toEqual(['srv-1', 'srv-2']);
-    const ids = sentUpdates().map((c) => (c[1].completionEvent as { completionId: string }).completionId);
-    expect(new Set(ids).size).toBe(2);
+    const entries = await queuedEntries();
+    expect(entries.map((q) => [q.type, q.taskId])).toEqual([['completion', 'srv-1'], ['completion', 'srv-2']]);
+    expect(new Set(entries.map((q) => (q.payload as Payload).completionId)).size).toBe(2);
+    expect(m.result.current.tasks.every((t) => t.completed && t.pendingSync)).toBe(true);
+    expect((await storedTasks()).every((t) => t.completed)).toBe(true);
+    expect(m.bridge.requestSync).toHaveBeenCalledTimes(online ? 1 : 0);
   });
 
-  it('offline: one completion entry per task', async () => {
-    const tasks = [makeTask({ _id: 'srv-1' }), makeTask({ _id: 'srv-2' })];
-    const m = mount(tasks, false);
+  it('skips a selected task that is already completed in the stored list: no second event for it', async () => {
+    const m = await mountTasks([makeTask({ _id: 'srv-1' }), makeTask({ _id: 'srv-2', completed: true, completionId: 'c2' })], false);
     await select(m, ['srv-1', 'srv-2']);
-
     await act(() => m.result.current.hook.handleMarkSelectedComplete());
-
-    expect(queued().map((q) => [q.type, q.taskId])).toEqual([['completion', 'srv-1'], ['completion', 'srv-2']]);
-    expect(m.result.current.tasks.every((t) => t.completed && t.pendingSync)).toBe(true);
+    expect((await queuedEntries()).map((q) => q.taskId)).toEqual(['srv-1']);
   });
 });

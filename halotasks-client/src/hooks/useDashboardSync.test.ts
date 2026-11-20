@@ -9,8 +9,14 @@ vi.mock('../offline/cache', () => ({
   setLastSyncTimestamp: vi.fn(async () => undefined),
 }));
 
+vi.mock('../offline/localMutations', () => ({
+  // The real merge runs in one IndexedDB transaction (localMutations.test.ts); here the server's list is what is adopted.
+  reconcileServerTasks: vi.fn(async (fresh: unknown[]) => fresh),
+  settleRejectedLocalState: vi.fn(async () => []),
+}));
+
 vi.mock('../offline/queueProcessor', () => ({
-  processSyncQueue: vi.fn(async () => ({ processed: 0, failed: 0, remaining: 0 })),
+  processSyncQueue: vi.fn(async () => ({ processed: 0, failed: 0, remaining: 0, rejected: [] })),
 }));
 
 vi.mock('../offline/syncQueue', () => ({
@@ -60,7 +66,7 @@ describe('useDashboardSync owns no cold-start overlay signal (the game is only e
     vi.useRealTimers();
   });
 
-  it('a request that takes a long time changes nothing but the sync status: no "waking" state is exposed, and the load still completes', async () => {
+  it('a request that takes a long time changes nothing the person is told as fact: no "waking" state is exposed, and the load still completes', async () => {
     let resolveTasks: ((value: Awaited<ReturnType<typeof taskService.getTasks>>) => void) | undefined;
     vi.mocked(taskService.getTasks).mockImplementation(
       () =>
@@ -75,14 +81,14 @@ describe('useDashboardSync owns no cold-start overlay signal (the game is only e
     await act(async () => {
       vi.advanceTimersByTime(60_000);
     });
-    expect(result.current.syncStatus).toBe('syncing');
+    expect(result.current.syncState.kind).toBe('unverified'); // nothing synchronized yet, so nothing is claimed
     expect('coldStartPhase' in result.current).toBe(false);
 
     await act(async () => {
       resolveTasks?.({ tasks: [], page: 1, limit: 0, hasMore: false });
     });
     await flushMicrotasks();
-    expect(result.current.syncStatus).toBe('synced');
+    expect(result.current.syncState.kind).toBe('synced'); // only after the list was read and the queue was empty
     expect('coldStartPhase' in result.current).toBe(false);
   });
 
@@ -140,7 +146,7 @@ describe('useDashboardSync: an unreachable server is a calm note, not an alarm (
     await flushMicrotasks(8);
     expect(setStatusInfo).toHaveBeenCalledWith("Showing what's saved on this device. Updates will appear when the server is back.");
     expect(setStatusError).not.toHaveBeenCalledWith(expect.stringMatching(/Unable/));
-    expect(result.current.syncStatus).toBe('cached');
+    expect(result.current.syncState.kind).toBe('unverified'); // the saved list is shown; no synchronization is claimed
   });
 
   it('a gateway answer (503) is the same calm note', async () => {

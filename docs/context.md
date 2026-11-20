@@ -352,7 +352,7 @@ A task can carry a small checklist. Phase 1 is the server contract only: nothing
 Phase 2 teaches the client's data layer about the server's checklist. There is still no UI: nothing renders, edits or creates subtasks yet (phase 3), so no user-visible behavior changes.
 
 - **Types and helpers.** `Subtask` and an optional `subtasks` on `Task` and `TaskCreatePayload` (so also on updates) in `types/task.ts`. `utils/subtasks.ts` is the one place that knows how to read and change a checklist: `getSubtasks` (a missing or non-array value, such as a task cached before the field existed, is `[]`), `subtaskProgress` (done and total, derived, never stored), `normalizeSubtasks` + `validateSubtasks` for the future save path (trim, drop blank or malformed entries, keep ids exactly, never generate or repair an id, then refuse more than 20, duplicate ids or titles over 200 characters), `withSubtaskCompleted`, `newSubtaskId` (same source as the sync queue's ids) and `subtaskCopyLines`.
-- **`toggleSubtask(taskId, subtaskId)`** (in `useDashboardTasks`). It reads the latest tasks when called (a ref advanced synchronously, so two taps in the same tick build on each other), sets that one subtask, and sends or queues the WHOLE next list as `{ subtasks }` only: it never sends `completed`, so it cannot complete the parent or award XP. An unknown task or subtask id does nothing. Online it is optimistic. Online, a failed request undoes only its own tap (a per-subtask tap counter), never a newer one. Offline it updates the checklist locally at once and queues an update carrying the whole list as it was at that tap, and marks the task pending only AFTER that queue write succeeded, so a later queued list already contains earlier taps. Because of that a failed queue write cannot be undone tap by tap: while any write for the task is in flight nothing is rolled back, and the LAST write to settle puts the CHECKLIST where the queue really is (the last list that was queued, or the list from before the first write if none was), and only if nothing else has changed the checklist meanwhile. `pendingSync` is owned by whoever successfully queued work for the task (this write, a task edit, a sync), so a failed toggle never set it and a rollback never touches it: a concurrent edit's pending flag, or a sync that cleared it, is left exactly as it is. Bookkeeping for both paths exists only while a write is in flight, so it does not grow over a long session. A server response that arrives after a newer local tap keeps the newer local list and still adopts the rest of the server task; this guard is scoped to the checklist. The sync-queue path (`onTaskUpdated`) is unchanged.
+- **`toggleSubtask(taskId, subtaskId)`** (in `useDashboardTasks`). One local-first commit (see "Local-First Task Mutations (Issue #57)"): inside the transaction it reads the STORED task, flips that one subtask and queues the WHOLE next list as `{ subtasks }` only: it never sends `completed`, so it cannot complete the parent or award XP. An unknown task or subtask id does nothing (nothing is queued). Two taps in the same tick both apply, the second built on the stored result of the first. There is no hand-built rollback any more: a failed commit stores nothing and shows nothing. A server answer that is out of date by the time it arrives is not adopted (the processor's stale check, below).
 - **Search and copy.** The existing search predicate also matches subtask TITLES (never ids or completion state). Copy-selected adds the trimmed description and one `  [x] title` / `  [ ] title` line per subtask; a task with neither copies exactly as before.
 - **Offline layer unchanged and tested.** The queue's shallow per-task merge already replaces an array whole (like `tags`); tests pin that: a later list replaces an earlier one, other-field updates keep it, an update that omits the key never adds it, edits made while the task is still a queued create merge into that create, and ids survive the local-id remap and the cache round trip.
 - **Still true:** whole-list last-writer-wins, online as well as offline (see phase 1). Creating, renaming and removing subtasks, the description fields, the card UI and accessibility are phase 3.
@@ -918,7 +918,7 @@ online, or is stored as a queue entry offline. It is never rebuilt on retry, rel
 - *Offline:* a new queue entry type `completion` (`{kind:'complete'|'revoke', completionId?, completedAt?, utcOffsetMinutes?, revokedAt?, title, estimatedMinutes}`).
   It never merges into another entry and nothing merges into it; a delete of the task drops plain updates but never a completion entry; the same event
   (kind + completionId) is stored once. Plain updates keep merging with each other exactly as before.
-- *Online failure (review fix):* the event is created BEFORE the request and the request may have reached the server with only the answer lost, so a failed
+- *Online failure (review fix; superseded by Issue #57, see "Local-First Task Mutations"):* since #57 the event is committed to the queue FIRST on every path, so the reasoning below is now the general rule rather than a failure branch. Original note: the event is created BEFORE the request and the request may have reached the server with only the answer lost, so a failed
   online write must not drop it (a manual retry would mint a NEW id and the server could hold two completions for one action). On a retryable failure (no
   answer, 5xx, 408, 429, 401: the queue's own rule, shared in `offline/deliveryErrors.ts`) the dashboard checkbox and bulk complete queue the SAME
   `transition.entry` that was sent and show the task completed and pending; the retry replays that id, so one action stays one record. A permanent 4xx is not
@@ -1737,6 +1737,81 @@ Not guaranteed:
 - An `unknown` event is never resent, by design.
 - No email verification at sign-up (the cap limits the damage). `docs/DUAL_EMAIL_TRANSPORT.md` was referenced by earlier docs but never existed; this section replaces it.
 
+## Local-First Task Mutations (Issue #57)
+
+Every dashboard task mutation is local-first: validate locally, commit to IndexedDB, render, then sync in the background.
+
+`user action → local validation → ONE IndexedDB transaction (task list + queue) → render → coalesced drain of the queue when online`
+
+### The primitive
+
+- `offline/localMutations.ts` `commitLocalMutation({ derive, seed? })`. Under a shared store lock it opens ONE readwrite transaction (`offlineDb.transaction`), reads the stored task list and the account's queue, calls `derive(stored) → { tasks, actions }`, folds the actions into the queue with the pure `applyActionToQueue` (`offline/queueActions.ts`, the old merge policy moved out unchanged), writes both, and resolves with the result. The read, the derivation and the writes are all inside the transaction, so the transaction is the serialization boundary: a second mutation (or a second tab) cannot derive from a list the first has already replaced. If `derive` or a write throws, the transaction is aborted and neither the list nor the queue changed.
+- The hook (`useDashboardTasks.commitMutation`) awaits that commit and only then calls `setTasks` and starts the drain. Nothing is shown that is not durable. A failure shows a message and stores nothing: a validation message (`MutationRejectedError`) or "storage unavailable".
+- `persistTasks` (sync adoptions, AI-created tasks) is `updateCachedTasks`: the same lock and a transaction over the STORED list, so it can never put back a list a committed mutation replaced. `fetchFreshTasks` uses `reconcileServerTasks`: a task with queued work keeps its local copy, a task with a queued delete stays gone, a queued create stays, and a task with ANY queued work that the server's list omits (partial, empty or unrelated answer) keeps its local copy until that work is delivered or refused; everything else takes the server's version.
+- Local ids are `local-` + `crypto.randomUUID()` (`newLocalTaskId`); a collision is refused (`assertNewLocalId`).
+
+### Validation (`offline/mutationValidation.ts`)
+
+Only what is demonstrably invalid under the client's existing rules: a non-empty title of at most 200 characters, a known priority, string tags, a numeric non-negative estimate, an `HH:mm` due time that sits next to a due date, an existing task for edits and completions. It adds no server rules and no completion rules: completing, re-opening and an already-completed task go through `makeCompletionTransition` exactly as before (events keep their idempotency by `kind:completionId`).
+
+### Ordering
+
+Per task, queue entries keep their relative order: an edit merges into the entry already queued for the task (same position), a completion is never merged or dropped, a delete drops the task's pending edits (not its completions) and goes last, and a delete cancels a queued create. Example: edit title, complete, edit priority, delete leaves `[completion, delete]`. #59 owns smarter coalescing; #57 only guarantees nothing is reordered or lost.
+
+### Sync, stale answers and rejections
+
+- After a commit the hook calls `syncBridgeRef.current.requestSync()` (online only). `useDashboardSync.requestSync` never runs two drains at once; requests during a drain cause exactly one more pass. Offline, entries wait for the existing triggers (load, coming online, recovery, manual retry).
+- Stale answers: the processor remembers each entry's payload when the run starts. If an entry for the same task has changed or appeared by the time the answer arrives (an edit merged into the in-flight entry, or a new entry), the answer is stale: `onTaskUpdated` is not called, and for a create `onTaskCreated(..., { stale: true })` adopts only the server id and keeps the local fields; the later entries are sent next and their answers are adopted.
+- Rejections: a permanent 4xx is still removed from the queue, but is now returned as `rejected: [{ type, taskId, title, status }]`. The hook says so (`describeRejections`: "Not saved: the server rejected the edit to “X” (error 400). Showing what the server has."), clears the pending flag on tasks with no queued work (and drops local-only tasks whose create was refused: `settleRejectedLocalState`), and reads the server back ONCE. No retry loop. Since #58 the message is kept (session only, nothing persisted) until the person dismisses it. 401 and transient failures keep their entries, as before.
+
+### Scope
+
+Dashboard task mutations only: create, edit, complete/re-open, delete, subtasks, clear completed, mark selected complete, delete selected. Out of scope and unchanged: the Insights completion toggle (online-only, follow-up), AI task creation (online-only), the sync-state model and the task badge (done in #58, below), coalescing (#59), Background Sync, conflict resolution.
+
+### Evidence and limits
+
+- Tested locally on the real `idb` layer over `fake-indexeddb` (a dev dependency; set up for every test file in `src/test/setup.ts`): `localMutations.test.ts` (atomic rollback of the list when the queue write fails, writes visible after a simulated reload, 20 concurrent commits all kept in call order, two module instances committing at once, seed, reconcile, settle), `queueActions.test.ts`, `mutationValidation.test.ts`, `queueProcessor.localFirst.test.ts`, `rejections.test.ts`, `useDashboardTasks.localFirst.test.ts` (nothing rendered before the commit resolves, ordering, bulk), `useDashboardSync.localFirst.test.ts` (coalesced drain, rejection report, one reconcile fetch), `useDashboardTasks.growth.test.ts` (real Growth hook, dashboard hook, queue and processor: an online optimistic completion shows +10 once and the server award replaces the preview, never +20), and the converted hook and pipeline tests.
+- Checked in real Chromium (Playwright, the same `idb` code bundled with esbuild, run once, not part of the suite): a queue write that throws `DataCloneError` rolls the list write back; two tabs committing 15 mutations each at once ended with all 30 in both the list and the queue; both survived a page reload.
+- NOT proven: crash or power-loss durability, behaviour under storage pressure, Safari/Firefox, a real server round trip. `fake-indexeddb` models the spec in memory; it does not prove those.
+
+## Sync State and Feedback (Issue #58)
+
+What the person is told about synchronization is DERIVED from facts, never set by a code path. Files: `offline/syncState.ts` (pure `deriveSyncState`), `offline/queueSignal.ts`, `hooks/useDashboardSync.ts` (the only writer of the facts), `components/dashboard/SyncIndicator.tsx` (renders, decides nothing).
+
+**Facts and their one owner**
+
+| Fact | Meaning | Source |
+| --- | --- | --- |
+| `online` | existing connectivity signal | `isOnline` prop |
+| `pending` | length of the durable queue | re-read from IndexedDB (`getSyncQueue`), never counted by hand |
+| `draining` | a drain in THIS tab is running | the single funnel `processPendingQueue` |
+| `blocked` | why the last drain stopped with work left: `unreachable` (network, timeout, 5xx, 408, 429: the server may not have received it) or `auth` (401, session changed). A drain that THROWS (unexpected/storage error) with work queued is also reported as `unreachable`, the conservative reading, so it is always actionable | `ProcessSyncQueueResult.blocked` |
+| `rejections` | changes the server RECEIVED and refused (permanent 4xx), until dismissed; session memory only | `rejected[]` of a drain |
+| `confirmedAt` | last time this session observed an empty queue as the result of a successful drain or list fetch | the hook |
+
+`blocked` and `rejections` are different facts and must stay different: "could not send" vs "was refused".
+
+**Invariant:** `confirmedAt` only advances when the queue is observed EMPTY as part of a successful drain (no refusal, not blocked) or a successful list fetch. Opening the app, a local mutation, a queue read or a failed drain never set it, and any read that finds work queued clears it, so "Synced HH:MM" is never older than the newest unsent change. It is not persisted: a new session claims nothing until it has synchronized.
+
+**States (priority order)**
+
+| State | Condition | Shown |
+| --- | --- | --- |
+| `attention` | rejections > 0, or online && pending > 0 && blocked && not draining | refusal text + Dismiss; or "Couldn’t sync with the server. N changes kept on this device." + Retry; or "Sign in again to sync N changes…" |
+| `syncing` | draining && pending > 0 | "Syncing N changes…" |
+| `offline` | not online | "Offline. N changes stored on this device." (or "Offline") |
+| `pending` | online, pending > 0, not draining, not blocked | "N changes not synced yet" + Sync now |
+| `synced` | pending = 0 and `confirmedAt` set | "Synced HH:MM" |
+| `unverified` | pending = 0, no `confirmedAt` | nothing |
+
+"Synced" means the server accepted every change this device queued. It does NOT claim other devices' changes are visible here, nor that a Growth Tree award was granted. The task badge now reads "Not synced yet" (the old "⟳ Syncing" claimed activity that might not exist). The old `cached` / `errors-pending` statuses, the Filters-panel "Status:" row, the persisted "Last sync" time and `PendingSyncNotice` are gone.
+
+**Two tabs.** After a commit or a drain, a tab posts `queue-changed` on `BroadcastChannel('halotasks-queue')`; other tabs only re-read the queue length. A tab that merely read an empty queue shows nothing (`unverified`) rather than "synced". The task list is NOT refreshed across tabs (existing limitation). In Chromium the announcing page's own listener also hears the message (one harmless extra re-read, no loop).
+
+**Not in #58:** automatic retry/backoff (Retry is manual; triggers are commit, reconnect, server recovery), persisted rejection records, coalescing (#59), cross-tab list sync.
+
+**Evidence:** `syncState.test.ts` (every state and priority conflict), `queueProcessor.blocked.test.ts`, `useDashboardSync.confirmed.test.ts` (each way of NOT confirming), `syncState.integration.test.ts` (real offline layer + real processor + real hooks on fake-indexeddb: online/offline mutation, reconnect, success, transient failure, 401, permanent rejection, several queued, reload with a pending queue, two tabs), `SyncIndicator.test.tsx`. Checked once in real Chromium: BroadcastChannel delivery between two pages. NOT proven: real network failure modes, Safari/Firefox, screen readers (ARIA `role="status"` only reasoned about).
+
 ## Documentation System
 
 The main documentation index is:
@@ -1793,7 +1868,7 @@ correctly fails at that suite. Nothing was excluded or skipped to hide it.
 If future work touches these areas, keep the current behavior in mind:
 - Settings page should remain thin and use the shared theme/auth stores
 - Route additions should preserve the `ProtectedRoute -> AppLayout` pattern
-- Offline mutations should not remove UI state before queue writes succeed
+- Offline mutations should not remove UI state before queue writes succeed; since Issue #57 every dashboard mutation is committed (list + queue, one transaction) BEFORE it is rendered, online or not
 - Growth orb behavior should preserve desktop tooltip fallback
 - Changelog updates should be written in both `.logs` and `docs/logs.md`
 

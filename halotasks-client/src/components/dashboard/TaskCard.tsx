@@ -215,7 +215,7 @@ export default function TaskCard({
             </span>
           )}
 
-          {task.pendingSync && <span className="task-pending-sync">⟳ Syncing</span>}
+          {task.pendingSync && <span className="task-pending-sync">Not synced yet</span>}
         </div>
 
         {hasDetails && (

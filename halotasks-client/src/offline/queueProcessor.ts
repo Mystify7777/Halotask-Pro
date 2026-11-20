@@ -6,6 +6,7 @@ import { completionService, type StandaloneEventBody } from '../services/complet
 import { httpStatusOf, isPermanentError } from './deliveryErrors';
 import { parseCompletionEntry, type CompletionEntryPayload } from './completionEvents';
 import { getSyncQueue, settleSyncQueue, SettledEntry, type SyncQueueRecord } from './syncQueue';
+import type { BlockedReason } from './syncState';
 
 /**
  * The queue merges later edits into earlier entries ({...old, ...new}), so a merged payload can in principle hold a due
@@ -56,9 +57,19 @@ const toTaskEvent = (event: CompletionEntryPayload): TaskCompletionEventPayload 
 
 const withoutDueTime = (payload: TaskUpdatePayload): TaskUpdatePayload => ({ ...payload, dueTime: null });
 
+/**
+ * Whether the server's answer is already out of date on arrival (Issue #57): the user made further changes to the task
+ * while this run was waiting on the network. A stale answer must not replace the local copy, which is ahead of it.
+ */
+export type AnswerContext = { stale: boolean };
+
 type ProcessSyncQueueParams = {
-  onTaskCreated: (localTaskId: string, serverTask: Task) => void;
-  onTaskUpdated: (taskId: string, serverTask: Task) => void;
+  /**
+   * A queued create reached the server. When `stale`, only the identity (the server's id) is theirs to adopt: the user
+   * changed the task since, and those changes are still queued.
+   */
+  onTaskCreated: (localTaskId: string, serverTask: Task, context: AnswerContext) => void;
+  onTaskUpdated: (taskId: string, serverTask: Task, context: AnswerContext) => void;
   onTaskDeleted: (taskId: string) => void;
   /**
    * The server's Growth Tree answer to a replayed completion (Issue #24). Called only while the owner is
@@ -78,10 +89,30 @@ type ProcessSyncQueueParams = {
   onCompletionsDelivered?: () => void;
 };
 
+/**
+ * A queued mutation the server refused for good (a permanent 4xx). It was removed from the queue and never retried; the
+ * caller reports it and reads the server's state back (Issue #57). Not persisted anywhere: that is #58's model.
+ */
+export type RejectedMutation = {
+  type: SyncQueueRecord['type'];
+  taskId: string | null;
+  /** The task's title when the entry carried one (a create, an edit that changed it, a completion's snapshot). */
+  title: string | null;
+  status: number | null;
+};
+
 export type ProcessSyncQueueResult = {
   processed: number;
   failed: number;
   remaining: number;
+  rejected: RejectedMutation[];
+  /**
+   * Why the run stopped with work left (Issue #58): `auth` = the session is not accepted (401, or the account changed
+   * mid-run), `unreachable` = a request failed in a way that is neither a refusal nor an auth problem (network, timeout,
+   * 5xx), so the server may not have received it. `null` when nothing stopped the run. A refusal is NOT blocked: it is in
+   * `rejected`. Entries that merely wait behind an unsynced create are not blocked either.
+   */
+  blocked: BlockedReason | null;
 };
 
 /**
@@ -142,6 +173,11 @@ const standaloneBodyOf = (taskId: string, event: CompletionEntryPayload): Standa
   return event.completionId ? { type: 'revoke', completionId: event.completionId, taskId, revokedAt: event.revokedAt as string } : null;
 };
 
+const titleOfEntry = (entry: SyncQueueRecord): string | null => {
+  const title = (entry.payload as { title?: unknown } | undefined)?.title;
+  return typeof title === 'string' && title.trim() ? title : null;
+};
+
 const runSyncQueue = async ({
   onTaskCreated,
   onTaskUpdated,
@@ -162,7 +198,7 @@ const runSyncQueue = async ({
   const session = captureSession();
 
   if (!session) {
-    return { processed: 0, failed: 0, remaining: 0 };
+    return { processed: 0, failed: 0, remaining: 0, rejected: [], blocked: null };
   }
 
   const ownerId = session.userId;
@@ -174,10 +210,26 @@ const runSyncQueue = async ({
       processed: 0,
       failed: 0,
       remaining: 0,
+      rejected: [],
+      blocked: null,
     };
   }
 
   const idMap = new Map<string, string>();
+  const rejected: RejectedMutation[] = [];
+  // What was queued when this run started. Work the user did while a request was out is either a NEW entry or a change
+  // merged into an entry that was already here (an edit merges into a queued update or create): both show up as a difference.
+  const snapshotPayloads = new Map(queue.map((item) => [item.id, JSON.stringify(item.payload ?? null)]));
+  const hasNewerWork = async (...taskIds: string[]): Promise<boolean> => {
+    const current = await getSyncQueue(ownerId);
+    return current.some(
+      (item) =>
+        item.taskId !== undefined &&
+        item.taskId !== null &&
+        taskIds.includes(item.taskId) &&
+        snapshotPayloads.get(item.id) !== JSON.stringify(item.payload ?? null),
+    );
+  };
   // What happened to each entry, by queue-entry id. Everything NOT listed here is still queued. The queue is written back
   // by settleSyncQueue against the queue as it is at the end of the run, so edits made while this run waited on the
   // network are never overwritten.
@@ -185,11 +237,15 @@ const runSyncQueue = async ({
   const sentCreates = new Map<string, string>(); // create entry id -> server id, to notice a delete made while it was in flight
   let processed = 0;
   let deliveredCompletions = 0;
+  let blocked: BlockedReason | null = null;
 
   for (const [index, entry] of queue.entries()) {
     // Early exit only (saves building a request that would be refused). The API client's check at send
     // time is the real guard; this one cannot be, because the account can still change after it.
-    if (!stillSignedIn()) break;
+    if (!stillSignedIn()) {
+      blocked = 'auth';
+      break;
+    }
 
     try {
       if (entry.type === 'create') {
@@ -204,7 +260,10 @@ const runSyncQueue = async ({
           // The request went out as the owner and is done. But if another account is on screen now, do
           // not feed the owner's result into that account's UI state and task cache.
           const waiting = queue.slice(index + 1).filter((item) => item.type === 'completion' && item.taskId === localTaskId);
-          if (stillSignedIn()) onTaskCreated(localTaskId, withPendingCompletions(response.task, waiting));
+          if (stillSignedIn()) {
+            const stale = await hasNewerWork(localTaskId);
+            onTaskCreated(localTaskId, withPendingCompletions(response.task, waiting), { stale });
+          }
         }
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
@@ -240,7 +299,10 @@ const runSyncQueue = async ({
         // A completion waiting behind this edit means the local copy is ahead of this answer: it is not adopted (the answer to
         // that completion will be).
         const completionWaits = queue.slice(index + 1).some((item) => item.type === 'completion' && item.taskId === sourceTaskId);
-        if (!completionWaits && stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+        if (!completionWaits && stillSignedIn()) {
+          const stale = await hasNewerWork(sourceTaskId, resolvedTaskId);
+          if (!stale) onTaskUpdated(resolvedTaskId, response.task, { stale });
+        }
         if (conflictedDueTime !== null && stillSignedIn()) onDueTimeConflict?.(resolvedTaskId, conflictedDueTime);
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
 
@@ -289,7 +351,10 @@ const runSyncQueue = async ({
             );
             delivered = true;
             settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
-            if (!laterForTask && stillSignedIn()) onTaskUpdated(resolvedTaskId, response.task);
+            if (!laterForTask && stillSignedIn()) {
+              const stale = await hasNewerWork(sourceTaskId, resolvedTaskId);
+              if (!stale) onTaskUpdated(resolvedTaskId, response.task, { stale });
+            }
             if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
           } catch (error) {
             // 404: the task is gone from the server (deleted by another device, or after this entry was queued). The event
@@ -348,6 +413,7 @@ const runSyncQueue = async ({
         // The account or token changed between building this request and sending it, and the API client
         // refused to send it. Nothing was sent. Keep this entry and everything not yet attempted for the
         // owner; do not retry under whoever is signed in now.
+        blocked = 'auth';
         break;
       }
 
@@ -356,16 +422,20 @@ const runSyncQueue = async ({
         // request would go out without credentials, fail the same way, and (before this) be thrown
         // away one by one. Keep this entry and everything not yet attempted, in order, for the next
         // run after the user signs in again.
+        blocked = 'auth';
         break;
       }
 
       if (isPermanentError(error)) {
         console.warn('[syncQueue] Discarding permanently failed entry:', entry.type, entry.taskId, error);
+        rejected.push({ type: entry.type, taskId: entry.taskId ?? null, title: titleOfEntry(entry), status: httpStatusOf(error) });
         settled.set(entry.id, { outcome: 'discarded' });
         processed += 1;
         continue;
       }
-      // any other failure: not settled, so the entry stays queued for the next run
+      // any other failure: not settled, so the entry stays queued for the next run. An auth stop already recorded stays
+      // the reason (the run ended there); otherwise the server may not have received this work.
+      blocked ??= 'unreachable';
     }
   }
 
@@ -376,6 +446,8 @@ const runSyncQueue = async ({
     processed,
     failed: remaining,
     remaining,
+    rejected,
+    blocked,
   };
 };
 
@@ -395,7 +467,7 @@ const withCrossTabLock = <T>(ownerId: string, fn: () => Promise<T>): Promise<T> 
 
 export const processSyncQueue = (params: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
   const ownerId = captureSession()?.userId;
-  if (!ownerId) return Promise.resolve({ processed: 0, failed: 0, remaining: 0 });
+  if (!ownerId) return Promise.resolve({ processed: 0, failed: 0, remaining: 0, rejected: [], blocked: null });
 
   const previous = runningFor.get(ownerId) ?? Promise.resolve();
   const run = previous.then(() => withCrossTabLock(ownerId, () => runSyncQueue(params)));

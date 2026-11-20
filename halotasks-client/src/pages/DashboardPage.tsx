@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
 import { useLocation } from 'react-router-dom';
 import BulkActionsBar from '../components/dashboard/BulkActionsBar';
 import DashboardContent from '../components/dashboard/DashboardContent';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardToolbar from '../components/dashboard/DashboardToolbar';
-import PendingSyncNotice from '../components/dashboard/PendingSyncNotice';
+import SyncIndicator from '../components/dashboard/SyncIndicator';
 import GrowthTree from '../components/dashboard/GrowthTree';
 import ReminderSettings from '../components/dashboard/ReminderSettings';
 import SmartSections from '../components/dashboard/SmartSections';
@@ -21,7 +20,6 @@ import { useDashboardGrowth } from '../hooks/useDashboardGrowth';
 import { useDashboardReminders } from '../hooks/useDashboardReminders';
 import { useAiTaskCreation } from '../hooks/useAiTaskCreation';
 import { useDashboardSync } from '../hooks/useDashboardSync';
-import type { SyncStatus } from '../hooks/useDashboardSync';
 import { useDashboardTasks } from '../hooks/useDashboardTasks';
 import { registerSW } from '../hooks/usePushSubscription';
 import { getWeekHistory, requestHistoryReconcile, type HistoryEntry } from '../offline/history';
@@ -92,11 +90,12 @@ export default function DashboardPage() {
 
   const tasksRef = useRef<Task[]>([]);
   const syncBridgeRef = useRef<{
-    setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
     refreshPendingQueueCount: () => Promise<number>;
+    /** Starts sending what was just committed locally (no-op offline; never two drains at once). */
+    requestSync: () => void;
   }>({
-    setSyncStatus: () => undefined,
     refreshPendingQueueCount: async () => 0,
+    requestSync: () => undefined,
   });
 
   const location = useLocation();
@@ -189,8 +188,9 @@ export default function DashboardPage() {
     onCompletionsDelivered: () => void requestHistoryReconcile(),
   });
 
-  syncBridgeRef.current.setSyncStatus = sync.setSyncStatus;
   syncBridgeRef.current.refreshPendingQueueCount = sync.refreshPendingQueueCount;
+  syncBridgeRef.current.requestSync = sync.requestSync;
+  sync.setTitleLookup((taskId) => tasksRef.current.find((task) => task._id === taskId)?.title ?? null);
 
   const reminders = useDashboardReminders({
     getTasks: () => tasksRef.current,
@@ -285,21 +285,6 @@ export default function DashboardPage() {
         }
         syncArea={
           <div className="sync-status-row">
-            <p className={`sync-status ${sync.syncStatus}`}>
-              Status:{' '}
-              {sync.syncStatus === 'offline'
-                ? 'Offline'
-                : sync.syncStatus === 'syncing'
-                  ? 'Syncing'
-                  : sync.syncStatus === 'cached'
-                    ? 'Cached'
-                    : sync.syncStatus === 'errors-pending'
-                      ? `Errors Pending (${sync.pendingQueueCount})`
-                      : 'Synced'}
-              {sync.lastSyncAt
-                ? ` • Last sync ${new Date(sync.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                : ''}
-            </p>
             <ReminderSettings
               isOpen={reminders.isReminderSettingsOpen}
               settings={reminders.reminderSettings}
@@ -311,23 +296,13 @@ export default function DashboardPage() {
                 type="button"
                 className="ghost-btn retry-sync-btn"
                 onClick={reminders.handleEnableReminders}
-                disabled={sync.syncStatus === 'syncing' || loadingTasks}
+                disabled={sync.syncState.kind === 'syncing' || loadingTasks}
               >
                 Enable Reminders
               </button>
             )}
             {reminders.remindersSupported && reminders.notificationPermission === 'denied' && (
               <span className="reminder-permission-note">Reminders blocked by browser settings.</span>
-            )}
-            {(sync.syncStatus === 'errors-pending' || sync.retryingSync) && (
-              <button
-                type="button"
-                className="ghost-btn retry-sync-btn"
-                onClick={sync.handleRetrySync}
-                disabled={sync.syncStatus === 'syncing' || sync.retryingSync || loadingTasks}
-              >
-                Retry Sync
-              </button>
             )}
           </div>
         }
@@ -359,11 +334,12 @@ export default function DashboardPage() {
         }
         statusMessages={
           <>
-            <PendingSyncNotice
-              pendingCount={sync.pendingQueueCount}
-              isOnline={isOnline}
-              syncing={sync.syncStatus === 'syncing' || sync.retryingSync}
+            <SyncIndicator
+              state={sync.syncState}
+              rejections={sync.rejectionNotices}
+              retrying={sync.retryingSync}
               onRetry={sync.handleRetrySync}
+              onDismiss={sync.dismissRejections}
             />
             {statusError && <p className="form-error">{statusError}</p>}
             {statusInfo && <p className="form-success">{statusInfo}</p>}

@@ -56,7 +56,7 @@ describe('processSyncQueue surfaces the server growth', () => {
     await processSyncQueue(cb);
 
     expect(vi.mocked(taskService.createTask).mock.calls[0][0]).toMatchObject({ completed: true });
-    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1-abc', { _id: 'srv1' });
+    expect(cb.onTaskCreated).toHaveBeenCalledWith('local-1-abc', { _id: 'srv1' }, { stale: false });
     expect(cb.onGrowth).toHaveBeenCalledTimes(1);
     expect(cb.onGrowth).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'srv1', treeState: expect.objectContaining({ xp: 10 }) }));
   });
