@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getReminderPayload, sendReminderNotification } from '../reminders/notification';
+import { reminderPayloadFor, sendReminderNotification } from '../reminders/notification';
 import {
   getNotificationPermissionStatus,
   isNotificationSupported,
@@ -55,9 +55,11 @@ export function useDashboardReminders({
       reminderSchedulerRef.current = createReminderScheduler({
         getTasks,
         getSettings: () => reminderSettingsRef.current,
-        onReminder: ({ task, type }) => {
-          const shown = sendReminderNotification(task, type);
-          void relayToServer(getReminderPayload(task, type));
+        onReminder: ({ task, type, merged }) => {
+          // One notification and one relay per event: for timed reminders an event is already the merge of everything
+          // due for that task in this poll (reminders/grouping.ts).
+          const shown = sendReminderNotification(task, type, merged);
+          void relayToServer(reminderPayloadFor(task, type, merged));
           return shown; // a date-only day reminder that was not shown is retried (reminders/scheduler.ts)
         },
         intervalMs: 60_000,

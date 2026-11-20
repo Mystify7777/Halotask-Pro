@@ -6,16 +6,22 @@ import {
   getSmartStartWindows,
   getTasksDueInNextHour,
   getTasksOverdueNow,
+  OVERDUE_NOTIFICATION_WINDOW_MS,
   reminderSchedulePart,
 } from './deadlineLogic';
+import { groupTimedEvents, type ReminderType, type TimedReminderEvent } from './grouping';
 import { reminderIdentity } from './identity';
 import { isWithinQuietHours, ReminderSettings } from './settings';
-
-type ReminderType = 'due-soon' | 'overdue' | 'work-session-soon' | 'start-now';
 
 type ReminderEvent = {
   task: Task;
   type: ReminderType;
+  /**
+   * Set for timed reminders (Issue #14): every reminder of this task that became due in the same poll, lead first, in
+   * the fixed order of REMINDER_PRECEDENCE. `type` is always `merged[0]`. Absent for a date-only task's calendar-day
+   * reminder (Issue #42), which stays one event per reminder.
+   */
+  merged?: ReminderType[];
 };
 
 type ReminderSchedulerOptions = {
@@ -276,15 +282,25 @@ export const createReminderScheduler = ({
     return `${type}:${reminderIdentity(task)}:${reminderSchedulePart(task)}`;
   };
 
-  const dispatchIfNeeded = (task: Task, type: ReminderType) => {
-    const key = makeKey(task, type);
-    if (notifiedInSession.has(key)) {
-      return;
+  /**
+   * Timed reminders of one poll are collected, then merged per task (Issue #14), so a task whose "due soon" and "start
+   * now" windows are open together is announced once. Every reminder a notification stands for is marked as fired, so
+   * none of them is sent again later on its own. A reminder already fired earlier is not part of a later group.
+   */
+  const collectIfNeeded = (pending: TimedReminderEvent[], task: Task, type: ReminderType) => {
+    if (!notifiedInSession.has(makeKey(task, type))) {
+      pending.push({ task, type });
     }
+  };
 
-    notifiedInSession.add(key);
-    saveFiredKeys(notifiedInSession);
-    onReminder({ task, type });
+  const dispatchGrouped = (pending: TimedReminderEvent[]) => {
+    for (const group of groupTimedEvents(pending)) {
+      for (const type of group.merged) {
+        notifiedInSession.add(makeKey(group.task, type));
+      }
+      saveFiredKeys(notifiedInSession);
+      onReminder({ task: group.task, type: group.type, merged: group.merged });
+    }
   };
 
   // A date-only task reminds by calendar day: "due today" on its due day, "overdue" on the day after, in the effective
@@ -420,13 +436,22 @@ export const createReminderScheduler = ({
     }
 
     const dueSoon = settings.dueSoonEnabled ? getTasksDueInNextHour(tasks, nowTime, 60) : [];
-    const overdue = getTasksOverdueNow(tasks, nowTime);
+    const overdue = settings.overdueEnabled ? getTasksOverdueNow(tasks, nowTime, OVERDUE_NOTIFICATION_WINDOW_MS) : [];
     const smartStartWindows = getSmartStartWindows(tasks, nowTime, settings.bufferMinutes);
 
-    dueSoon.forEach((task) => dispatchIfNeeded(task, 'due-soon'));
-    if (settings.overdueEnabled) {
-      overdue.forEach((task) => dispatchIfNeeded(task, 'overdue'));
-    }
+    const pending: TimedReminderEvent[] = [];
+    dueSoon.forEach((task) => collectIfNeeded(pending, task, 'due-soon'));
+    overdue.forEach((task) => collectIfNeeded(pending, task, 'overdue'));
+    smartStartWindows.forEach(({ task, latestStartTime, notifyAtTime, windowEndTime }) => {
+      if (settings.workSessionSoonEnabled && nowTime >= notifyAtTime && nowTime < latestStartTime) {
+        collectIfNeeded(pending, task, 'work-session-soon');
+      }
+
+      if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < windowEndTime) {
+        collectIfNeeded(pending, task, 'start-now');
+      }
+    });
+    dispatchGrouped(pending);
 
     if (settings.dueSoonEnabled) {
       getDateOnlyTasksInPhase(tasks, 'due-today', nowTime).forEach((task) => dispatchDayReminder(task, 'due-soon', nowTime));
@@ -434,16 +459,6 @@ export const createReminderScheduler = ({
     if (settings.overdueEnabled) {
       getDateOnlyTasksInPhase(tasks, 'overdue', nowTime).forEach((task) => dispatchDayReminder(task, 'overdue', nowTime));
     }
-
-    smartStartWindows.forEach(({ task, latestStartTime, notifyAtTime, windowEndTime }) => {
-      if (settings.workSessionSoonEnabled && nowTime >= notifyAtTime && nowTime < latestStartTime) {
-        dispatchIfNeeded(task, 'work-session-soon');
-      }
-
-      if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < windowEndTime) {
-        dispatchIfNeeded(task, 'start-now');
-      }
-    });
   };
 
   const start = () => {

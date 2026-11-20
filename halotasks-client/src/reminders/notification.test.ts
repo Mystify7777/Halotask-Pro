@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clockOf } from '../test/localeText';
 import { inTimeZone, makeTask } from '../test/taskFactory';
-import { getReminderPayload, sendReminderNotification } from './notification';
+import { getReminderPayload, getTimedReminderPayload, reminderPayloadFor, sendReminderNotification } from './notification';
 
 // The server's push relay validator caps the tag (halotasks-server/src/utils/pushValidators.ts: PUSH_TAG_MAX_LENGTH).
 const PUSH_TAG_MAX_LENGTH = 200;
@@ -123,5 +123,103 @@ describe('sendReminderNotification reports whether the reminder was shown', () =
       throw new TypeError('Illegal constructor');
     });
     expect(() => sendReminderNotification(makeTask(), 'due-soon')).toThrow('Illegal constructor');
+  });
+});
+
+describe('merged timed reminder notification (Issue #14)', () => {
+  const task = makeTask({ _id: OBJECT_ID, title: 'Write report', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '17:30', estimatedMinutes: 60 });
+
+  it('a single reminder has the title and sentence it always had, under the per-task tag', () => {
+    const payload = getTimedReminderPayload(task, ['due-soon']);
+    const legacy = getReminderPayload(task, 'due-soon');
+    expect(payload.title).toBe(legacy.title);
+    expect(payload.body).toBe(legacy.body);
+    expect(payload.tag).toBe(`halotask-task-${OBJECT_ID}`);
+  });
+
+  it('merges with the fixed template: lead sentence, then one clause per other type in precedence order', () => {
+    inTimeZone('Asia/Kolkata', () => {
+      const merged = getTimedReminderPayload(task, ['due-soon', 'start-now']);
+      expect(merged.title).toBe('Start now to finish on time');
+      expect(merged.body).toMatch(/^Start Write report now to stay on track for .+\. Due within the next hour\.$/);
+    });
+    expect(getTimedReminderPayload(task, ['work-session-soon', 'due-soon']).body).toBe(
+      'Write report is due within the next hour. A planned work session starts soon.',
+    );
+  });
+
+  it('depends only on the task and the set of types, not on the order they are listed in', () => {
+    const a = getTimedReminderPayload(task, ['work-session-soon', 'due-soon', 'start-now']);
+    const b = getTimedReminderPayload(task, ['start-now', 'work-session-soon', 'due-soon']);
+    expect(a).toEqual(b);
+  });
+
+  it('the tag is the stable identity: not the title, not the schedule, and the same for every type', () => {
+    const tags = new Set([
+      getTimedReminderPayload(task, ['due-soon']).tag,
+      getTimedReminderPayload({ ...task, title: 'Renamed, with "odd" chars / ✓' }, ['start-now']).tag,
+      getTimedReminderPayload({ ...task, dueTime: '09:00', startTime: '2026-10-20T01:00:00.000Z' }, ['overdue']).tag,
+    ]);
+    expect([...tags]).toEqual([`halotask-task-${OBJECT_ID}`]);
+  });
+
+  it('keeps a task\'s identity across the offline-created to synced id change', () => {
+    const synced = { ...task, _id: 'server-1', clientKey: 'local-1' };
+    expect(getTimedReminderPayload(synced, ['due-soon']).tag).toBe('halotask-task-local-1');
+  });
+
+  it('fits the relay limits with the longest title and every type merged', () => {
+    const long = makeTask({ _id: OBJECT_ID, title: 'x'.repeat(200), dueDate: '2026-10-20T00:00:00.000Z', dueTime: '23:59', estimatedMinutes: 600 });
+    const payload = getTimedReminderPayload(long, ['start-now', 'due-soon', 'work-session-soon', 'overdue']);
+    expect(payload.title.length).toBeLessThanOrEqual(100); // PUSH_TITLE_MAX_LENGTH
+    expect(payload.body.length).toBeLessThanOrEqual(500); // PUSH_BODY_MAX_LENGTH
+    expect(payload.tag.length).toBeLessThanOrEqual(PUSH_TAG_MAX_LENGTH);
+  });
+
+  it('needs at least one type', () => {
+    expect(() => getTimedReminderPayload(task, [])).toThrow();
+  });
+
+  it('reminderPayloadFor picks the merged payload only when a merge is given (date-only day reminders keep theirs)', () => {
+    expect(reminderPayloadFor(task, 'due-soon', ['due-soon']).tag).toBe(`halotask-task-${OBJECT_ID}`);
+    expect(reminderPayloadFor(task, 'due-soon')).toEqual(getReminderPayload(task, 'due-soon'));
+  });
+});
+
+describe('sendReminderNotification for a merged reminder', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'Notification');
+  afterEach(() => {
+    if (original) Object.defineProperty(globalThis, 'Notification', original);
+    else Reflect.deleteProperty(globalThis, 'Notification');
+  });
+
+  const stub = (onCreate: (title: string, options: unknown) => void) => {
+    class Fake {
+      static permission = 'granted';
+      constructor(title: string, options: unknown) {
+        onCreate(title, options);
+      }
+    }
+    Object.defineProperty(globalThis, 'Notification', { value: Fake, configurable: true, writable: true });
+  };
+
+  it('shows ONE notification under the per-task tag and asks to be re-announced when it replaces an earlier one', () => {
+    const created = vi.fn();
+    stub(created);
+    const task = makeTask({ _id: OBJECT_ID, title: 'Write report', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '17:30' });
+    expect(sendReminderNotification(task, 'start-now', ['start-now', 'due-soon'])).toBe(true);
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(created.mock.calls[0][1]).toMatchObject({ tag: `halotask-task-${OBJECT_ID}`, renotify: true });
+  });
+
+  it('a calendar-day reminder (no merge) keeps its per-type tag and no renotify', () => {
+    const created = vi.fn();
+    stub(created);
+    const task = makeTask({ _id: OBJECT_ID, title: 'Write report', dueDate: '2026-10-20T00:00:00.000Z' });
+    sendReminderNotification(task, 'due-soon');
+    expect(created.mock.calls[0][1]).toEqual({
+      body: 'Write report is due today.',
+      tag: `halotask-due-soon-${OBJECT_ID}-2026-10-20T00:00:00.000Z`,
+    });
   });
 });

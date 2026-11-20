@@ -1670,6 +1670,25 @@ deliberately explicit rather than left to Express/Node defaults:
   model-registration issue that comes from re-importing `src/app.ts`
   under different env vars in the same test run).
 
+## Consolidated Reminder Notifications (Issue #14)
+
+Browser reminders for one task are announced once per poll, not once per reminder type. Nothing else about the reminder system changed: same 60 s scheduler, same relay, same settings, quiet hours and per-type toggles, and email reminders are untouched.
+
+### Rule
+- `runNow()` collects the timed reminders of one poll (`due-soon`, `overdue`, `work-session-soon`, `start-now`), then `reminders/grouping.ts` merges the events of the **same task** (same `reminderIdentity`) into one event. Different tasks are never merged. Groups follow the order their task first appears in the list.
+- Lead type, fixed precedence: `start-now` > `due-soon` > `work-session-soon` > `overdue`. The lead supplies the title and the sentence a single reminder always had; every other merged type adds one fixed clause, in the same order (`getTimedReminderPayload` in `reminders/notification.ts`). Example: `Start Write report now to stay on track for 13:05. Due within the next hour.` The output depends only on the task, the lead and the set of types, never on iteration order.
+- Only reminders not already fired join a group. Every reminder a notification stands for is marked fired in the existing per-session keys, so a merged heads-up never fires again on its own, and a later reminder (for example start-now after an earlier heads-up) is announced with only what is new.
+- One browser notification and one relay request per event (`useDashboardReminders` builds the payload once for both). No server change: the payload stays well inside the relay limits (title 100, body 500, tag 200), tested with a 200-character title and every type merged.
+
+### Tag
+Timed reminders use `halotask-task-<reminderIdentity(task)>`: stable across title edits, schedule edits and the offline-id to server-id change, never the title. All of a task's timed notifications therefore share one tray entry, and a later one replaces the earlier one. `renotify: true` (local notification and the service worker's pushed copy) makes the replacement alert again. Date-only calendar-day reminders (Issue #42) are untouched: per-type tag, their own receipts, locks and retry budget, never merged.
+
+### Overdue window
+A timed task earns an "overdue" notification only up to and including 24 h after its deadline (`OVERDUE_NOTIFICATION_WINDOW_MS`, the same bound the email channel uses). Reopening the app no longer announces tasks that went overdue days ago. The task stays overdue on its card; only the alert is bounded.
+
+### Not in this change
+Cross-tab duplicate timed reminders: timed reminders still dedupe per tab (`sessionStorage`), so two open tabs can each send (and relay) the same reminder. Tracked as a follow-up issue, see `claude/design-issue-14.md`. Real browser and OS rendering, tray replacement and multi-device push need a real-device check.
+
 ## Email Delivery (Issue #29)
 
 Email is a server-side delivery channel for task reminders and an optional daily digest, next to (not instead of) the browser reminders. Browser notifications, the push relay and the client scheduler are unchanged; email is off for every account until the user turns it on.
@@ -1724,7 +1743,7 @@ Not guaranteed:
 
 - A per-user rolling-24 h cap (`EMAIL_REMINDER_DAILY_CAP`, 1–200, default 20) exists because sign-up has no email verification, so a user can enter anyone's address. It is enforced against the durable ledger: an event is claimed first, then the user's claimed/sent/unknown rows in the last 24 h are counted; if that is over the cap the claim is released unsent (`failed`, attempt not spent) and the event stays due. A sender never releases, so the senders in any window never exceed the cap, even with several server instances running (racing instances may both release, so the cap can under-send slightly; it never over-sends).
 - Content: titles are flattened and cut to 80 characters and HTML-escaped. Emails carry no reset token and no credentials; the footer links to `/dashboard/reminders` built from `APP_BASE_URL`.
-- Divergences from the browser, deliberate: a timed-overdue email is sent only within 24 h of the deadline, and a zone change does not suppress both the due-today and overdue emails.
+- Divergence from the browser, deliberate: a zone change does not suppress both the due-today and overdue emails. (The 24 h bound on a timed-overdue email is shared with the browser since Issue #14.) Email is not consolidated per task: each reminder is its own ledger event.
 
 ### Production configuration
 
