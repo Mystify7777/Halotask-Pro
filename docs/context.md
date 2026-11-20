@@ -1775,7 +1775,7 @@ Only what is demonstrably invalid under the client's existing rules: a non-empty
 
 ### Ordering
 
-Per task, queue entries keep their relative order: an edit merges into the entry already queued for the task (same position), a completion is never merged or dropped, a delete drops the task's pending edits (not its completions) and goes last, and a delete cancels a queued create. Example: edit title, complete, edit priority, delete leaves `[completion, delete]`. #59 owns smarter coalescing; #57 only guarantees nothing is reordered or lost.
+Per task, queue entries keep their relative order: an edit merges into the entry already queued for the task (same position), a completion is never merged or dropped, a delete drops the task's pending edits (not its completions) and goes last, and a delete cancels a queued create. Example: edit title, complete, edit priority, delete leaves `[completion, delete]`. Issue #59 made this an explicit contract ("Queue Contract (Issue #59)" below); #57 guarantees nothing is reordered or lost.
 
 ### Sync, stale answers and rejections
 
@@ -1785,7 +1785,7 @@ Per task, queue entries keep their relative order: an edit merges into the entry
 
 ### Scope
 
-Dashboard task mutations only: create, edit, complete/re-open, delete, subtasks, clear completed, mark selected complete, delete selected. Out of scope and unchanged: the Insights completion toggle (online-only, follow-up), AI task creation (online-only), the sync-state model and the task badge (done in #58, below), coalescing (#59), Background Sync, conflict resolution.
+Dashboard task mutations only: create, edit, complete/re-open, delete, subtasks, clear completed, mark selected complete, delete selected. Out of scope and unchanged: the Insights completion toggle (online-only, follow-up), AI task creation (online-only), the sync-state model and the task badge (done in #58, below), the coalescing contract (done in #59, below), batching (#60), Background Sync, conflict resolution.
 
 ### Evidence and limits
 
@@ -1827,9 +1827,27 @@ What the person is told about synchronization is DERIVED from facts, never set b
 
 **Two tabs.** After a commit or a drain, a tab posts `queue-changed` on `BroadcastChannel('halotasks-queue')`; other tabs only re-read the queue length. A tab that merely read an empty queue shows nothing (`unverified`) rather than "synced". The task list is NOT refreshed across tabs (existing limitation). In Chromium the announcing page's own listener also hears the message (one harmless extra re-read, no loop).
 
-**Not in #58:** automatic retry/backoff (Retry is manual; triggers are commit, reconnect, server recovery), persisted rejection records, coalescing (#59), cross-tab list sync.
+**Not in #58:** automatic retry/backoff (Retry is manual; triggers are commit, reconnect, server recovery), persisted rejection records, cross-tab list sync.
 
 **Evidence:** `syncState.test.ts` (every state and priority conflict), `queueProcessor.blocked.test.ts`, `useDashboardSync.confirmed.test.ts` (each way of NOT confirming), `syncState.integration.test.ts` (real offline layer + real processor + real hooks on fake-indexeddb: online/offline mutation, reconnect, success, transient failure, 401, permanent rejection, several queued, reload with a pending queue, two tabs), `SyncIndicator.test.tsx`. Checked once in real Chromium: BroadcastChannel delivery between two pages. NOT proven: real network failure modes, Safari/Firefox, screen readers (ARIA `role="status"` only reasoned about).
+
+## Queue Contract (Issue #59)
+
+Coalescing is NOT a separate mechanism. `applyActionToQueue` (pure, `offline/queueActions.ts`) is the only place entries are merged, and it runs at insertion, inside the commit transaction, on the STORED queue (so two tabs coalesce against the same state and a reload changes nothing). The audit is `claude/audit-issue-59.md`; every rule below is pinned by `queueActions.contract.test.ts` (pure matrix + a seeded property test) and `queue.contract.realdb.test.ts` (real storage, two module instances, the real processor).
+
+| Rule | Meaning |
+| --- | --- |
+| 1 | Per task, plain field edits only: an update merges into the task's queued create, else its queued update; last value wins per field (a `null` clear is not lost). |
+| 2 | A completion entry is an EVENT (`kind:completionId`): never merged, never reordered, never cancelled by another completion (complete, revoke, complete stays three events), never dropped by a delete (create, complete, delete keeps the completion, delivered standalone), de-duplicated only by its exact id. |
+| 3 | A delete drops the task's queued updates, cancels a queued create (the task never reached the server), is queued once. **Nothing is queued behind a delete of the same task**: a later update is dropped (it could only reach a task that is gone and return a permanent 404, shown to the user as a spurious "Not saved"; reachable through another tab). |
+| 4 | Entries keep their position or are removed; new work goes to the end; per-task order is preserved; across tasks, order of first queued. |
+| 5 | An edit may merge ACROSS a completion of the same task (update, complete, update becomes update, complete) only while its payload cannot modify completion state. A payload naming any of `COMPLETION_STATE_FIELDS` (`completed`, `completedAt`, `completionId`, `completionEvent`) never merges backwards over a completion: it is appended after it. No writer sends those fields in an update today (completion has its own entry type), which is why the cross-completion merge is safe; the rule protects that reason, not the current payloads. |
+| 6 | A merge keeps the earlier entry's `id`, `type` and `taskId` (only `payload` and `createdAt` change); a completion entry is never rewritten. |
+| 7 | All coalescing happens at insertion. The processor and `settleSyncQueue` rely on entries changing only that way (they key by entry id and diff payloads), so there is no compaction pass and no coalescing during a run. #60 (batching) takes the coalesced queue, in order and with ids intact, as its input; coalescing never depends on batching. |
+
+Deliberately NOT done: cancelling an unsent complete + revoke pair (they are history events, and cancelling changes the Growth award day, which follows the event's day, and the CompletionRecord trail); turning create, complete, delete into an empty queue; per-task counts in the sync indicator (it keeps counting queue entries: three edits to one task read "1 change not synced yet", a create cancelled by its delete leaves nothing queued and the state claims nothing). Bulk operations produce one entry per task and are #60's concern, not coalescing's.
+
+**Evidence:** pure matrix (every audit row), F1 and F2 cases, identity and idempotence, 400 seeded random sequences (order, no lost completion, no entry behind a delete, one create/update/delete per task, no update before its create); real idb: create/edit/edit/delete, F1 across two module instances, two tabs editing one task, reload determinism; processor: the coalesced queue sends the same requests the final state needs (one PUT, one POST carrying every edit, merged edit then completion event, only the delete, three distinct events); #58 counts; BroadcastChannel re-read after a collapse. 14 mutation checks on the policy, all caught. NOT proven: real-browser multi-tab timing (fake-indexeddb).
 
 ## Documentation System
 

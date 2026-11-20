@@ -1315,6 +1315,12 @@ No TypeScript errors or warnings.
 
 ### November 2026
 
+#### Explicit sync queue contract and delete-then-edit guard (Issue #59)
+
+**2026-11-20 · Bugfix · completed · Priority: medium**
+
+Issue #59. The queue already coalesced the common offline sequences (Issue #57), so this makes that policy an explicit, tested contract in applyActionToQueue and closes two gaps. (1) An update queued after a delete of the same task is now dropped: it was appended behind the delete, reached a task that no longer existed and came back as a permanent 404, shown to the user as a spurious "Not saved" (reachable through a second tab). (2) An edit merges across a completion entry of the same task only while its payload cannot modify completion state; a payload naming completed, completedAt, completionId or completionEvent is never merged backwards over a completion. No writer sends those fields today, so behaviour is unchanged; the rule protects the reason the merge is safe. Unchanged by design: completion entries are events (never merged, reordered or cancelled by another completion; complete, revoke, complete stays three events; create, complete, delete keeps the completion), the processor, settle logic, retry behaviour, #58 state derivation and the entry count shown to the user (entries, not taps). No batching (#60). Tested locally: contract matrix with every sequence of the audit, a seeded property test over 400 random sequences, real idb tests (two module instances, reload determinism), processor tests proving the coalesced queue sends the requests the final state needs, and a two-tab count test; 14 mutation checks on the policy all caught. Client suite 96 files / 1946 tests, tsc clean, vite build ok. Not proven: real-browser multi-tab timing.
+
 #### Explicit sync state and user-facing synchronization feedback (Issue #58)
 
 **2026-11-20 · Feature · completed · Priority: high**

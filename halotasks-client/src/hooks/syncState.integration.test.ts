@@ -332,6 +332,17 @@ describe('two tabs', () => {
     expect(b.state().confirmedAt).toBeNull();
   });
 
+  it('coalescing keeps the other tab truthful (Issue #59): a create cancelled by its delete reads 1, then 0', async () => {
+    const a = await mountTab(false);
+    const b = await mountTab(false);
+    await a.create('short-lived');
+    await waitFor(() => expect(b.state().pending).toBe(1));
+    await act(() => a.result.current.hook.handleDeleteTask(a.result.current.tasks[0]._id));
+    await waitFor(() => expect(b.state().pending).toBe(0)); // the entry collapsed away; B re-read the queue and says so
+    expect(b.kind()).toBe('offline');
+    expect(a.state().pending).toBe(0);
+  });
+
   it('a queue count read by another tab never creates a confirmation', async () => {
     const a = await mountTab(false);
     const b = await mountTab(false);
