@@ -31,7 +31,7 @@ vi.mock('../services/taskService', () => ({
   taskService: {
     createTask: vi.fn(),
     updateTask: vi.fn(),
-    deleteTask: vi.fn(),
+    deleteTask: vi.fn(), syncBatch: vi.fn(async () => { throw Object.assign(new Error('no batch route'), { response: { status: 404 } }); }),
   },
 }));
 
@@ -86,7 +86,7 @@ describe('a 401 keeps the account’s queue', () => {
     const result = await processSyncQueue(callbacks());
 
     expect(result).toMatchObject({ processed: 0, failed: 3, remaining: 3 });
-    expect(stored(USER_A.id)).toEqual(original);
+    expect(stored(USER_A.id)).toEqual(original.map((e) => ({ ...e, mutationId: expect.any(String) }))); // untouched, but each now has its stored mutation id (Issue #60)
     // Stopped: nothing after the first refused request was attempted.
     expect(taskService.updateTask).toHaveBeenCalledTimes(1);
     expect(taskService.deleteTask).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe('a 401 keeps the account’s queue', () => {
 
     await processSyncQueue(callbacks());
 
-    expect(stored(USER_A.id)).toEqual([entry('a', 'create', 'local-1')]);
+    expect(stored(USER_A.id)).toEqual([{ ...entry('a', 'create', 'local-1'), mutationId: expect.any(String) }]);
   });
 
   it('writes the remainder back to the OWNER even though the interceptor has already signed everyone out', async () => {

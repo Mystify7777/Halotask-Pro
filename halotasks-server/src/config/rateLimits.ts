@@ -43,6 +43,11 @@ export const RATE_LIMITS = {
   // due reminder (scheduler tick: 60s), so this leaves room for bursts of due tasks and many devices.
   pushRelayUser: { windowMs: 5 * MINUTE, max: 60 },
 
+  // Batched task sync (Issue #60): one request carries up to 50 mutations, so a request is worth much more than a single task
+  // write. The client sends one batch per drain (a drain is triggered by a local change, a reconnect or a manual retry), so one
+  // request a second on average is far above real use and well below a loop.
+  taskSyncUser: { windowMs: MINUTE, max: 60 },
+
   // The external scheduler's trigger (Issue #29): one call every few minutes from a fixed source. This only blunts
   // guessing of the shared secret; the secret's length and constant-time comparison are the real protection.
   internalRunIp: { windowMs: 15 * MINUTE, max: 30 },

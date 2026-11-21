@@ -1315,6 +1315,12 @@ No TypeScript errors or warnings.
 
 ### November 2026
 
+#### Batched task synchronization API (Issue #60)
+
+**2026-11-21 · Backend · completed · Priority: high**
+
+Issue #60. The offline queue now drains through POST /api/tasks/sync (up to 50 mutations per request, 60 requests/min per user, 1 MB body limit) instead of one request per entry. Each mutation carries its own mutationId and returns applied, replayed, rejected, failed or skipped; the batch is not atomic and items run in array order. The create/update/delete rules moved into services/taskMutations.ts behind thin controllers, and applyTaskWrite arbitration (conditional write, completion record, Growth award) is unchanged. Bounded idempotency: creates use a clientKey with a partial unique (userId, clientKey) index; non-completion updates use a per-task appliedMutations marker (last 25) written in the same conditional update, with MUTATION_ID_REUSED for a changed payload; completions use completionId; a repeated delete is applied with alreadyDeleted. Only a transient failure blocks later mutations of the same task (they become skipped); a permanent rejection does not. Server-arrival-order last-write-wins is preserved and no cross-device operation ordering is established. Client: mutationId assigned when queued and regenerated on every merge in the same IndexedDB transaction; chunking by count and size, 413 splitting (a single mutation still refused is rejected for good), fallback to the single endpoints on 404/405 or a malformed answer, and the existing processor loop, stale checks and completion fallback unchanged. The single createTask fallback is not idempotent. Tested locally: server suite 2654 passed (real-MongoDB suites cannot run in the sandbox), client suite 99 files / 1982 tests, tsc clean on both, vite build ok, mutation checks on both sides. Not proven locally: taskSync.realmongo.test.ts (concurrent identical updates and creates, $slice, unique index) needs CI with real MongoDB; the marker mechanism stays provisional until it passes.
+
 #### Explicit sync queue contract and delete-then-edit guard (Issue #59)
 
 **2026-11-20 · Bugfix · completed · Priority: medium**

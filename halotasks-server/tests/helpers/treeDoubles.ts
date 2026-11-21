@@ -39,7 +39,8 @@ const getPath = (doc: Doc, path: string): unknown => {
     if (current === null || current === undefined) return undefined;
     if (Array.isArray(current)) {
       const index = Number(part);
-      current = Number.isInteger(index) ? current[index] : undefined;
+      // `array.0` is an element; `array.field` is the field of every element (how a MongoDB path through an array behaves)
+      current = Number.isInteger(index) ? current[index] : current.map((item) => (typeof item === 'object' && item !== null ? (item as Doc)[part] : undefined));
     } else if (typeof current === 'object') {
       current = (current as Doc)[part];
     } else {
@@ -123,7 +124,14 @@ const apply = (doc: Doc, update: Update): void => {
         }
         case '$push': {
           const current = getPath(doc, path);
-          setPath(doc, path, [...(Array.isArray(current) ? current : []), value]);
+          // `{ $each: [...], $slice: -n }` appends the items and keeps the LAST n (the only modifiers the code under test uses)
+          const modifiers = typeof value === 'object' && value !== null && '$each' in value ? (value as { $each: unknown[]; $slice?: number }) : null;
+          let list = [...(Array.isArray(current) ? current : []), ...(modifiers ? clone(modifiers.$each) : [value])];
+          if (modifiers?.$slice !== undefined) {
+            if (modifiers.$slice >= 0) throw new Error('treeDoubles: only a negative $slice is supported');
+            list = list.slice(modifiers.$slice);
+          }
+          setPath(doc, path, list);
           break;
         }
         case '$addToSet': {
@@ -247,6 +255,10 @@ export function createTaskStore() {
   const hooks: {
     beforeWrite?: (filter: Filter, update: Doc) => Promise<void> | void;
     delay?: (op: string) => Promise<void> | void;
+    /** Awaited at the start of a create, before the unique-key check: a rival request can insert here. */
+    beforeCreate?: (data: Doc) => Promise<void> | void;
+    /** Awaited at the start of a findOne (a rival request can change the task between this read and a later write). */
+    afterFindOne?: (filter: Filter) => Promise<void> | void;
   } = {};
   let nextId = 1;
 
@@ -259,14 +271,24 @@ export function createTaskStore() {
     }
   };
   const owns = (filter: Filter): Doc | null => {
-    const task = tasks.get(String(filter._id));
-    return task && task.userId === filter.userId ? task : null;
+    const { userId, ...rest } = filter;
+    // by _id (the common case), or by any other key of the owner's own tasks (the Issue #60 client-key lookup)
+    for (const task of tasks.values()) {
+      if (task.userId === userId && matches(task, rest)) return task;
+    }
+    return null;
+  };
+  // `appliedMutations` is `select: false` on the real model: hidden unless a read asks for it with '+appliedMutations'.
+  const visible = (task: Doc, projection?: unknown): Doc => {
+    const copy = clone(task);
+    if (projection !== '+appliedMutations') delete copy.appliedMutations;
+    return copy;
   };
 
   const model = {
     find: (filter: Filter) => {
       ops.push({ op: 'find', filter });
-      const rows = [...tasks.values()].filter((t) => t.userId === filter.userId);
+      const rows = [...tasks.values()].filter((t) => t.userId === filter.userId).map((t) => visible(t));
       const chain: Record<string, unknown> = {};
       chain.sort = () => chain;
       chain.skip = () => chain;
@@ -276,17 +298,26 @@ export function createTaskStore() {
     countDocuments: async (filter: Filter) => [...tasks.values()].filter((t) => t.userId === filter.userId).length,
     create: async (data: Doc) => {
       enter('create', { userId: data.userId });
-      const doc = { _id: taskIdOf(nextId++), ...data };
+      await hooks.beforeCreate?.(data);
+      // the partial unique index (userId, clientKey) of the real model, raised like the driver does
+      if (typeof data.clientKey === 'string') {
+        const clash = [...tasks.values()].some((t) => t.userId === data.userId && t.clientKey === data.clientKey);
+        if (clash) throw Object.assign(new Error('E11000 duplicate key error'), { code: 11000, keyPattern: { userId: 1, clientKey: 1 } });
+      }
+      const doc = { _id: data._id !== undefined ? String(data._id) : taskIdOf(nextId++), ...data };
+      doc._id = String(doc._id);
       tasks.set(String(doc._id), doc);
       return doc;
     },
     // Like Mongoose, the query is awaitable and also offers .lean().
-    findOne: (filter: Filter) => {
+    findOne: (filter: Filter, projection?: unknown) => {
       const run = (async () => {
         enter('findOne', filter);
         await hooks.delay?.('findOne');
         const task = owns(filter);
-        return task ? { ...task } : null;
+        const answer = task ? visible(task, projection) : null;
+        await hooks.afterFindOne?.(filter);
+        return answer;
       })();
       return Object.assign(run, { lean: () => run });
     },
@@ -300,10 +331,11 @@ export function createTaskStore() {
       // with the write: there is no await between this check and the assignment below.
       const { _id: _ignoredId, userId: _ignoredUser, ...conditions } = filter;
       if (!matches(task, conditions)) return null;
-      const { $set, $unset, ...plain } = update as { $set?: Doc; $unset?: Doc } & Doc;
+      const { $set, $unset, $push, ...plain } = update as { $set?: Doc; $unset?: Doc; $push?: Doc } & Doc;
       Object.assign(task, plain, $set ?? {});
       for (const key of Object.keys($unset ?? {})) delete task[key];
-      return { ...task };
+      if ($push) apply(task, { $push } as Update);
+      return visible(task);
     },
     findOneAndDelete: async (filter: Filter) => {
       enter('findOneAndDelete', filter);
@@ -323,7 +355,17 @@ export function createTaskStore() {
       tasks.set(String(doc._id), doc);
       return doc;
     },
-    get: (id: string): Doc | undefined => (tasks.has(id) ? { ...(tasks.get(id) as Doc) } : undefined),
+    get: (id: string): Doc | undefined => (tasks.has(id) ? clone(tasks.get(id) as Doc) : undefined),
+    /** Changes a stored task directly, as another request that landed in between would (tests only). */
+    patch(id: string, fields: Doc): void {
+      const stored = tasks.get(id) as Doc;
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined) delete stored[key]; // undefined removes the field
+        else stored[key] = clone(value);
+      }
+    },
+    /** Every stored task, including hidden fields (tests only). */
+    all: (): Doc[] => [...tasks.values()].map((t) => clone(t)),
     has: (id: string): boolean => tasks.has(id),
     size: (): number => tasks.size,
     reset() {

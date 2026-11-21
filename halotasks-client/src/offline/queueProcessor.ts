@@ -1,11 +1,14 @@
 import { captureSession, isSameSession, isSessionChangedError } from '../services/api';
 import { taskService } from '../services/taskService';
-import { TaskCreatePayload, TaskUpdatePayload, Task, TaskCompletionEventPayload } from '../types/task';
+import { TaskCreatePayload, TaskUpdatePayload, Task, TaskCompletionEventPayload, TaskResponse } from '../types/task';
 import type { GrowthResult } from '../growth/treeTypes';
 import { completionService, type StandaloneEventBody } from '../services/completionService';
 import { httpStatusOf, isPermanentError } from './deliveryErrors';
 import { parseCompletionEntry, type CompletionEntryPayload } from './completionEvents';
-import { getSyncQueue, settleSyncQueue, SettledEntry, type SyncQueueRecord } from './syncQueue';
+import { ensureMutationIds, getSyncQueue, settleSyncQueue, SettledEntry, type SyncQueueRecord } from './syncQueue';
+import { COMPLETION_STATE_FIELDS } from './queueActions';
+import { createBatchTransport, payloadAppliedBy, type PlannedMutation } from './batchTransport';
+import type { TaskRef } from './batchProtocol';
 import type { BlockedReason } from './syncState';
 
 /**
@@ -173,6 +176,9 @@ const standaloneBodyOf = (taskId: string, event: CompletionEntryPayload): Standa
   return event.completionId ? { type: 'revoke', completionId: event.completionId, taskId, revokedAt: event.revokedAt as string } : null;
 };
 
+/** What a local task id looks like to the server (`local-<uuid>`): the key a retried create is recognised by. */
+const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
+
 const titleOfEntry = (entry: SyncQueueRecord): string | null => {
   const title = (entry.payload as { title?: unknown } | undefined)?.title;
   return typeof title === 'string' && title.trim() ? title : null;
@@ -203,7 +209,8 @@ const runSyncQueue = async ({
 
   const ownerId = session.userId;
   const stillSignedIn = () => isSameSession(captureSession(), session);
-  const queue = await getSyncQueue(ownerId);
+  // Every entry has the id its current payload is sent under, stored BEFORE anything is sent (Issue #60).
+  const queue = await ensureMutationIds(ownerId);
 
   if (queue.length === 0) {
     return {
@@ -230,6 +237,45 @@ const runSyncQueue = async ({
         snapshotPayloads.get(item.id) !== JSON.stringify(item.payload ?? null),
     );
   };
+  // ── Batch (Issue #60) ─────────────────────────────────────────────────────────────────────────────────────────────────
+  // The entries the loop below WOULD send, in queue order, go out in batches first; the loop then asks the transport for each
+  // entry's answer. Planning mirrors the loop's own decisions: an entry the loop settles locally (nothing to send it to, an
+  // unsynced create it waits behind, a delete of a task the server never saw) is not planned, and neither is anything that
+  // needs the single-task request (a completion for a task that only exists locally is delivered standalone). A task that
+  // only has a local id is named by it (`localId`): the server resolves it through the create planned ahead of it.
+  const planBatch = (): PlannedMutation[] => {
+    const plan: PlannedMutation[] = [];
+    const planned = new Set<string>(); // local ids whose create is in this plan
+    for (const entry of queue) {
+      const mutationId = entry.mutationId;
+      const taskId = entry.taskId;
+      if (!mutationId) continue;
+      if (entry.type === 'create') {
+        if (!taskId || !LOCAL_KEY_PATTERN.test(taskId)) continue; // no usable key: the single request (which has none either)
+        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'create', localId: taskId, payload: withConsistentDeadline((entry.payload ?? {}) as TaskCreatePayload, 'create') } });
+        planned.add(taskId);
+        continue;
+      }
+      if (!taskId) continue;
+      const isLocal = taskId.startsWith('local-');
+      if (isLocal && !planned.has(taskId)) continue;
+      const task: TaskRef = isLocal ? { localId: taskId } : { id: taskId };
+      if (entry.type === 'update') {
+        const payload = withConsistentDeadline((entry.payload ?? {}) as TaskUpdatePayload, 'update');
+        if (COMPLETION_STATE_FIELDS.some((field) => field in payload)) continue; // completion state goes through its own entry type
+        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'update', task, payload } });
+      } else if (entry.type === 'completion') {
+        const event = parseCompletionEntry(entry.payload);
+        if (!event) continue;
+        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'completion', task, payload: { completed: event.kind === 'complete', completionEvent: toTaskEvent(event) } } });
+      } else {
+        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'delete', task } });
+      }
+    }
+    return plan;
+  };
+  const transport = await createBatchTransport(planBatch(), session);
+
   // What happened to each entry, by queue-entry id. Everything NOT listed here is still queued. The queue is written back
   // by settleSyncQueue against the queue as it is at the end of the run, so edits made while this run waited on the
   // network are never overwritten.
@@ -242,7 +288,9 @@ const runSyncQueue = async ({
   for (const [index, entry] of queue.entries()) {
     // Early exit only (saves building a request that would be refused). The API client's check at send
     // time is the real guard; this one cannot be, because the account can still change after it.
-    if (!stillSignedIn()) {
+    // An answer already in hand needs no request, so it is settled even if the account changed meanwhile (the callbacks below
+    // still check); anything that would send a request first needs the owner to be signed in.
+    if (!stillSignedIn() && !transport.holds(entry.id)) {
       blocked = 'auth';
       break;
     }
@@ -251,8 +299,14 @@ const runSyncQueue = async ({
       if (entry.type === 'create') {
         const localTaskId = entry.taskId;
         const payload = withConsistentDeadline((entry.payload ?? {}) as TaskCreatePayload, 'create');
-        const response = await taskService.createTask(payload, { session });
-        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: response.task._id });
+        const response = await transport.answer<TaskResponse & { replayed?: boolean }>(entry.id, () =>
+          taskService.createTask(payload, { session }),
+        );
+        // A REPLAYED create was applied by an earlier request, and the entry may have changed since: only what the server's task
+        // already holds counts as sent, so the rest is queued as an update (see payloadAppliedBy).
+        const sentPayload = response.replayed ? payloadAppliedBy(response.task, entry.payload) : entry.payload;
+        const partlyApplied = response.replayed === true && Object.keys(sentPayload ?? {}).length !== Object.keys(entry.payload ?? {}).length;
+        settled.set(entry.id, { outcome: 'sent', payload: sentPayload, serverTaskId: response.task._id });
         sentCreates.set(entry.id, response.task._id);
 
         if (localTaskId) {
@@ -261,7 +315,7 @@ const runSyncQueue = async ({
           // not feed the owner's result into that account's UI state and task cache.
           const waiting = queue.slice(index + 1).filter((item) => item.type === 'completion' && item.taskId === localTaskId);
           if (stillSignedIn()) {
-            const stale = await hasNewerWork(localTaskId);
+            const stale = partlyApplied || (await hasNewerWork(localTaskId));
             onTaskCreated(localTaskId, withPendingCompletions(response.task, waiting), { stale });
           }
         }
@@ -289,7 +343,7 @@ const runSyncQueue = async ({
         let response;
         let conflictedDueTime: string | null = null;
         try {
-          response = await taskService.updateTask(resolvedTaskId, payload, { session });
+          response = await transport.answer(entry.id, () => taskService.updateTask(resolvedTaskId, payload, { session }));
         } catch (error) {
           if (!isDueDateConflict(error, payload)) throw error;
           conflictedDueTime = payload.dueTime as string;
@@ -344,10 +398,8 @@ const runSyncQueue = async ({
         let delivered = false;
         if (!resolvedTaskId.startsWith('local-')) {
           try {
-            const response = await taskService.updateTask(
-              resolvedTaskId,
-              { completed: event.kind === 'complete', completionEvent: toTaskEvent(event) },
-              { session },
+            const response = await transport.answer(entry.id, () =>
+              taskService.updateTask(resolvedTaskId, { completed: event.kind === 'complete', completionEvent: toTaskEvent(event) }, { session }),
             );
             delivered = true;
             settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
@@ -402,7 +454,13 @@ const runSyncQueue = async ({
           continue;
         }
 
-        await taskService.deleteTask(resolvedTaskId, { session });
+        try {
+          await transport.answer(entry.id, () => taskService.deleteTask(resolvedTaskId, { session }));
+        } catch (error) {
+          // The task is already gone (deleted on another device, or by an earlier attempt whose answer was lost): what the user
+          // wanted has happened. Treating the 404 as a refusal would report "Not saved" for a delete that worked.
+          if (httpStatusOf(error) !== 404) throw error;
+        }
         settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
         if (stillSignedIn()) onTaskDeleted(resolvedTaskId);
 

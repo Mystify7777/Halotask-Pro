@@ -1,5 +1,6 @@
 import { apiClient, type BoundSession, type SessionRequestConfig } from './api';
 import { Task, TaskCreatePayload, TaskListResponse, TaskResponse, TaskUpdatePayload } from '../types/task';
+import type { SyncBatchResponse, SyncMutation } from '../offline/batchProtocol';
 
 // Matches the server's bounded max page size (halotasks-server/src/utils/pagination.ts).
 // Requesting this explicitly on every call means the server's own default
@@ -57,6 +58,12 @@ export const taskService = {
   updateTask: async (taskId: string, payload: TaskUpdatePayload, options?: { session?: BoundSession }) => {
     const config: SessionRequestConfig = { session: options?.session };
     const response = await apiClient.put<TaskResponse>(`/api/tasks/${taskId}`, payload, config);
+    return response.data;
+  },
+  // One request carrying many queued mutations (Issue #60). The answer holds one result per mutation; see offline/batchProtocol.ts.
+  syncBatch: async (mutations: SyncMutation[], options?: { session?: BoundSession }) => {
+    const config: SessionRequestConfig = { session: options?.session };
+    const response = await apiClient.post<SyncBatchResponse>('/api/tasks/sync', { mutations }, config);
     return response.data;
   },
   deleteTask: async (taskId: string, options?: { session?: BoundSession }) => {

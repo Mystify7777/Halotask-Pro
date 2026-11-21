@@ -192,8 +192,8 @@ describe('identity and idempotence', () => {
     let live: SyncQueueRecord[] = [];
     let reloaded: SyncQueueRecord[] = [];
     actions.forEach((action, i) => {
-      live = applyActionToQueue(live, action, `id${i}`, 10 + i);
-      reloaded = applyActionToQueue(structuredClone(reloaded), action, `id${i}`, 10 + i); // a structured clone is what storage returns
+      live = applyActionToQueue(live, action, `id${i}`, 10 + i, `m-${i}`);
+      reloaded = applyActionToQueue(structuredClone(reloaded), action, `id${i}`, 10 + i, `m-${i}`); // a structured clone is what storage returns
     });
     expect(reloaded).toEqual(live);
   });

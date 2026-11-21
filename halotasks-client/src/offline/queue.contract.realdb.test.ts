@@ -12,7 +12,7 @@ import { deriveSyncState } from './syncState';
 // not prove a real browser's multi-tab timing (same limit as Issue #57).
 
 vi.mock('../services/taskService', () => ({
-  taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn(), getTasks: vi.fn() },
+  taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn(), syncBatch: vi.fn(async () => { throw Object.assign(new Error('no batch route'), { response: { status: 404 } }); }), getTasks: vi.fn() },
 }));
 
 type Modules = {

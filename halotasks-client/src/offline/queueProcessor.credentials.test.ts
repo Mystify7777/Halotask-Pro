@@ -32,6 +32,8 @@ import { processSyncQueue } from './queueProcessor';
 const USER_A = { id: 'user-a', name: 'Alice', email: 'a@example.com' };
 const USER_B = { id: 'user-b', name: 'Bob', email: 'b@example.com' };
 
+// Queued work goes out as ONE batch request (Issue #60).
+const SYNC = '/api/tasks/sync';
 const TOKEN_A = 'token-user-a';
 const TOKEN_B = 'token-user-b';
 
@@ -104,6 +106,16 @@ beforeEach(() => {
       authorization: typeof header === 'string' ? header : null,
     });
     inFlight.hook?.();
+    if (String(config.url) === '/api/tasks/sync') {
+      // The batch endpoint (Issue #60): every mutation applied, answered in order.
+      const { mutations } = JSON.parse(String(config.data)) as { mutations: Array<{ mutationId: string; type: string; localId?: string; task?: { id?: string; localId?: string } }> };
+      const results = mutations.map((m) => ({
+        mutationId: m.mutationId,
+        status: 'applied',
+        ...(m.type === 'delete' ? {} : { task: { _id: m.task?.id ?? m.task?.localId ?? m.localId ?? 'srv' } }),
+      }));
+      return { data: { results }, status: 200, statusText: 'OK', headers: {}, config };
+    }
     const id = String(config.url).split('/').pop() ?? 'srv';
     return { data: { task: { _id: id } }, status: 200, statusText: 'OK', headers: {}, config };
   };
@@ -124,8 +136,8 @@ describe('which credential a queued request carries', () => {
     await processSyncQueue(callbacks());
 
     expect(sent).toEqual([
-      { method: 'PUT', url: '/api/tasks/srv-a1', authorization: `Bearer ${TOKEN_A}` },
-      { method: 'PUT', url: '/api/tasks/srv-b1', authorization: `Bearer ${TOKEN_B}` },
+      { method: 'POST', url: SYNC, authorization: `Bearer ${TOKEN_A}` },
+      { method: 'POST', url: SYNC, authorization: `Bearer ${TOKEN_B}` },
     ]);
     expect(idsOf(USER_A.id)).toEqual([]);
     expect(idsOf(USER_B.id)).toEqual([]);
@@ -193,7 +205,8 @@ describe('the account switches between the ownership check and the request', () 
     const result = await processSyncQueue(callbacks());
 
     expect(result).toMatchObject({ processed: 2, failed: 0, remaining: 0 });
-    expect(sent.map((r) => r.authorization)).toEqual([`Bearer ${TOKEN_A}`, `Bearer ${TOKEN_A}`]);
+    // both kept entries leave in one batch request, under A's token
+    expect(sent.map((r) => r.authorization)).toEqual([`Bearer ${TOKEN_A}`]);
   });
 
   it('the same account re-signing in (a different token) before the request: refused, not sent with either', async () => {
@@ -235,8 +248,8 @@ describe('the account switches between the ownership check and the request', () 
 
 describe('the account switches while a request is in flight', () => {
   it.each(KINDS)(
-    'a $kind that already left stays A’s; nothing further is sent; B’s screen is not fed A’s result',
-    async ({ entry, method, url, callback }) => {
+    'the batch that already left with a $kind is settled as A’s, nothing further is sent, and B’s screen is not fed A’s result',
+    async ({ entry, callback }) => {
       seed(USER_A.id, [entry, update('k2', 'srv-2'), update('k3', 'srv-3')]);
       seed(USER_B.id, [update('b1', 'srv-b1')]);
       signIn(USER_A);
@@ -248,9 +261,11 @@ describe('the account switches while a request is in flight', () => {
 
       const result = await processSyncQueue(cb);
 
-      expect(sent).toEqual([{ method, url, authorization: `Bearer ${TOKEN_A}` }]);
-      expect(result).toMatchObject({ processed: 1, failed: 2, remaining: 2 });
-      expect(idsOf(USER_A.id)).toEqual(['k2', 'k3']);
+      expect(sent).toEqual([{ method: 'POST', url: SYNC, authorization: `Bearer ${TOKEN_A}` }]);
+      // The one request carried all three entries and the server confirmed them: they are settled for A, from the answer already in
+      // hand (nothing is sent as B), instead of staying queued to be replayed.
+      expect(result).toMatchObject({ processed: 3, failed: 0, remaining: 0 });
+      expect(idsOf(USER_A.id)).toEqual([]);
       expect(idsOf(USER_B.id)).toEqual(['b1']);
       expect(cb[callback]).not.toHaveBeenCalled(); // the result belongs to A, who is no longer on screen
     },
@@ -297,7 +312,7 @@ describe('a queued request refused with 401 after the account switched', () => {
 
     const result = await processSyncQueue(callbacks());
 
-    expect(sent).toEqual([{ method: 'PUT', url: '/api/tasks/srv-a1', authorization: `Bearer ${TOKEN_A}` }]);
+    expect(sent).toEqual([{ method: 'POST', url: SYNC, authorization: `Bearer ${TOKEN_A}` }]);
     expect(useAuthStore.getState().token).toBe(TOKEN_B);
     expect(useAuthStore.getState().user).toEqual(USER_B);
     expect(toLogin).not.toHaveBeenCalled();

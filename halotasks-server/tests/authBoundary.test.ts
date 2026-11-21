@@ -236,6 +236,7 @@ describe('every protected route is still guarded', () => {
   const PROTECTED: Array<[method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string]> = [
     ['get', '/api/tasks'],
     ['post', '/api/tasks'],
+    ['post', '/api/tasks/sync'],
     ['put', '/api/tasks/665f1c2e9b1e8a00000000bb'],
     ['delete', '/api/tasks/665f1c2e9b1e8a00000000bb'],
     ['get', '/api/history'],

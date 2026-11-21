@@ -1,7 +1,7 @@
 import type { SyncQueueRecord } from './syncQueue';
 
 /** What a caller asks to queue: everything but the id and the time, which the queue assigns. */
-export type QueueActionInput = Omit<SyncQueueRecord, 'id' | 'createdAt'>;
+export type QueueActionInput = Omit<SyncQueueRecord, 'id' | 'createdAt' | 'mutationId'>;
 
 type QueuePayload = Record<string, unknown>;
 
@@ -9,6 +9,14 @@ export const newQueueId = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+/**
+ * The id a mutation is sent under (Issue #60). It names the EXACT payload being sent: the server remembers an update's id next
+ * to the change, so a retry with the same id is recognised and the same id with another change is refused. That is why it is
+ * not the entry id (which survives merges, rule 6): an entry that has changed since it was last sent gets a NEW mutation id, in
+ * the same step that changes its payload, so changed work can never go out under an id the server may already have applied.
+ */
+export const newMutationId = (): string => `m-${newQueueId()}`;
 
 /** Identity of a completion entry for de-duplication: `kind:completionId`. null when it names no completion (an id-less revoke). */
 export const completionKeyOf = (entry: { payload?: QueuePayload }): string | null => {
@@ -35,8 +43,9 @@ export const completionKeyOf = (entry: { payload?: QueuePayload }): string | nul
  *  5. An edit may merge ACROSS a completion entry of the same task (update, complete, update -> update, complete) ONLY while
  *     its payload cannot modify completion state. A payload that names any completion field (`COMPLETION_STATE_FIELDS`) is
  *     never merged backwards over a completion: it is appended after it, so it cannot move a state change across the event.
- *  6. Identity survives: a merge keeps the entry's `id`, `type` and `taskId` (only the payload and `createdAt` change); a
- *     completion entry's payload (and its `completionId`) is never rewritten.
+ *  6. Identity survives: a merge keeps the entry's `id`, `type` and `taskId` (only the payload, `createdAt` and `mutationId`
+ *     change); a completion entry's payload (and its `completionId`) is never rewritten. The `mutationId` (Issue #60) is NOT
+ *     identity: it names the payload as last changed, so every merge assigns a new one and a new entry gets its own.
  *  7. All of this happens at insertion, inside the commit transaction, never during a sync run (the processor and
  *     `settleSyncQueue` rely on entries changing only by that merge). #60's batching takes the coalesced queue, in order and
  *     with ids intact, as its input; coalescing never depends on batching.
@@ -68,8 +77,9 @@ export const applyActionToQueue = (
   action: QueueActionInput,
   id: string = newQueueId(),
   now: number = Date.now(),
+  mutationId: string = newMutationId(),
 ): SyncQueueRecord[] => {
-  const next: SyncQueueRecord = { ...action, id, createdAt: now };
+  const next: SyncQueueRecord = { ...action, id, createdAt: now, mutationId };
   const items = [...queue];
 
   if (next.type === 'completion') {
@@ -96,6 +106,8 @@ export const applyActionToQueue = (
         ...items[index],
         payload: { ...(items[index].payload ?? {}), ...(next.payload ?? {}) },
         createdAt: next.createdAt,
+        // the payload changed, so it is a different change: a new id (see newMutationId)
+        mutationId,
       };
       return items;
     };

@@ -1,6 +1,6 @@
 import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
-import { applyActionToQueue, newQueueId, type QueueActionInput } from './queueActions';
+import { applyActionToQueue, newMutationId, newQueueId, type QueueActionInput } from './queueActions';
 import { resetStoreLock, withStoreLock } from './storeLock';
 
 /**
@@ -22,6 +22,12 @@ export type SyncQueueRecord = {
   taskId?: string;
   payload?: QueuePayload;
   createdAt: number;
+  /**
+   * The id the entry's CURRENT payload is sent under (Issue #60; see newMutationId). Assigned when the entry is queued and
+   * replaced whenever its payload changes. Absent only on entries queued before it existed: the processor gives those one
+   * (and stores it) before sending anything.
+   */
+  mutationId?: string;
 };
 
 // One queue PER ACCOUNT: `sync_queue:<userId>`. Isolation is by construction — there is no way to read
@@ -140,15 +146,30 @@ export const settleSyncQueue = (
 
       const delta = changedSince(result.payload, entry.payload);
       if (Object.keys(delta).length === 0 || !result.serverTaskId) continue;
-      next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta });
+      // The residual is a different change from the one that was sent (and from the entry as it was queued): its own mutation id.
+      next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta, mutationId: newMutationId() });
     }
 
     for (const [entryId, serverTaskId] of sentCreates) {
       if (!stillQueued.has(entryId)) {
-        next.push({ id: newQueueId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now() });
+        next.push({ id: newQueueId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now(), mutationId: newMutationId() });
       }
     }
 
+    await setSyncQueue(next, ownerId);
+    return next;
+  });
+
+/**
+ * Gives every entry that has no mutation id one, and STORES them, before anything is sent (Issue #60): an id that was only
+ * ever in memory could differ on the next run, and a retry must reuse the id the earlier attempt went out under. Entries
+ * that already have one are left exactly as they are. Runs under the queue lock, so it cannot race an edit merging in.
+ */
+export const ensureMutationIds = (ownerId: string): Promise<SyncQueueRecord[]> =>
+  withQueueLock(async () => {
+    const current = await getSyncQueue(ownerId);
+    if (current.every((entry) => entry.mutationId)) return current;
+    const next = current.map((entry) => (entry.mutationId ? entry : { ...entry, mutationId: newMutationId() }));
     await setSyncQueue(next, ownerId);
     return next;
   });

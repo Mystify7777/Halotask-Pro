@@ -28,6 +28,9 @@ export const aiLimiter = createRateLimiter([
   { ...RATE_LIMITS.aiIp, key: ipKey },
 ]);
 
+// Mounted AFTER requireAuth (the route list order in routes/task.routes.ts), so the user id is available.
+export const taskSyncLimiter = createRateLimiter([{ ...RATE_LIMITS.taskSyncUser, key: userKey }]);
+
 export const pushRelayLimiter = createRateLimiter([{ ...RATE_LIMITS.pushRelayUser, key: userKey }]);
 
 // Mounted BEFORE the secret check on the internal scheduler route, so wrong-secret guesses are counted per source.

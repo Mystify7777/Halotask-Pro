@@ -145,6 +145,20 @@ const taskSchema = new Schema(
       required: true,
       trim: true,
     },
+    // Issue #60: the client's local id for a task it created offline (`local-<uuid>`), so a retried create finds the task it
+    // already made and later mutations can name the task by it. Unique per user (index below); absent on tasks made online.
+    clientKey: {
+      type: String,
+      trim: true,
+    },
+    // Issue #60: the last applied update mutations of this task, `{ id, fp }`, written in the SAME single-document write as the
+    // edit they belong to, so a retried mutation is recognised without a second collection that could fall out of step. Bounded
+    // (APPLIED_MUTATIONS_WINDOW): idempotency holds while the id is still in the window. Never returned to clients.
+    appliedMutations: {
+      type: [new Schema({ id: { type: String, required: true }, fp: { type: String, required: true } }, { _id: false })],
+      select: false,
+      default: undefined,
+    },
     description: {
       type: String,
       default: '',
@@ -213,6 +227,10 @@ const taskSchema = new Schema(
     timestamps: true,
   },
 );
+
+// Issue #60: one task per (user, client key). Partial, so the many tasks made online (no key) are not indexed and never collide.
+// Mongoose builds it at startup when autoIndex is on; on a database that has tasks already it builds without a backfill.
+taskSchema.index({ userId: 1, clientKey: 1 }, { unique: true, partialFilterExpression: { clientKey: { $type: 'string' } } });
 
 // Documents: runs on every save/create/insertMany, as a validate hook AND a save hook, so it also holds when validation is
 // switched off with `validateBeforeSave: false`. Clearing the date of a loaded task clears the time with it, as the API

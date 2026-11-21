@@ -12,7 +12,7 @@ import type { Task } from '../types/task';
 // credited, with the XP twice.
 
 vi.mock('../offline/history', () => ({ updateTodaySnapshot: vi.fn(async () => undefined) }));
-vi.mock('../services/taskService', () => ({ taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn() } }));
+vi.mock('../services/taskService', () => ({ taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn(), syncBatch: vi.fn(async () => { throw Object.assign(new Error('no batch route'), { response: { status: 404 } }); }) } }));
 vi.mock('../services/treeService', () => ({ treeService: { getTree: vi.fn() } }));
 
 import { processSyncQueue } from '../offline/queueProcessor';

@@ -21,7 +21,7 @@ vi.mock('./db', () => ({
 }));
 
 vi.mock('../services/taskService', () => ({
-  taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn() },
+  taskService: { createTask: vi.fn(), updateTask: vi.fn(), deleteTask: vi.fn(), syncBatch: vi.fn(async () => { throw Object.assign(new Error('no batch route'), { response: { status: 404 } }); }) },
 }));
 
 import { SessionChangedError } from '../services/api';
