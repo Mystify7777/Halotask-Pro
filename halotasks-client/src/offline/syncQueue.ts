@@ -1,7 +1,9 @@
 import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
 import { applyActionToQueue, newMutationId, newQueueId, type QueueActionInput } from './queueActions';
-import { resetStoreLock, withStoreLock } from './storeLock';
+import { resetStoreLock, TASKS_KEY, withStoreLock } from './storeLock';
+import { derivePending } from './taskReconcile';
+import type { Task } from '../types/task';
 
 /**
  * `completion` (Issue #47, Phase 2E) is one completion event: the user completed or re-opened a task. It is its own entry
@@ -118,7 +120,7 @@ const changedSince = (sent: QueuePayload | undefined, current: QueuePayload | un
  *    so a delete for it is queued instead of leaving it behind.
  * Returns the queue as written.
  */
-export const settleSyncQueue = (
+export const settleSyncQueue = async (
   ownerId: string,
   settled: Map<string, SettledEntry>,
   sentCreates: Map<string, string>,
@@ -129,36 +131,56 @@ export const settleSyncQueue = (
    * is merged into its create or handled above, as before.
    */
   idMap: Map<string, string> = new Map(),
-): Promise<SyncQueueRecord[]> =>
-  withQueueLock(async () => {
-    const current = await getSyncQueue(ownerId);
-    const next: SyncQueueRecord[] = [];
-    const stillQueued = new Set(current.map((entry) => entry.id));
+): Promise<SyncQueueRecord[]> => (await settleSyncQueueAndTasks(ownerId, settled, sentCreates, idMap)).queue;
 
-    for (const entry of current) {
-      const result = settled.get(entry.id);
-      if (!result) {
-        const remapped = entry.type === 'completion' && entry.taskId ? idMap.get(entry.taskId) : undefined;
-        next.push(remapped ? { ...entry, taskId: remapped } : entry);
-        continue;
+/**
+ * `settleSyncQueue`, also returning the task list as stored. The queue AND the task list are read and written in ONE transaction:
+ * every task's `pendingSync` is derived from the queue this very write produces (Issue #61, I4), so the flag cannot disagree with
+ * the queue a moment after the run, in either direction (a completion still waiting keeps its task pending; a suppressed stale
+ * answer whose work is gone no longer leaves "Not synced yet" behind). `tasks` is null when no list is stored.
+ */
+export const settleSyncQueueAndTasks = async (
+  ownerId: string,
+  settled: Map<string, SettledEntry>,
+  sentCreates: Map<string, string>,
+  idMap: Map<string, string> = new Map(),
+): Promise<{ queue: SyncQueueRecord[]; tasks: Task[] | null }> => {
+  await purgeLegacySyncQueueOnce();
+  return withQueueLock(() =>
+    offlineDb.transaction(async (tx) => {
+      const current = (await tx.get<SyncQueueRecord[]>(keyFor(ownerId))) ?? [];
+      const next: SyncQueueRecord[] = [];
+      const stillQueued = new Set(current.map((entry) => entry.id));
+
+      for (const entry of current) {
+        const result = settled.get(entry.id);
+        if (!result) {
+          const remapped = entry.type === 'completion' && entry.taskId ? idMap.get(entry.taskId) : undefined;
+          next.push(remapped ? { ...entry, taskId: remapped } : entry);
+          continue;
+        }
+        if (result.outcome === 'discarded') continue;
+
+        const delta = changedSince(result.payload, entry.payload);
+        if (Object.keys(delta).length === 0 || !result.serverTaskId) continue;
+        // The residual is a different change from the one that was sent (and from the entry as it was queued): its own mutation id.
+        next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta, mutationId: newMutationId() });
       }
-      if (result.outcome === 'discarded') continue;
 
-      const delta = changedSince(result.payload, entry.payload);
-      if (Object.keys(delta).length === 0 || !result.serverTaskId) continue;
-      // The residual is a different change from the one that was sent (and from the entry as it was queued): its own mutation id.
-      next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta, mutationId: newMutationId() });
-    }
-
-    for (const [entryId, serverTaskId] of sentCreates) {
-      if (!stillQueued.has(entryId)) {
-        next.push({ id: newQueueId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now(), mutationId: newMutationId() });
+      for (const [entryId, serverTaskId] of sentCreates) {
+        if (!stillQueued.has(entryId)) {
+          next.push({ id: newQueueId(), type: 'delete', taskId: serverTaskId, createdAt: Date.now(), mutationId: newMutationId() });
+        }
       }
-    }
 
-    await setSyncQueue(next, ownerId);
-    return next;
-  });
+      await tx.put(keyFor(ownerId), next);
+      const stored = await tx.get<Task[]>(TASKS_KEY);
+      const tasks = stored ? derivePending(stored, next) : null;
+      if (tasks) await tx.put(TASKS_KEY, tasks);
+      return { queue: next, tasks };
+    }),
+  );
+};
 
 /**
  * Gives every entry that has no mutation id one, and STORES them, before anything is sent (Issue #60): an id that was only

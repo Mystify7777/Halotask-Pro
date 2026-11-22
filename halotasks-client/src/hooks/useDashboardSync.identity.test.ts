@@ -18,6 +18,21 @@ vi.mock('../offline/db', () => ({
   offlineDb: {
     get: async (key: string) => (db.store.has(key) ? structuredClone(db.store.get(key)) : null),
     set: async (key: string, value: unknown) => void db.store.set(key, structuredClone(value)),
+    // Staged like the real transaction: applied together only if `fn` succeeds (Issue #57; used by the Issue #61 adoption and settle).
+    transaction: async <T,>(fn: (tx: { get: <V>(key: string) => Promise<V | null>; put: (key: string, value: unknown) => Promise<void> }) => Promise<T>) => {
+      const staged = new Map<string, unknown>();
+      const result = await fn({
+        get: async <V,>(key: string) => {
+          const source = staged.has(key) ? staged : db.store;
+          return source.has(key) ? (structuredClone(source.get(key)) as V) : null;
+        },
+        put: async (key: string, value: unknown) => {
+          staged.set(key, structuredClone(value));
+        },
+      });
+      staged.forEach((value, key) => db.store.set(key, value));
+      return result;
+    },
     remove: async (key: string) => void db.store.delete(key),
   },
 }));
@@ -67,6 +82,7 @@ describe('reminder identity across the offline create -> server id change', () =
     const local = makeTask({ _id: LOCAL_ID, title: 'Pay rent', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '12:30', pendingSync: true });
     const synced = makeTask({ _id: 'srv-1', title: 'Pay rent', dueDate: '2026-10-20T00:00:00.000Z', dueTime: '12:30' });
     tasks = [local];
+    db.store.set('tasks', structuredClone([local])); // the list the offline commit stored (the sync run now adopts into the STORED list, Issue #61)
     await enqueueSyncAction({ type: 'create', taskId: LOCAL_ID, payload: { title: 'Pay rent', priority: 'medium', dueDate: '2026-10-20', dueTime: '12:30' } });
     vi.mocked(taskService.createTask).mockResolvedValue({ task: synced });
     vi.mocked(taskService.getTasks).mockResolvedValue({ tasks: [synced], page: 1, limit: 1, hasMore: false });

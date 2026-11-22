@@ -5,7 +5,9 @@ import type { GrowthResult } from '../growth/treeTypes';
 import { completionService, type StandaloneEventBody } from '../services/completionService';
 import { httpStatusOf, isPermanentError } from './deliveryErrors';
 import { parseCompletionEntry, type CompletionEntryPayload } from './completionEvents';
-import { ensureMutationIds, getSyncQueue, settleSyncQueue, SettledEntry, type SyncQueueRecord } from './syncQueue';
+import { ensureMutationIds, settleSyncQueueAndTasks, SettledEntry, type SyncQueueRecord } from './syncQueue';
+import { adoptServerAnswer } from './localMutations';
+import { adoptCreated, adoptDeleted, adoptUpdated } from './taskReconcile';
 import { COMPLETION_STATE_FIELDS } from './queueActions';
 import { createBatchTransport, payloadAppliedBy, type PlannedMutation } from './batchTransport';
 import type { TaskRef } from './batchProtocol';
@@ -74,6 +76,12 @@ type ProcessSyncQueueParams = {
   onTaskCreated: (localTaskId: string, serverTask: Task, context: AnswerContext) => void;
   onTaskUpdated: (taskId: string, serverTask: Task, context: AnswerContext) => void;
   onTaskDeleted: (taskId: string) => void;
+  /**
+   * The task list as it was STORED by an adoption or by the end-of-run settle (Issue #61). The processor writes the list itself, in
+   * the same transaction that decides whether an answer is stale; this hands that list to the caller to show. The other callbacks
+   * above are notifications and no longer write anything. Optional.
+   */
+  onTasksStored?: (tasks: Task[]) => void;
   /**
    * The server's Growth Tree answer to a replayed completion (Issue #24). Called only while the owner is
    * still signed in, like the other callbacks. Optional: callers that do not show the tree can omit it.
@@ -188,6 +196,7 @@ const runSyncQueue = async ({
   onTaskCreated,
   onTaskUpdated,
   onTaskDeleted,
+  onTasksStored,
   onGrowth,
   onDueTimeConflict,
   onCompletionsDelivered,
@@ -227,16 +236,10 @@ const runSyncQueue = async ({
   // What was queued when this run started. Work the user did while a request was out is either a NEW entry or a change
   // merged into an entry that was already here (an edit merges into a queued update or create): both show up as a difference.
   const snapshotPayloads = new Map(queue.map((item) => [item.id, JSON.stringify(item.payload ?? null)]));
-  const hasNewerWork = async (...taskIds: string[]): Promise<boolean> => {
-    const current = await getSyncQueue(ownerId);
-    return current.some(
-      (item) =>
-        item.taskId !== undefined &&
-        item.taskId !== null &&
-        taskIds.includes(item.taskId) &&
-        snapshotPayloads.get(item.id) !== JSON.stringify(item.payload ?? null),
-    );
-  };
+  // Whether an answer is stale (the user did more to the task while it was in flight) is decided by adoptServerAnswer, INSIDE the
+  // transaction that writes the task list, from the queue as it is at that moment (Issue #61). `snapshotPayloads` is what it compares to.
+  const adopt = (taskIds: string[], apply: (stored: Task[], context: { stale: boolean }) => Task[], alsoStale = false) =>
+    adoptServerAnswer({ ownerId, taskIds, snapshot: snapshotPayloads, alsoStale, apply });
   // ── Batch (Issue #60) ─────────────────────────────────────────────────────────────────────────────────────────────────
   // The entries the loop below WOULD send, in queue order, go out in batches first; the loop then asks the transport for each
   // entry's answer. Planning mirrors the loop's own decisions: an entry the loop settles locally (nothing to send it to, an
@@ -315,8 +318,10 @@ const runSyncQueue = async ({
           // not feed the owner's result into that account's UI state and task cache.
           const waiting = queue.slice(index + 1).filter((item) => item.type === 'completion' && item.taskId === localTaskId);
           if (stillSignedIn()) {
-            const stale = partlyApplied || (await hasNewerWork(localTaskId));
-            onTaskCreated(localTaskId, withPendingCompletions(response.task, waiting), { stale });
+            const adopted = withPendingCompletions(response.task, waiting);
+            const outcome = await adopt([localTaskId], (stored, { stale }) => adoptCreated(stored, localTaskId, adopted, stale), partlyApplied);
+            onTaskCreated(localTaskId, adopted, { stale: outcome.stale });
+            onTasksStored?.(outcome.tasks);
           }
         }
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
@@ -354,8 +359,9 @@ const runSyncQueue = async ({
         // that completion will be).
         const completionWaits = queue.slice(index + 1).some((item) => item.type === 'completion' && item.taskId === sourceTaskId);
         if (!completionWaits && stillSignedIn()) {
-          const stale = await hasNewerWork(sourceTaskId, resolvedTaskId);
-          if (!stale) onTaskUpdated(resolvedTaskId, response.task, { stale });
+          const outcome = await adopt([sourceTaskId, resolvedTaskId], (stored, { stale }) => adoptUpdated(stored, resolvedTaskId, response.task, stale));
+          if (!outcome.stale) onTaskUpdated(resolvedTaskId, response.task, { stale: false });
+          onTasksStored?.(outcome.tasks);
         }
         if (conflictedDueTime !== null && stillSignedIn()) onDueTimeConflict?.(resolvedTaskId, conflictedDueTime);
         if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
@@ -404,8 +410,9 @@ const runSyncQueue = async ({
             delivered = true;
             settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
             if (!laterForTask && stillSignedIn()) {
-              const stale = await hasNewerWork(sourceTaskId, resolvedTaskId);
-              if (!stale) onTaskUpdated(resolvedTaskId, response.task, { stale });
+              const outcome = await adopt([sourceTaskId, resolvedTaskId], (stored, { stale }) => adoptUpdated(stored, resolvedTaskId, response.task, stale));
+              if (!outcome.stale) onTaskUpdated(resolvedTaskId, response.task, { stale: false });
+              onTasksStored?.(outcome.tasks);
             }
             if (response.growth && stillSignedIn()) onGrowth?.(response.growth);
           } catch (error) {
@@ -462,7 +469,11 @@ const runSyncQueue = async ({
           if (httpStatusOf(error) !== 404) throw error;
         }
         settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
-        if (stillSignedIn()) onTaskDeleted(resolvedTaskId);
+        if (stillSignedIn()) {
+          const outcome = await adopt([sourceTaskId, resolvedTaskId], (stored) => adoptDeleted(stored, resolvedTaskId));
+          onTaskDeleted(resolvedTaskId);
+          onTasksStored?.(outcome.tasks);
+        }
 
         processed += 1;
       }
@@ -497,7 +508,10 @@ const runSyncQueue = async ({
     }
   }
 
-  const remaining = (await settleSyncQueue(ownerId, settled, sentCreates, idMap)).length;
+  const settledState = await settleSyncQueueAndTasks(ownerId, settled, sentCreates, idMap);
+  const remaining = settledState.queue.length;
+  // The list as the settle stored it: every task's pending flag now matches the queue that was just written (Issue #61).
+  if (settledState.tasks && stillSignedIn()) onTasksStored?.(settledState.tasks);
   if (deliveredCompletions > 0 && stillSignedIn()) onCompletionsDelivered?.();
 
   return {

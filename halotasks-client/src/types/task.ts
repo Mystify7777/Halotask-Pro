@@ -46,6 +46,12 @@ export type Task = {
    * `_id` so the task keeps ONE reminder identity (see reminders/identity.ts). Never sent to the server.
    */
   clientKey?: string;
+  /**
+   * Client-only (Issue #61). The server's `updatedAt` of the task representation this copy was last ADOPTED from (an
+   * acknowledgement or a server list). It only ever advances from server data, never from a local edit, and it is how an older
+   * server snapshot is recognised and refused (offline/localMutations.ts, `isOlderSnapshot`). Never sent to the server.
+   */
+  syncedRevision?: string;
 };
 
 export type TaskListResponse = {

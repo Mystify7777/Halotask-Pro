@@ -179,11 +179,11 @@ export default function DashboardPage() {
 
   const sync = useDashboardSync({
     isOnline,
-    persistTasks: tasksHook.persistTasks,
     setLoadingTasks,
     setStatusError,
     setStatusInfo,
     setTasks: tasksHook.setTasks,
+    showStoredTasks: tasksHook.showStoredTasks,
     applyServerGrowth,
     onCompletionsDelivered: () => void requestHistoryReconcile(),
   });

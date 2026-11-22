@@ -19,11 +19,17 @@ export type RejectionNotice = { message: string; count: number };
 
 type UseDashboardSyncArgs = {
   isOnline: boolean;
-  persistTasks: (updater: (current: Task[]) => Task[]) => void;
+  /** Unused since Issue #61 (the processor writes the list itself, atomically); kept so callers need not change. */
+  persistTasks?: (updater: (current: Task[]) => Task[]) => void;
   setLoadingTasks: (loading: boolean) => void;
   setStatusError: (message: string | null) => void;
   setStatusInfo: (message: string | null) => void;
   setTasks: (tasks: Task[]) => void;
+  /**
+   * Show a task list the sync run has just STORED (an adoption or the end-of-run settle). Defaults to `setTasks`; the dashboard also
+   * refreshes its refs and the 7-day snapshot.
+   */
+  showStoredTasks?: (tasks: Task[]) => void;
   /** Adopt the Growth Tree the server returned for a replayed completion (Issue #24). */
   applyServerGrowth?: (growth: GrowthResult | undefined) => void;
   /**
@@ -36,11 +42,11 @@ type UseDashboardSyncArgs = {
 
 export function useDashboardSync({
   isOnline,
-  persistTasks,
   setLoadingTasks,
   setStatusError,
   setStatusInfo,
   setTasks,
+  showStoredTasks,
   applyServerGrowth,
   onCompletionsDelivered,
 }: UseDashboardSyncArgs) {
@@ -117,26 +123,11 @@ export function useDashboardSync({
     setDraining(true);
 
     const result = await processSyncQueue({
-      onTaskCreated: (localTaskId, serverTask, { stale }) => {
-        persistTasks((current) =>
-          current.map((task) => {
-            if (task._id !== localTaskId) return task;
-            const adopted = keepReminderIdentity(serverTask, task, localTaskId);
-            // The user changed the task after it was sent (Issue #57): those changes are still queued, so the local copy
-            // stays as it is and only takes the server's identity, which the queue's later entries are remapped to.
-            return stale ? { ...task, _id: adopted._id, clientKey: adopted.clientKey, pendingSync: true } : { ...adopted, pendingSync: false };
-          }),
-        );
-      },
-      // Stale answers never reach this callback: the processor holds them back while newer local work for the task exists.
-      onTaskUpdated: (taskId, serverTask) => {
-        persistTasks((current) =>
-          current.map((task) => (task._id === taskId ? { ...keepReminderIdentity(serverTask, task), pendingSync: false } : task)),
-        );
-      },
-      onTaskDeleted: (taskId) => {
-        persistTasks((current) => current.filter((task) => task._id !== taskId));
-      },
+      // Adoption is done by the processor, in one transaction with the staleness decision (Issue #61); these only show the result.
+      onTaskCreated: () => undefined,
+      onTaskUpdated: () => undefined,
+      onTaskDeleted: () => undefined,
+      onTasksStored: (stored) => (showStoredTasks ?? setTasks)(stored),
       onGrowth: (growth) => applyServerGrowth?.(growth),
       onCompletionsDelivered: () => onCompletionsDelivered?.(),
       onDueTimeConflict: () =>

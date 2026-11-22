@@ -13,6 +13,21 @@ vi.mock('./db', () => ({
     set: async (key: string, value: unknown) => {
       db.store.set(key, structuredClone(value));
     },
+    // Staged like the real transaction: applied together only if `fn` succeeds (Issue #57; used by the Issue #61 adoption and settle).
+    transaction: async <T,>(fn: (tx: { get: <V>(key: string) => Promise<V | null>; put: (key: string, value: unknown) => Promise<void> }) => Promise<T>) => {
+      const staged = new Map<string, unknown>();
+      const result = await fn({
+        get: async <V,>(key: string) => {
+          const source = staged.has(key) ? staged : db.store;
+          return source.has(key) ? (structuredClone(source.get(key)) as V) : null;
+        },
+        put: async (key: string, value: unknown) => {
+          staged.set(key, structuredClone(value));
+        },
+      });
+      staged.forEach((value, key) => db.store.set(key, value));
+      return result;
+    },
     remove: async (key: string) => {
       db.store.delete(key);
     },

@@ -135,6 +135,13 @@ export function useDashboardTasks({
       });
   };
 
+  /** Shows a list the sync run has just stored (Issue #61): state, the ref the next commit seeds from, and the 7-day snapshot. */
+  const showStoredTasks = (next: Task[]) => {
+    latestTasksRef.current = next;
+    setTasks(next);
+    void updateTodaySnapshot(next);
+  };
+
   /**
    * THE way a user's task mutation happens (Issue #57): validate and derive inside one IndexedDB transaction that also
    * writes the queue entries, wait for that commit, and only then render. If it throws, nothing was stored and nothing is
@@ -738,6 +745,7 @@ export function useDashboardTasks({
     tasks,
     setTasks,
     persistTasks,
+    showStoredTasks,
 
     creatingTask,
     bulkActionLoading,
