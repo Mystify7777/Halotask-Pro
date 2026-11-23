@@ -93,3 +93,38 @@ describe('SyncIndicator', () => {
     expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
   });
 });
+
+// Issue #62B: a conflicted edit is shown with the two choices, and a stray Dismiss never discards the decision.
+describe('SyncIndicator conflicts', () => {
+  const conflictNotice = { message: '“Plan” was changed on another device, so your edit was not saved (title: yours “A”, now “B”).', count: 1, conflict: {} as never };
+  const mountConflict = (extra: { message: string; count: number; conflict?: never }[] = []) => {
+    const onKeepMine = vi.fn();
+    const onUseTheirs = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <SyncIndicator state={state({ kind: 'attention', rejected: 1 })} rejections={[conflictNotice, ...extra]} retrying={false} onRetry={vi.fn()} onDismiss={onDismiss} onKeepMine={onKeepMine} onUseTheirs={onUseTheirs} />,
+    );
+    return { onKeepMine, onUseTheirs, onDismiss };
+  };
+
+  it('shows the message with Keep mine and Use theirs, each acting on THAT notice', async () => {
+    const { onKeepMine, onUseTheirs } = mountConflict();
+    expect(screen.getByRole('status')).toHaveTextContent('was changed on another device');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Keep mine' }));
+    expect(onKeepMine).toHaveBeenCalledWith(conflictNotice);
+    await user.click(screen.getByRole('button', { name: 'Use theirs' }));
+    expect(onUseTheirs).toHaveBeenCalledWith(conflictNotice);
+  });
+
+  it('a conflict alone has no Dismiss (it must be resolved); with a refusal beside it, Dismiss is offered for the refusal', () => {
+    mountConflict();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
+
+  it('a refusal beside a conflict still gets its Dismiss, and no choice buttons', () => {
+    mountConflict([{ message: 'Not saved: refused.', count: 1 }]);
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Keep mine' })).toHaveLength(1);
+  });
+});

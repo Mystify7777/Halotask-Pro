@@ -12,6 +12,7 @@ import { COMPLETION_STATE_FIELDS } from './queueActions';
 import { createBatchTransport, payloadAppliedBy, type PlannedMutation } from './batchTransport';
 import type { TaskRef } from './batchProtocol';
 import type { BlockedReason } from './syncState';
+import { TaskConflictError, type ConflictedMutation } from './conflicts';
 
 /**
  * The queue merges later edits into earlier entries ({...old, ...new}), so a merged payload can in principle hold a due
@@ -118,6 +119,12 @@ export type ProcessSyncQueueResult = {
   remaining: number;
   rejected: RejectedMutation[];
   /**
+   * Edits the server did NOT apply because another device changed a field first (Issue #62B). Each entry was removed from the queue;
+   * the caller shows it until the person chooses Keep mine or Use theirs (session memory only, D7). Optional so a caller that builds
+   * a result by hand need not know about it.
+   */
+  conflicts?: ConflictedMutation[];
+  /**
    * Why the run stopped with work left (Issue #58): `auth` = the session is not accepted (401, or the account changed
    * mid-run), `unreachable` = a request failed in a way that is neither a refusal nor an auth problem (network, timeout,
    * 5xx), so the server may not have received it. `null` when nothing stopped the run. A refusal is NOT blocked: it is in
@@ -213,7 +220,7 @@ const runSyncQueue = async ({
   const session = captureSession();
 
   if (!session) {
-    return { processed: 0, failed: 0, remaining: 0, rejected: [], blocked: null };
+    return { processed: 0, failed: 0, remaining: 0, rejected: [], conflicts: [], blocked: null };
   }
 
   const ownerId = session.userId;
@@ -227,12 +234,14 @@ const runSyncQueue = async ({
       failed: 0,
       remaining: 0,
       rejected: [],
+      conflicts: [],
       blocked: null,
     };
   }
 
   const idMap = new Map<string, string>();
   const rejected: RejectedMutation[] = [];
+  const conflicts: ConflictedMutation[] = [];
   // What was queued when this run started. Work the user did while a request was out is either a NEW entry or a change
   // merged into an entry that was already here (an edit merges into a queued update or create): both show up as a difference.
   const snapshotPayloads = new Map(queue.map((item) => [item.id, JSON.stringify(item.payload ?? null)]));
@@ -266,7 +275,9 @@ const runSyncQueue = async ({
       if (entry.type === 'update') {
         const payload = withConsistentDeadline((entry.payload ?? {}) as TaskUpdatePayload, 'update');
         if (COMPLETION_STATE_FIELDS.some((field) => field in payload)) continue; // completion state goes through its own entry type
-        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'update', task, payload } });
+        // Issue #62B: the base goes with the mutation only when there is something to check; without it the server is last-write-wins.
+        const base = entry.base && Object.keys(entry.base).length > 0 ? entry.base : undefined;
+        plan.push({ entryId: entry.id, mutation: { mutationId, type: 'update', task, payload, ...(base ? { base } : {}) } });
       } else if (entry.type === 'completion') {
         const event = parseCompletionEntry(entry.payload);
         if (!event) continue;
@@ -354,7 +365,8 @@ const runSyncQueue = async ({
           conflictedDueTime = payload.dueTime as string;
           response = await taskService.updateTask(resolvedTaskId, withoutDueTime(payload), { session });
         }
-        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId });
+        // the server's task is carried along: a residual edit is based on what the server STORED (normalised), not on what was sent
+        settled.set(entry.id, { outcome: 'sent', payload: entry.payload, serverTaskId: resolvedTaskId, serverTask: response.task });
         // A completion waiting behind this edit means the local copy is ahead of this answer: it is not adopted (the answer to
         // that completion will be).
         const completionWaits = queue.slice(index + 1).some((item) => item.type === 'completion' && item.taskId === sourceTaskId);
@@ -495,6 +507,25 @@ const runSyncQueue = async ({
         break;
       }
 
+      if (error instanceof TaskConflictError && entry.type === 'update' && entry.taskId) {
+        // Another device changed a field this edit was based on (Issue #62B). Nothing was written on the server. The entry is dropped
+        // (what to do is the person's decision, D8), what the user asked for is kept in the notice, and the server's current task is
+        // adopted like any other answer: through the transaction that decides staleness, so a newer local edit is never overwritten.
+        const resolvedTaskId = idMap.get(entry.taskId) ?? entry.taskId;
+        conflicts.push({ taskId: resolvedTaskId, title: titleOfEntry(entry), fields: error.conflicts, mine: { ...(entry.payload ?? {}) }, base: { ...(entry.base ?? {}) } });
+        settled.set(entry.id, { outcome: 'conflicted', payload: entry.payload, serverTaskId: resolvedTaskId });
+        const serverTask = error.task;
+        // like an applied answer: a completion waiting behind this edit means the local copy is ahead, and that completion's answer is adopted instead
+        const completionWaits = queue.slice(index + 1).some((item) => item.type === 'completion' && item.taskId === entry.taskId);
+        if (serverTask && !completionWaits && stillSignedIn()) {
+          const outcome = await adopt([entry.taskId, resolvedTaskId], (stored, { stale }) => adoptUpdated(stored, resolvedTaskId, serverTask, stale));
+          if (!outcome.stale) onTaskUpdated(resolvedTaskId, serverTask, { stale: false });
+          onTasksStored?.(outcome.tasks);
+        }
+        processed += 1;
+        continue;
+      }
+
       if (isPermanentError(error)) {
         console.warn('[syncQueue] Discarding permanently failed entry:', entry.type, entry.taskId, error);
         rejected.push({ type: entry.type, taskId: entry.taskId ?? null, title: titleOfEntry(entry), status: httpStatusOf(error) });
@@ -519,6 +550,7 @@ const runSyncQueue = async ({
     failed: remaining,
     remaining,
     rejected,
+    conflicts,
     blocked,
   };
 };
@@ -539,7 +571,7 @@ const withCrossTabLock = <T>(ownerId: string, fn: () => Promise<T>): Promise<T> 
 
 export const processSyncQueue = (params: ProcessSyncQueueParams): Promise<ProcessSyncQueueResult> => {
   const ownerId = captureSession()?.userId;
-  if (!ownerId) return Promise.resolve({ processed: 0, failed: 0, remaining: 0, rejected: [], blocked: null });
+  if (!ownerId) return Promise.resolve({ processed: 0, failed: 0, remaining: 0, rejected: [], conflicts: [], blocked: null });
 
   const previous = runningFor.get(ownerId) ?? Promise.resolve();
   const run = previous.then(() => withCrossTabLock(ownerId, () => runSyncQueue(params)));

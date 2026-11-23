@@ -7,6 +7,10 @@ type SyncIndicatorProps = {
   retrying: boolean;
   onRetry: () => void;
   onDismiss: () => void;
+  /** Issue #62B: re-apply a conflicted edit on top of the server's values. */
+  onKeepMine?: (notice: RejectionNotice) => void;
+  /** Issue #62B: accept the server's values (already shown); the discarded edit is dropped. */
+  onUseTheirs?: (notice: RejectionNotice) => void;
 };
 
 const changes = (count: number) => `${count} ${count === 1 ? 'change' : 'changes'}`;
@@ -17,7 +21,7 @@ const changes = (count: number) => `${count} ${count === 1 ? 'change' : 'changes
  * queued; "stored on this device" is said whenever the work has not been sent. Quiet (nothing at all) when the app was just
  * opened and has not synchronized yet, because then there is nothing true to say.
  */
-export default function SyncIndicator({ state, rejections, retrying, onRetry, onDismiss }: SyncIndicatorProps) {
+export default function SyncIndicator({ state, rejections, retrying, onRetry, onDismiss, onKeepMine, onUseTheirs }: SyncIndicatorProps) {
   if (state.kind === 'unverified') return null;
 
   if (state.kind === 'attention') {
@@ -25,7 +29,20 @@ export default function SyncIndicator({ state, rejections, retrying, onRetry, on
       <div className="sync-indicator attention" role="status">
         <div className="sync-indicator-lines">
           {rejections.map((notice, index) => (
-            <span key={index}>{notice.message}</span>
+            <span key={index}>
+              {notice.message}
+              {notice.conflict && (
+                <>
+                  {' '}
+                  <button type="button" className="ghost-btn btn-sm" onClick={() => onKeepMine?.(notice)}>
+                    Keep mine
+                  </button>{' '}
+                  <button type="button" className="ghost-btn btn-sm" onClick={() => onUseTheirs?.(notice)}>
+                    Use theirs
+                  </button>
+                </>
+              )}
+            </span>
           ))}
           {state.blocked === 'unreachable' && (
             <span>Couldn’t sync with the server. {changes(state.pending)} kept on this device.</span>
@@ -37,7 +54,7 @@ export default function SyncIndicator({ state, rejections, retrying, onRetry, on
             {retrying ? 'Retrying...' : 'Retry'}
           </button>
         )}
-        {rejections.length > 0 && (
+        {rejections.some((notice) => !notice.conflict) && (
           <button type="button" className="ghost-btn btn-sm" onClick={onDismiss}>
             Dismiss
           </button>

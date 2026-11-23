@@ -6,6 +6,7 @@ import { useTagSuggestions } from './useTagSuggestions';
 import { makeCompletionTransition, type CompletionTransition } from '../offline/completionEvents';
 import type { QueueActionInput } from '../offline/queueActions';
 import { commitLocalMutation, type CommitResult, type LocalMutation } from '../offline/localMutations';
+import { applyUpdatePayload, keepMineEdit, type ConflictedMutation } from '../offline/conflicts';
 import {
   assertNewLocalId,
   MutationRejectedError,
@@ -160,6 +161,31 @@ export function useDashboardTasks({
     // Offline the entry simply waits: the sync state derives "offline, N stored on this device" from the queue (Issue #58).
     if (isOnline) syncBridgeRef.current.requestSync();
     return result;
+  };
+
+  /**
+   * "Keep mine" (Issue #62B, D8): the edit the server did not apply is made again as a fresh, ordinary edit on top of what the server
+   * holds now. It is based on that value (the person has seen it), so it conflicts again only if the field changes yet again.
+   * Returns whether it was queued.
+   */
+  const keepMineAfterConflict = async (conflict: ConflictedMutation): Promise<boolean> => {
+    const { payload, base } = keepMineEdit(conflict);
+    try {
+      await commitMutation({
+        derive: (stored) => {
+          requireTask(stored, conflict.taskId);
+          const updatedAt = new Date().toISOString();
+          return {
+            tasks: stored.map((item) => (item._id === conflict.taskId ? { ...applyUpdatePayload(item, payload), updatedAt, pendingSync: true } : item)),
+            actions: [{ type: 'update', taskId: conflict.taskId, payload, base, rebase: true }],
+          };
+        },
+      });
+      return true;
+    } catch (error) {
+      reportCommitFailure(error);
+      return false;
+    }
   };
 
   const reportCommitFailure = (error: unknown) => {
@@ -746,6 +772,7 @@ export function useDashboardTasks({
     setTasks,
     persistTasks,
     showStoredTasks,
+    keepMineAfterConflict,
 
     creatingTask,
     bulkActionLoading,

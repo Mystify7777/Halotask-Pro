@@ -1,6 +1,7 @@
 import { offlineDb } from './db';
 import { useAuthStore } from '../store/authStore';
 import { applyActionToQueue, newMutationId, newQueueId, type QueueActionInput } from './queueActions';
+import { baseForDelta, canonicalBase, type BaseValues } from './conflicts';
 import { resetStoreLock, TASKS_KEY, withStoreLock } from './storeLock';
 import { derivePending } from './taskReconcile';
 import type { Task } from '../types/task';
@@ -30,6 +31,13 @@ export type SyncQueueRecord = {
    * (and stores it) before sending anything.
    */
   mutationId?: string;
+  /**
+   * Issue #62B, updates only: the server-derived value of each field the user changed, as it was at the start of the first unsent
+   * edit of that field (see offline/conflicts.ts, D11). Sent with the mutation so the server can tell a stale edit from a current
+   * one. Absent on entries queued before it existed and on anything that is not an update of a task the server has: those stay
+   * last-write-wins.
+   */
+  base?: BaseValues;
 };
 
 // One queue PER ACCOUNT: `sync_queue:<userId>`. Isolation is by construction — there is no way to read
@@ -92,8 +100,18 @@ export const clearSyncQueue = async (userId: string | null = getCurrentQueueOwne
 
 /** What the processor did with one queue entry during a run (see settleSyncQueue). */
 export type SettledEntry =
-  /** Sent and accepted. `payload` is exactly what was read when the run started; `serverTaskId` is the task it landed on. */
-  | { outcome: 'sent'; payload: QueuePayload | undefined; serverTaskId: string | null }
+  /**
+   * Sent and accepted. `payload` is exactly what was read when the run started; `serverTaskId` is the task it landed on.
+   * `serverTask` (an update's answer, Issue #62B) is the canonical task the server returned: residual bases come from IT, never from
+   * the submitted payload, because the server normalises (trims, parses dates, drops a due time without a due date).
+   */
+  | { outcome: 'sent'; payload: QueuePayload | undefined; serverTaskId: string | null; serverTask?: Task }
+  /**
+   * The server did not apply an update because another device changed a field first (Issue #62B). The entry is dropped (the user
+   * decides what happens next), but anything merged into it after it was read is kept as a new update that still carries the
+   * ORIGINAL base, so a later edit of the same field neither disappears nor overwrites what the server now holds.
+   */
+  | { outcome: 'conflicted'; payload: QueuePayload | undefined; serverTaskId: string }
   /** Permanently refused by the server: dropped, never retried (the pre-existing rule for 4xx answers). */
   | { outcome: 'discarded' };
 
@@ -164,7 +182,15 @@ export const settleSyncQueueAndTasks = async (
         const delta = changedSince(result.payload, entry.payload);
         if (Object.keys(delta).length === 0 || !result.serverTaskId) continue;
         // The residual is a different change from the one that was sent (and from the entry as it was queued): its own mutation id.
-        next.push({ ...entry, type: 'update', taskId: result.serverTaskId, payload: delta, mutationId: newMutationId() });
+        // Its base (Issue #62B): a field the sent edit carried is now what the server holds, so that is its base; any other field
+        // keeps the base it had. A conflicted entry was NOT applied, so every field keeps its original base.
+        const { base: _sentBase, ...rest } = entry;
+        // (D11: "server-derived") A field the sent edit carried is based on the value the server STORED for it, read from the task the
+        // server returned. With no returned task nothing is guessed from the payload: that field simply has no base (last-write-wins).
+        const canonical = result.outcome === 'sent' && result.serverTask ? canonicalBase(result.serverTask, result.payload) : undefined;
+        // an accepted send whose answer carried no task leaves nothing trustworthy to base on (entry.base is now stale): last-write-wins
+        const base = entry.type === 'create' || (result.outcome === 'sent' && !result.serverTask) ? undefined : baseForDelta(delta, canonical, entry.base);
+        next.push({ ...rest, type: 'update', taskId: result.serverTaskId, payload: delta, mutationId: newMutationId(), ...(base !== undefined ? { base } : {}) });
       }
 
       for (const [entryId, serverTaskId] of sentCreates) {

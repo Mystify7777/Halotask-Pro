@@ -4,6 +4,7 @@ import { applyActionToQueue, type QueueActionInput } from './queueActions';
 import { getCurrentQueueOwner, purgeLegacySyncQueueOnce, queueKeyFor, type SyncQueueRecord } from './syncQueue';
 import { TASKS_KEY, withStoreLock } from './storeLock';
 import { derivePending, isOlderSnapshot, withRevision } from './taskReconcile';
+import { captureBase } from './conflicts';
 
 export { derivePending } from './taskReconcile';
 
@@ -44,7 +45,14 @@ export const commitLocalMutation = (mutation: LocalMutation): Promise<CommitResu
       const stored = (await tx.get<Task[]>(TASKS_KEY)) ?? mutation.seed ?? [];
       const queue = (await tx.get<SyncQueueRecord[]>(queueKeyFor(ownerId))) ?? [];
       const { tasks, actions } = mutation.derive(stored);
-      const nextQueue = actions.reduce<SyncQueueRecord[]>((current, action) => applyActionToQueue(current, action), queue);
+      // Issue #62B: an edit of a task the server has carries the server-derived value of each field it changes (D11). `stored` is the
+      // list before this edit, so a field's value there is what the user saw; the queue keeps an earlier entry's base over it.
+      const withBases = actions.map((action) =>
+        action.type === 'update' && action.taskId && !action.taskId.startsWith('local-') && action.base === undefined
+          ? { ...action, base: captureBase(stored.find((task) => task._id === action.taskId), action.payload) }
+          : action,
+      );
+      const nextQueue = withBases.reduce<SyncQueueRecord[]>((current, action) => applyActionToQueue(current, action), queue);
       await tx.put(TASKS_KEY, tasks);
       await tx.put(queueKeyFor(ownerId), nextQueue);
       return { tasks, queue: nextQueue };

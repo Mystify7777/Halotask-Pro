@@ -5,6 +5,7 @@ import { looksLikeServerTrouble } from '../launch/serverTrouble';
 import { getCachedTasks } from '../offline/cache';
 import { reconcileServerTasks, settleRejectedLocalState } from '../offline/localMutations';
 import { describeRejections } from '../offline/rejections';
+import { describeConflict, type ConflictedMutation } from '../offline/conflicts';
 import { processSyncQueue, type RejectedMutation } from '../offline/queueProcessor';
 import { getSyncQueue } from '../offline/syncQueue';
 import { announceQueueChanged, onQueueChanged } from '../offline/queueSignal';
@@ -14,8 +15,12 @@ import type { Task } from '../types/task';
 import { keepReminderIdentity } from '../reminders/identity';
 import type { GrowthResult } from '../growth/treeTypes';
 
-/** A refusal the person has not dismissed yet (Issue #58). Session memory only: nothing about it is persisted. */
-export type RejectionNotice = { message: string; count: number };
+/**
+ * A refusal the person has not dismissed yet (Issue #58), or (with `conflict`, Issue #62B) an edit the server did not apply because
+ * another device changed a field first, kept until the person chooses Keep mine or Use theirs. Session memory only: nothing about
+ * it is persisted (D7).
+ */
+export type RejectionNotice = { message: string; count: number; conflict?: ConflictedMutation };
 
 type UseDashboardSyncArgs = {
   isOnline: boolean;
@@ -114,6 +119,7 @@ export function useDashboardSync({
       return {
         remaining: 0,
         rejected: [] as RejectedMutation[],
+        conflicts: [] as ConflictedMutation[],
         blocked: null as BlockedReason | null,
         reconciled: false,
       };
@@ -144,7 +150,15 @@ export function useDashboardSync({
     setPendingQueueCount(left);
     setBlocked(result.blocked);
     setDraining(false);
-    if (left === 0 && result.blocked === null && result.rejected.length === 0) setConfirmedAt(new Date().toISOString());
+    const conflicted = result.conflicts ?? [];
+    if (conflicted.length > 0) {
+      // Nothing was saved for these and the person has to decide, so the device is not "synced" (the processor already adopted the server's values).
+      setRejectionNotices((current) => [
+        ...current,
+        ...conflicted.map((conflict) => ({ message: describeConflict(conflict, latestTitleRef.current(conflict.taskId)), count: 1, conflict })),
+      ]);
+    }
+    if (left === 0 && result.blocked === null && result.rejected.length === 0 && conflicted.length === 0) setConfirmedAt(new Date().toISOString());
     announceQueueChanged();
 
     // True when the server's state was already read back because of a refusal: callers must not fetch it a second time.
@@ -310,7 +324,7 @@ export function useDashboardSync({
       }
 
       if (!queueResult.reconciled) await fetchFreshTasks();
-      if (queueResult.rejected.length === 0) setStatusInfo('Pending sync actions completed successfully.');
+      if (queueResult.rejected.length === 0 && (queueResult.conflicts ?? []).length === 0) setStatusInfo('Pending sync actions completed successfully.');
     } catch (error) {
       noteDrainFailure();
       await readPending().catch(() => undefined);
@@ -325,7 +339,10 @@ export function useDashboardSync({
     syncState,
     pendingQueueCount,
     rejectionNotices,
-    dismissRejections: () => setRejectionNotices([]),
+    // Dismiss clears the refusals; a conflict stays until it is resolved (Keep mine or Use theirs), so a decision is never lost by a stray click.
+    dismissRejections: () => setRejectionNotices((current) => current.filter((notice) => notice.conflict !== undefined)),
+    /** Removes one notice: "Use theirs" (the server's values were already adopted) or after "Keep mine" has been queued. */
+    resolveNotice: (notice: RejectionNotice) => setRejectionNotices((current) => current.filter((item) => item !== notice)),
     retryingSync,
     refreshPendingQueueCount,
     requestSync,

@@ -1,10 +1,12 @@
 // The wire format of POST /api/tasks/sync (Issue #60). Must match halotasks-server src/services/taskSync.ts.
 
+import type { FieldConflict } from './conflicts';
+
 export type TaskRef = { id: string } | { localId: string };
 
 export type SyncMutation =
   | { mutationId: string; type: 'create'; localId: string; payload: Record<string, unknown> }
-  | { mutationId: string; type: 'update'; task: TaskRef; payload: Record<string, unknown> }
+  | { mutationId: string; type: 'update'; task: TaskRef; payload: Record<string, unknown>; base?: Record<string, unknown> }
   | { mutationId: string; type: 'completion'; task: TaskRef; payload: Record<string, unknown> }
   | { mutationId: string; type: 'delete'; task: TaskRef };
 
@@ -13,6 +15,7 @@ export type SyncError = { httpStatus?: number; code?: string; message: string; b
 export type SyncResult =
   | { mutationId: string; status: 'applied'; task?: unknown; growth?: unknown; alreadyDeleted?: true }
   | { mutationId: string; status: 'replayed'; task: unknown }
+  | { mutationId: string; status: 'conflict'; conflicts: FieldConflict[]; task: unknown; retryable: false }
   | { mutationId: string; status: 'rejected'; error: SyncError; retryable: false }
   | { mutationId: string; status: 'failed'; error: SyncError; retryable: true }
   | { mutationId: string; status: 'skipped'; error: SyncError; retryable: true };

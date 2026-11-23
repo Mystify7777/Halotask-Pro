@@ -340,6 +340,10 @@ export default function DashboardPage() {
               retrying={sync.retryingSync}
               onRetry={sync.handleRetrySync}
               onDismiss={sync.dismissRejections}
+              onKeepMine={(notice) => {
+                if (notice.conflict) void tasksHook.keepMineAfterConflict(notice.conflict).then((queued) => queued && sync.resolveNotice(notice));
+              }}
+              onUseTheirs={sync.resolveNotice}
             />
             {statusError && <p className="form-error">{statusError}</p>}
             {statusInfo && <p className="form-success">{statusInfo}</p>}

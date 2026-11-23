@@ -18,6 +18,33 @@
   "entries": [
     {
       "date": "2026-11-23",
+      "category": "Frontend",
+      "title": "Client handling of task conflicts: base capture, conflict answer, Keep mine / Use theirs (Issue #62B)",
+      "description": "Issue #62B (client half of task conflict handling; the server contract is Issue #62A). An edit now remembers what the user saw: each queued update of a task the server has carries a base, the stored server-derived value of every field the edit CHANGES (a field the edit form merely repeats gets none, so another device's change is not turned into a conflict the user never caused). Invariant D11: the base is the value at the start of the first unsent edit of that field and later edits change only the requested value (A, B, C, D gives base A, requested D); the queue merge keeps the earlier base per field, an entry queued before this has no base and stays last-write-wins, a create never has one, only a resolution replaces one. The batch update mutation sends base when it is non-empty; the single-task fallback sends none. A conflict answer from the server is neither a rejection nor a failure: the entry is removed, the discarded values, the conflicted fields and the base are kept for the notice, the server's current task is adopted through the same transaction that decides staleness (a newer local edit or a completion still waiting is never overwritten), later work is not blocked, and the device is not claimed synced while a conflict is unresolved. Edits made while the request was out are kept as a new update that keeps the ORIGINAL base after a conflict (and, after an applied send, the value the server stored as returned in its answer, never the submitted payload), so nothing is silently lost or overwritten. Resolution is session-only like other rejections: the sync indicator shows the sentence with Keep mine (queues the discarded values again as a fresh edit based on the server value the user has now seen) and Use theirs (the server values are already shown); Dismiss clears refusals but never a conflict; no merge editor. Tested locally: 58 new client tests (pure rules, merge rules, 22 on the real IndexedDB layer with the real processor and settle including a randomised D11 property and reload persistence, sync hook, notice UI), client suite 2069 pass across 104 files, tsc -b clean; eight mutation checks each caught (later base wins, unchanged fields given a base, residual base order, a conflict dropping late edits, adopting over a waiting completion, no base captured at commit, base not sent, residual base from the sent payload). Not covered: a real browser's IndexedDB and multi-tab timing, and vite build (needs the production API URL). The server's real-MongoDB gate (taskConflict.realmongo.test.ts) passed in CI. A notice lost by a reload leaves the server values in place, and a second conflict on the same field after Keep mine needs a second decision: known limits.",
+      "files": [
+        "halotasks-client/src/offline/conflicts.ts",
+        "halotasks-client/src/offline/queueActions.ts",
+        "halotasks-client/src/offline/syncQueue.ts",
+        "halotasks-client/src/offline/localMutations.ts",
+        "halotasks-client/src/offline/batchProtocol.ts",
+        "halotasks-client/src/offline/batchTransport.ts",
+        "halotasks-client/src/offline/queueProcessor.ts",
+        "halotasks-client/src/hooks/useDashboardSync.ts",
+        "halotasks-client/src/hooks/useDashboardTasks.ts",
+        "halotasks-client/src/components/dashboard/SyncIndicator.tsx",
+        "halotasks-client/src/pages/DashboardPage.tsx",
+        "halotasks-client/src/offline/conflicts.test.ts",
+        "halotasks-client/src/offline/conflicts.realdb.test.ts",
+        "halotasks-client/src/offline/queueActions.base.test.ts",
+        "halotasks-client/src/hooks/useDashboardSync.conflicts.test.ts",
+        "halotasks-client/src/components/dashboard/SyncIndicator.test.tsx",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "date": "2026-11-23",
       "category": "Backend",
       "title": "Field-level conflict detection for batched task updates, server contract (Issue #62A)",
       "description": "Issue #62A (server half; the client, 62B, is not built and no client file changed). Until now two devices editing the same field of a task resolved silently by arrival order (the later write won), and a list field (tags, subtasks) was replaced whole. Characterised first with a scratch test: same field on two devices, later arrival wins; different fields both survive; delete then update is a rejected 404; update then delete deletes; completion and a title edit are independent. New opt-in contract on the batch endpoint only: an update mutation may carry base, the value the client expected for each field it sets or clears. The server applies the mutation when the stored value equals base or already equals the requested value, and otherwise answers a new status conflict {conflicts:[{field, base, requested, current}], task} that writes nothing and records no marker (one conflicting field stops the whole mutation; repeating it is judged again). Fields are compared by value, not by a task revision counter and not by the client-only syncedRevision, so different fields never conflict; tags and subtasks are one field each, compared as whole lists; absent optional fields are the value null; dates compare as instants; schema-default fields also match legacy documents that never stored them. The check is a read followed by a conditional write whose filter pins every checked field to the value just observed (positional paths for lists, because subdocument equality in MongoDB depends on key order); if another request changed a field in between, the update re-reads and evaluates again, bounded at 4 attempts, then a retryable 503 TASK_BUSY. A mutation without base, and the single PUT, are unchanged (last write wins); base on a create, completion or delete, or a malformed base, is a per-item 400 INVALID_BASE; the fingerprint covers base only when present, so existing mutations keep their #60 fingerprints. Documented invariant for 62B (D11): base is the server value at the start of the first unsent edit of a field and later local edits change only the requested value. Tested locally: 35 route tests on the strict doubles (extended with $and, $size and Date equality), 9 tests of the exact filter the real Mongoose model sends, mutation checks (dropping the pinned filter and dropping the requested-value rule are caught); server suite 2698 pass, tsc clean. NOT proven locally and the hard gate before 62B: tests/taskConflict.realmongo.test.ts (16 tests: MongoDB equality for strings, dates, absent fields, lists, subtasks including a different stored key order, legacy documents; ten-way concurrent conflicting updates apply exactly once; same-value requests never conflict; different fields never collide; one mutation id raced against itself; $slice with base) needs real MongoDB in CI. If subtask equality fails there, subtasks fall back to last-write-wins, with no invented merge.",
@@ -1989,5 +2016,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-23T03:13:57.208Z"
+  "lastUpdated": "2026-11-23T08:45:53.525Z"
 }

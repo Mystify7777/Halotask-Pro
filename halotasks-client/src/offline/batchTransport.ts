@@ -1,6 +1,8 @@
 import { taskService } from '../services/taskService';
 import type { BoundSession } from '../services/api';
 import { httpStatusOf } from './deliveryErrors';
+import { TaskConflictError } from './conflicts';
+import type { Task } from '../types/task';
 import { INVALID_SYNC_REQUEST, MAX_BATCH_MUTATIONS, type SyncMutation, type SyncResult } from './batchProtocol';
 
 /**
@@ -11,6 +13,8 @@ import { INVALID_SYNC_REQUEST, MAX_BATCH_MUTATIONS, type SyncMutation, type Sync
  * entry instead of making its own request.
  *
  *  - `applied` / `replayed`  -> the response (`{ task, growth }`; a replay carries `replayed: true`; a delete resolves with nothing)
+ *  - `conflict`              -> a TaskConflictError (Issue #62B): the server did not apply the edit because another device changed a
+ *                               field first. Not a refusal (it is not an HTTP error) and not a failure: the processor settles it itself
  *  - `rejected`              -> an error with `response.status` and `response.data.code`, so `isPermanentError` and the
  *                               409/404 recoveries see exactly what a single request's failure looked like
  *  - `failed` / `skipped`    -> an error with NO response (the server may not have applied it; kept and retried later)
@@ -163,6 +167,8 @@ export const createBatchTransport = async (plan: PlannedMutation[], session: Bou
           return { task: result.task, ...(result.growth !== undefined ? { growth: result.growth } : {}) } as T;
         case 'replayed':
           return { task: result.task, replayed: true } as T;
+        case 'conflict':
+          throw new TaskConflictError(result.conflicts, (result.task ?? null) as Task | null);
         case 'rejected':
           throw refusal(result.error.httpStatus ?? 400, result.error.message, result.error.code);
         default:

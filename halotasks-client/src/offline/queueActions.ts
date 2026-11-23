@@ -1,7 +1,12 @@
 import type { SyncQueueRecord } from './syncQueue';
+import { mergeBase } from './conflicts';
 
-/** What a caller asks to queue: everything but the id and the time, which the queue assigns. */
-export type QueueActionInput = Omit<SyncQueueRecord, 'id' | 'createdAt' | 'mutationId'>;
+/**
+ * What a caller asks to queue: everything but the id and the time, which the queue assigns. `rebase` (Issue #62B) is only an
+ * instruction to the merge, never stored: the action's `base` REPLACES the base of the entry it merges into (a resolution, where
+ * the user has just seen the server's value), instead of the earlier base winning.
+ */
+export type QueueActionInput = Omit<SyncQueueRecord, 'id' | 'createdAt' | 'mutationId'> & { rebase?: boolean };
 
 type QueuePayload = Record<string, unknown>;
 
@@ -46,7 +51,11 @@ export const completionKeyOf = (entry: { payload?: QueuePayload }): string | nul
  *  6. Identity survives: a merge keeps the entry's `id`, `type` and `taskId` (only the payload, `createdAt` and `mutationId`
  *     change); a completion entry's payload (and its `completionId`) is never rewritten. The `mutationId` (Issue #60) is NOT
  *     identity: it names the payload as last changed, so every merge assigns a new one and a new entry gets its own.
- *  7. All of this happens at insertion, inside the commit transaction, never during a sync run (the processor and
+ *  7. (Issue #62B) A queued UPDATE may carry `base`: for each field the user changed, the server-derived value at the start of
+ *     the first unsent edit of that field (D11). A merge keeps the earlier entry's base for every field it holds and adds the
+ *     new edit's base only for fields it does not hold; an entry with no base stays without one; a create never has a base
+ *     (nothing on the server to conflict with). Only a resolution (`rebase`) replaces a base.
+ *  8. All of this happens at insertion, inside the commit transaction, never during a sync run (the processor and
  *     `settleSyncQueue` rely on entries changing only by that merge). #60's batching takes the coalesced queue, in order and
  *     with ids intact, as its input; coalescing never depends on batching.
  */
@@ -79,7 +88,8 @@ export const applyActionToQueue = (
   now: number = Date.now(),
   mutationId: string = newMutationId(),
 ): SyncQueueRecord[] => {
-  const next: SyncQueueRecord = { ...action, id, createdAt: now, mutationId };
+  const { rebase, ...record } = action;
+  const next: SyncQueueRecord = { ...record, id, createdAt: now, mutationId };
   const items = [...queue];
 
   if (next.type === 'completion') {
@@ -102,12 +112,16 @@ export const applyActionToQueue = (
     const mayMerge = (index: number) => !(touchesCompletionState(next.payload) && index < lastCompletionIndex);
 
     const mergeInto = (index: number) => {
+      const { base: _earlierBase, ...target } = items[index];
+      // a create has no base; an update keeps the earlier base per field (D11) unless this is a resolution
+      const base = target.type === 'update' ? mergeBase(items[index].base, next.base, rebase === true) : undefined;
       items[index] = {
-        ...items[index],
+        ...target,
         payload: { ...(items[index].payload ?? {}), ...(next.payload ?? {}) },
         createdAt: next.createdAt,
         // the payload changed, so it is a different change: a new id (see newMutationId)
         mutationId,
+        ...(base !== undefined ? { base } : {}),
       };
       return items;
     };
