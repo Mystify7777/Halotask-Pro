@@ -9,7 +9,7 @@ import { createCompletionStore, installCompletionRecordMock, removeCompletionRec
 //   * every operation is applied ATOMICALLY: match + apply happen in one synchronous block, after the
 //     (optional) async `hooks.before`, exactly like a single-document update on the server;
 //   * only the operators the Growth Tree code uses are supported ($ne, $exists, $gte, $lte on filters;
-//     $type:'array' and a top-level $or on filters; $inc, $push, $addToSet, $set, $unset on updates). Anything else THROWS, so a change that starts using another
+//     $type:'array', $size and a top-level $or / $and on filters; $inc, $push, $addToSet, $set, $unset on updates). Anything else THROWS, so a change that starts using another
 //     operator fails here loudly instead of being quietly accepted;
 //   * matching follows MongoDB's rules: `null` matches a missing or null field, `$ne` matches when no
 //     array element equals the value (or the field is missing), `$gte`/`$lte` only match numbers
@@ -75,6 +75,8 @@ const isOperatorObject = (value: unknown): value is Record<string, unknown> =>
 
 const equalsValue = (actual: unknown, expected: unknown): boolean => {
   if (expected === null) return actual === null || actual === undefined;
+  // a Date equals a Date of the same instant (MongoDB compares dates by value)
+  if (expected instanceof Date) return actual instanceof Date && actual.getTime() === expected.getTime();
   if (Array.isArray(actual) && !Array.isArray(expected)) return actual.some((item) => Object.is(item, expected));
   return Object.is(actual, expected);
 };
@@ -93,6 +95,8 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
         return typeof actual === 'number' && typeof operand === 'number' && actual >= operand;
       case '$lte':
         return typeof actual === 'number' && typeof operand === 'number' && actual <= operand;
+      case '$size':
+        return Array.isArray(actual) && actual.length === operand;
       case '$type':
         if (operand !== 'array') throw new Error(`treeDoubles: unsupported $type ${String(operand)}`);
         return Array.isArray(actual);
@@ -108,6 +112,10 @@ const matches = (doc: Doc, filter: Filter): boolean =>
     if (path === '$or') {
       if (!Array.isArray(condition)) throw new Error('treeDoubles: $or needs an array');
       return condition.some((clause) => matches(doc, clause as Filter));
+    }
+    if (path === '$and') {
+      if (!Array.isArray(condition)) throw new Error('treeDoubles: $and needs an array');
+      return condition.every((clause) => matches(doc, clause as Filter));
     }
     if (path.startsWith('$')) throw new Error(`treeDoubles: unsupported top-level operator ${path}`);
     return matchesField(getPath(doc, path), condition);

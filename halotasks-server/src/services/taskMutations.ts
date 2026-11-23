@@ -15,6 +15,7 @@ import {
   type RevokeResult,
 } from '../utils/completionRecords';
 import { applyTaskWrite, taskOwnsCompletion } from '../utils/taskCompletion';
+import { CHECKED_FIELDS, INVALID_BASE, TASK_FIELD_CONFLICT, bodyValue, evaluateBase, isCheckedField, type BaseValues, type Verdict } from '../utils/taskConflict';
 import {
   DESCRIPTION_MAX_LENGTH,
   TAGS_MAX_COUNT,
@@ -54,6 +55,10 @@ export type UpdateMutation = { id: string; fp: string };
 export const UPDATE_CARRIES_COMPLETION = 'UPDATE_CARRIES_COMPLETION';
 /** Code of the 409 for a mutation id that was already applied with a DIFFERENT payload. */
 export const MUTATION_ID_REUSED = 'MUTATION_ID_REUSED';
+/** How many times an update with `base` re-reads and re-checks when another request changes a checked field between its read and its write (Issue #62). */
+export const MAX_BASE_ATTEMPTS = 4;
+/** Code of the 503 for an update with `base` that lost that race every time: nothing was written, the client retries. */
+export const TASK_BUSY = 'TASK_BUSY';
 /** How many applied update mutations a task remembers (bounded idempotency window, Issue #60 D12). */
 export const APPLIED_MUTATIONS_WINDOW = 25;
 /** The client's local id for a task it created offline (`local-<uuid>`), kept on the task so a retried create is recognised. */
@@ -455,11 +460,39 @@ export const createTaskService = (userId: string, body: unknown): Promise<Servic
     });
   });
 
+/**
+ * Validates the `base` of an update mutation (Issue #62): an object naming, for fields the mutation itself sets or clears, the
+ * value the client expected the server to hold. Values go through the SAME parser as a request body (trimming, date parsing,
+ * `null` = absent), so an expected value and a requested value are always comparable.
+ */
+const parseBase = (raw: unknown, body: Record<string, unknown>): { ok: true; value: BaseValues } | { ok: false; message: string } => {
+  if (!isPlainObject(raw)) return { ok: false, message: 'base must be an object' };
+  for (const key of Object.keys(raw)) {
+    if (!isCheckedField(key)) return { ok: false, message: `base.${key} is not a field that can be checked (${CHECKED_FIELDS.join(', ')})` };
+    if (body[key] === undefined) return { ok: false, message: `base.${key} is given but the mutation does not change ${key}` };
+  }
+  const parsed = parseTaskBody(raw, { requireTitle: false });
+  if (!parsed.ok) return { ok: false, message: `base: ${parsed.message}` };
+  const value: BaseValues = {};
+  for (const key of Object.keys(raw) as Array<(typeof CHECKED_FIELDS)[number]>) {
+    const known = bodyValue(parsed.value, key);
+    if (known === undefined) return { ok: false, message: `base.${key} is not a usable value` };
+    value[key] = known;
+  }
+  return { ok: true, value };
+};
+
 export const updateTaskService = (
   userId: string,
   taskId: unknown,
   body: unknown,
-  options: { mutation?: UpdateMutation } = {},
+  options: {
+    mutation?: UpdateMutation;
+    /** Issue #62: the values the client expected (batch only, and only together with `mutation`). Absent = last write wins, as always. */
+    base?: unknown;
+    /** Internal: which attempt this is, when an update with `base` re-checks after losing a race. */
+    attempt?: number;
+  } = {},
 ): Promise<ServiceResult> =>
   guarded(async () => {
     if (!isValidObjectId(taskId)) {
@@ -485,6 +518,13 @@ export const updateTaskService = (
       return reply(400, { message: 'An update cannot change completion state; send a completion.', code: UPDATE_CARRIES_COMPLETION });
     }
 
+    let base: BaseValues | undefined;
+    if (options.base !== undefined) {
+      const parsedBase = mutation ? parseBase(options.base, body) : ({ ok: false, message: 'base needs a mutation id' } as const);
+      if (!parsedBase.ok) return reply(400, { message: parsedBase.message, code: INVALID_BASE });
+      base = parsedBase.value;
+    }
+
     // With a mutation the stored markers are read too (they are never selected otherwise).
     const currentTask = await Task.findOne({ _id: taskId, userId }, mutation ? '+appliedMutations' : undefined);
 
@@ -495,6 +535,19 @@ export const updateTaskService = (
     if (mutation) {
       const prior = markerOf(currentTask, mutation.id);
       if (prior) return answerForMarker(userId, taskId, prior, mutation);
+    }
+
+    // Conflict check (Issue #62, opt-in: only a mutation that carries `base`). It runs AFTER the replay check, so a mutation that
+    // was applied still answers as a replay however the field has changed since. A conflict writes nothing and leaves no marker,
+    // so repeating the mutation is judged again against whatever the server holds then.
+    let verdict: Verdict | undefined;
+    if (base) {
+      verdict = evaluateBase(currentTask, base, payload);
+      if (verdict.conflicts.length > 0) {
+        const latest = await Task.findOne({ _id: taskId, userId }); // without the markers, as a replay answers
+        if (!latest) return reply(404, { message: 'Task not found' });
+        return reply(409, { message: 'The task changed since this edit began; nothing was changed.', code: TASK_FIELD_CONFLICT, conflicts: verdict.conflicts, task: latest });
+      }
     }
 
     // Deadline fields (Issue #10): the due time must always sit next to a due date.
@@ -563,6 +616,8 @@ export const updateTaskService = (
             userId,
             // the duplicate guard: a mutation id the task already holds matches nothing, so a replay writes nothing
             ...(mutation ? { 'appliedMutations.id': { $ne: mutation.id } } : {}),
+            // the same check as above, made atomically with the write: every checked field must still hold the value just observed
+            ...(verdict && verdict.clauses.length > 0 ? { $and: verdict.clauses } : {}),
             ...(relyOnStoredDueDate ? { dueDate: { $exists: true, $ne: null } } : {}),
             ...extraFilter,
           },
@@ -590,6 +645,12 @@ export const updateTaskService = (
       if (!latest) return reply(404, { message: 'Task not found' });
       const prior = markerOf(latest, mutation.id);
       if (prior) return answerForMarker(userId, taskId, prior, mutation);
+      if (verdict && !(relyOnStoredDueDate && latest.dueDate == null)) {
+        // a checked field changed after it was read (not a conflict yet: the fresh read decides): evaluate again, a bounded number of times
+        const attempt = options.attempt ?? 0;
+        if (attempt + 1 < MAX_BASE_ATTEMPTS) return updateTaskService(userId, taskId, body, { ...options, attempt: attempt + 1 });
+        return reply(503, { message: 'The task kept changing while this update was checked; nothing was changed.', code: TASK_BUSY });
+      }
       if (!relyOnStoredDueDate) throw new Error('A task update with a mutation matched nothing although the task exists.');
     }
 

@@ -17,6 +17,24 @@
   ],
   "entries": [
     {
+      "date": "2026-11-23",
+      "category": "Backend",
+      "title": "Field-level conflict detection for batched task updates, server contract (Issue #62A)",
+      "description": "Issue #62A (server half; the client, 62B, is not built and no client file changed). Until now two devices editing the same field of a task resolved silently by arrival order (the later write won), and a list field (tags, subtasks) was replaced whole. Characterised first with a scratch test: same field on two devices, later arrival wins; different fields both survive; delete then update is a rejected 404; update then delete deletes; completion and a title edit are independent. New opt-in contract on the batch endpoint only: an update mutation may carry base, the value the client expected for each field it sets or clears. The server applies the mutation when the stored value equals base or already equals the requested value, and otherwise answers a new status conflict {conflicts:[{field, base, requested, current}], task} that writes nothing and records no marker (one conflicting field stops the whole mutation; repeating it is judged again). Fields are compared by value, not by a task revision counter and not by the client-only syncedRevision, so different fields never conflict; tags and subtasks are one field each, compared as whole lists; absent optional fields are the value null; dates compare as instants; schema-default fields also match legacy documents that never stored them. The check is a read followed by a conditional write whose filter pins every checked field to the value just observed (positional paths for lists, because subdocument equality in MongoDB depends on key order); if another request changed a field in between, the update re-reads and evaluates again, bounded at 4 attempts, then a retryable 503 TASK_BUSY. A mutation without base, and the single PUT, are unchanged (last write wins); base on a create, completion or delete, or a malformed base, is a per-item 400 INVALID_BASE; the fingerprint covers base only when present, so existing mutations keep their #60 fingerprints. Documented invariant for 62B (D11): base is the server value at the start of the first unsent edit of a field and later local edits change only the requested value. Tested locally: 35 route tests on the strict doubles (extended with $and, $size and Date equality), 9 tests of the exact filter the real Mongoose model sends, mutation checks (dropping the pinned filter and dropping the requested-value rule are caught); server suite 2698 pass, tsc clean. NOT proven locally and the hard gate before 62B: tests/taskConflict.realmongo.test.ts (16 tests: MongoDB equality for strings, dates, absent fields, lists, subtasks including a different stored key order, legacy documents; ten-way concurrent conflicting updates apply exactly once; same-value requests never conflict; different fields never collide; one mutation id raced against itself; $slice with base) needs real MongoDB in CI. If subtask equality fails there, subtasks fall back to last-write-wins, with no invented merge.",
+      "files": [
+        "halotasks-server/src/utils/taskConflict.ts",
+        "halotasks-server/src/services/taskMutations.ts",
+        "halotasks-server/src/services/taskSync.ts",
+        "halotasks-server/tests/helpers/treeDoubles.ts",
+        "halotasks-server/tests/taskSync.conflict.routes.test.ts",
+        "halotasks-server/tests/taskConflict.writePaths.test.ts",
+        "halotasks-server/tests/taskConflict.realmongo.test.ts",
+        "docs/context.md"
+      ],
+      "priority": "high",
+      "status": "completed"
+    },
+    {
       "date": "2026-11-21",
       "category": "Bugfix",
       "title": "Reconcile sync acknowledgements without clobbering pending local state (Issue #61)",
@@ -1971,5 +1989,5 @@
       "status": "completed"
     }
   ],
-  "lastUpdated": "2026-11-22T13:55:17.884Z"
+  "lastUpdated": "2026-11-23T03:13:57.208Z"
 }

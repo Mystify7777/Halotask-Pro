@@ -9,6 +9,7 @@ import {
   type ServiceResult,
 } from './taskMutations';
 import mongoose from 'mongoose';
+import { INVALID_BASE, TASK_FIELD_CONFLICT, type FieldConflict } from '../utils/taskConflict';
 
 // Batched task synchronization (Issue #60): many independent task mutations in one request, one result per mutation.
 //
@@ -29,7 +30,9 @@ import mongoose from 'mongoose';
 //   delete      deleting a task that is already gone is a success (`alreadyDeleted`)
 //
 // Ordering across DEVICES is not established here: ordinary fields stay last-write-wins in the order requests reach the server,
-// exactly as with the single-task route.
+// exactly as with the single-task route, EXCEPT for an update that carries `base` (Issue #62, opt-in): then each field it names
+// is checked against the value the client expected (utils/taskConflict.ts). A mismatch is answered `conflict`, writes nothing and
+// records no marker. A conflict is a final answer about that mutation (nothing is unknown), so it does not block later ones.
 
 export const MAX_SYNC_MUTATIONS = 50;
 export const INVALID_SYNC_REQUEST = 'INVALID_SYNC_REQUEST';
@@ -39,16 +42,19 @@ const MUTATION_ID_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
 const SERVER_FAILURE_MESSAGE = 'The server could not apply this change right now.';
 
 type TaskRef = { id: string } | { localId: string };
-type SyncMutation =
+// `base` (Issue #62) is carried unvalidated until the update service parses it; only an update may have one.
+type SyncMutation = { base?: unknown } & (
   | { mutationId: string; type: 'create'; localId: string; payload: Record<string, unknown> }
   | { mutationId: string; type: 'update'; task: TaskRef; payload: Record<string, unknown> }
   | { mutationId: string; type: 'completion'; task: TaskRef; payload: Record<string, unknown> }
-  | { mutationId: string; type: 'delete'; task: TaskRef };
+  | { mutationId: string; type: 'delete'; task: TaskRef }
+);
 
 export type SyncError = { httpStatus?: number; code?: string; message: string; blockedBy?: string };
 export type SyncResult =
   | { mutationId: string; status: 'applied'; task?: unknown; growth?: unknown; alreadyDeleted?: true }
   | { mutationId: string; status: 'replayed'; task: unknown }
+  | { mutationId: string; status: 'conflict'; conflicts: FieldConflict[]; task: unknown; retryable: false }
   | { mutationId: string; status: 'rejected'; error: SyncError; retryable: false }
   | { mutationId: string; status: 'failed'; error: SyncError; retryable: true }
   | { mutationId: string; status: 'skipped'; error: SyncError; retryable: true };
@@ -62,6 +68,7 @@ const applied = (mutationId: string, extra: { task?: unknown; growth?: unknown; 
   ...(extra.alreadyDeleted ? { alreadyDeleted: true as const } : {}),
 });
 const replayed = (mutationId: string, task: unknown): SyncResult => ({ mutationId, status: 'replayed', task });
+const conflict = (mutationId: string, conflicts: FieldConflict[], task: unknown): SyncResult => ({ mutationId, status: 'conflict', conflicts, task, retryable: false });
 const rejected = (mutationId: string, error: SyncError): SyncResult => ({ mutationId, status: 'rejected', error, retryable: false });
 const failed = (mutationId: string, error: SyncError): SyncResult => ({ mutationId, status: 'failed', error, retryable: true });
 const skipped = (mutationId: string, blockedBy: string): SyncResult => ({
@@ -81,6 +88,8 @@ const parseRef = (value: unknown): TaskRef | null => {
   if (typeof localId === 'string' && id === undefined && CLIENT_KEY_PATTERN.test(localId)) return { localId };
   return null;
 };
+
+const withBase = (raw: Record<string, unknown>): { base?: unknown } => (raw.base !== undefined ? { base: raw.base } : {});
 
 /** The shape of the request. Anything wrong here fails the WHOLE request: without a usable mutation id there is no result to give. */
 const parseRequest = (body: unknown): { ok: true; mutations: SyncMutation[] } | { ok: false; message: string } => {
@@ -103,16 +112,16 @@ const parseRequest = (body: unknown): { ok: true; mutations: SyncMutation[] } | 
     if (type === 'create') {
       if (typeof raw.localId !== 'string' || !CLIENT_KEY_PATTERN.test(raw.localId)) return { ok: false, message: `${at}.localId is invalid` };
       if (!isPlainObject(raw.payload)) return { ok: false, message: `${at}.payload must be an object` };
-      mutations.push({ mutationId, type, localId: raw.localId, payload: raw.payload });
+      mutations.push({ mutationId, type, localId: raw.localId, payload: raw.payload, ...withBase(raw) });
     } else if (type === 'update' || type === 'completion') {
       const task = parseRef(raw.task);
       if (!task) return { ok: false, message: `${at}.task must name a task by id or localId` };
       if (!isPlainObject(raw.payload)) return { ok: false, message: `${at}.payload must be an object` };
-      mutations.push({ mutationId, type, task, payload: raw.payload });
+      mutations.push({ mutationId, type, task, payload: raw.payload, ...withBase(raw) });
     } else if (type === 'delete') {
       const task = parseRef(raw.task);
       if (!task) return { ok: false, message: `${at}.task must name a task by id or localId` };
-      mutations.push({ mutationId, type, task });
+      mutations.push({ mutationId, type, task, ...withBase(raw) });
     } else {
       return { ok: false, message: `${at}.type must be create, update, completion or delete` };
     }
@@ -132,6 +141,7 @@ const errorOf = (result: ServiceResult): SyncError => {
 /** Maps a service answer to a result: 2xx applied (or replayed), 4xx a final refusal, anything else a retryable failure. */
 const fromService = (mutationId: string, result: ServiceResult): SyncResult => {
   const { task, growth } = result.body;
+  if (result.status === 409 && result.body.code === TASK_FIELD_CONFLICT) return conflict(mutationId, result.body.conflicts as FieldConflict[], task);
   if (result.status >= 200 && result.status < 300) {
     return result.replayed ? replayed(mutationId, task) : applied(mutationId, { task, growth });
   }
@@ -165,6 +175,10 @@ export async function executeTaskSync(userId: string, body: unknown): Promise<Sy
 
   const attempt = async (mutation: SyncMutation, keys: { current: string[] }): Promise<SyncResult> => {
     const { mutationId } = mutation;
+    // an expected value only means something on an update: refuse it elsewhere instead of silently not checking it
+    if (mutation.base !== undefined && mutation.type !== 'update') {
+      return rejected(mutationId, { httpStatus: 400, code: INVALID_BASE, message: 'base is only allowed on an update.' });
+    }
     const blockerOf = (list: string[]) => list.map((key) => blocked.get(key)).find((id) => id !== undefined);
     const skippedBy = (blocker: string) => skipped(mutationId, blocker);
 
@@ -192,7 +206,11 @@ export async function executeTaskSync(userId: string, body: unknown): Promise<Sy
     if (mutation.type === 'update') {
       return fromService(
         mutationId,
-        await updateTaskService(userId, resolved.id, mutation.payload, { mutation: { id: mutationId, fp: fingerprintOf(mutation.payload) } }),
+        await updateTaskService(userId, resolved.id, mutation.payload, {
+          // the fingerprint covers the expected values too, but only when there are some, so every mutation without `base` keeps its #60 fingerprint
+          mutation: { id: mutationId, fp: fingerprintOf(mutation.base === undefined ? mutation.payload : { payload: mutation.payload, base: mutation.base }) },
+          ...(mutation.base !== undefined ? { base: mutation.base } : {}),
+        }),
       );
     }
     if (mutation.type === 'completion') {
