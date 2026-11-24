@@ -1687,7 +1687,27 @@ Timed reminders use `halotask-task-<reminderIdentity(task)>`: stable across titl
 A timed task earns an "overdue" notification only up to and including 24 h after its deadline (`OVERDUE_NOTIFICATION_WINDOW_MS`, the same bound the email channel uses). Reopening the app no longer announces tasks that went overdue days ago. The task stays overdue on its card; only the alert is bounded.
 
 ### Not in this change
-Cross-tab duplicate timed reminders: timed reminders still dedupe per tab (`sessionStorage`), so two open tabs can each send (and relay) the same reminder. Tracked as a follow-up issue, see `claude/design-issue-14.md`. Real browser and OS rendering, tray replacement and multi-device push need a real-device check.
+Cross-tab duplicate timed reminders: fixed by Issue #69 (section below); per-tab `sessionStorage` alone let two open tabs each send (and relay) the same reminder. Real browser and OS rendering, tray replacement and multi-device push need a real-device check.
+
+## Timed Reminders Across Tabs (Issue #69)
+
+Two tabs of one browser no longer both deliver the same timed reminder. Delivery (`onReminder`: the browser notification AND the server push relay) goes through a shared claim. Code: `reminders/scheduler.ts` (`deliverGroups`, `dispatchGrouped`, `readTimedClaims`/`writeTimedClaims`). Decisions D1-D9 of `claude/audit-issue-69.md`.
+
+**Invariant.** For one timed reminder (`type:reminderIdentity:schedulePart`, the existing key) at most one tab of a browser delivers it within its eligibility window.
+
+**How.** Inside one Web Lock (`halotask-timed-reminders`, separate from the day-reminder lock): read the claims from `localStorage` (`halotask_timed_claims`), drop the types of each group that are already claimed (or already sent by this tab), claim the rest and write the store, and only then call `onReminder` with one event that stands for exactly the unclaimed types (lead = first remaining type in the fixed precedence). The shared store is the authority at claim time; a scheduler's own fired set (read once at construction) only ever suppresses, never grants.
+
+**Lifetime (D3).** A claim lasts for the reminder's own window and not longer: due-soon until the deadline, overdue until the deadline plus the 24 h bound, work-session-soon and start-now until the end of the start window. It is not once-ever: a rescheduled task has a new key and is a new reminder. Behaviour change, on purpose: a reload or a new tab inside the window no longer announces the reminder again (before, only a per-tab store existed, and `resetSession()` has no production caller).
+
+**Failure (D5).** A delivery that throws or returns false keeps its claim: no retry by this tab, no takeover by another (delivery is two coupled effects; a takeover could send the push twice). One group's failure no longer stops the other groups of the poll (they are delivered in the same poll instead of being retried on the next).
+
+**Storage (D9).** Each record is `{at, until}` and self-validating: missing, malformed, incoherent (`at` in the future, negative or after `until`), expired or implausible (`until` more than 48 h ahead) records count as not claimed and are dropped on the next write, so only live claims remain when the cap applies. The cap (500 live claims, newest kept) is a bounded-storage tradeoff and an explicit exception to the invariant: only with more than 500 simultaneously live timed reminders in one browser could the oldest be claimed again. Unreadable or throwing storage: the tab delivers from its own fired set, as before.
+
+**Without Web Locks (D6).** The same steps run directly: best-effort, two tabs polling in the same instant can both pass the check. The notification tag still collapses the pair on screen; only the server relay could repeat. No hard cross-tab guarantee without Web Locks.
+
+**Not changed (D8).** Grouping, precedence, quiet hours, windows, wording, the tag, the date-only machinery (#42), the server API. No server dedupe, cross-device logic or persistent history.
+
+**Evidence.** `reminders/scheduler.timedClaims.test.ts` (32 tests: two tabs with and without locks, claim before delivery under the lock, a tab built before the other claimed, queued polls, reload/new tab inside the window, reschedule, recorded windows, expiry, failed delivery, merged groups, malformed/incoherent/hostile/throwing storage, the cap and that expired records never evict live ones, failing lock requests; the no-Web-Locks test is sequential and says so: it is not a race test). Two existing tests encoded the per-tab "new session re-sends" behaviour and were changed (`dateOnlyReminders.test.ts` exact-time retry test; `scheduler.grouping.test.ts` order test now clears the shared store between its two independent runs). Fourteen mutation checks (claim after send, no lock, shared claims ignored, failure releases the claim, expiry ignored, claim lasting the maximum, full merge sent, day lock reused, implausible `until` trusted, same-tab re-check dropped, no cap, `at` in the future trusted, negative `at` trusted, `at <= until` dropped): all killed except the last, an equivalent mutant (`at <= now < until` already implies it). NOT proven: real-browser multi-tab timing and real Web Locks behaviour (jsdom with a minimal lock model).
 
 ## Email Delivery (Issue #29)
 

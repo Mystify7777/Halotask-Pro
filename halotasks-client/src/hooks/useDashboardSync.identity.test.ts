@@ -55,6 +55,7 @@ const persistTasks = (updater: (current: Task[]) => Task[]) => {
 beforeEach(() => {
   db.store.clear();
   sessionStorage.clear();
+  localStorage.clear(); // the shared timed-reminder claims (Issue #69) belong to one browser, not to one test
   resetSyncQueueState();
   useAuthStore.setState({ token: 'token-a', user: USER });
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -65,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 const sentBy = () => {

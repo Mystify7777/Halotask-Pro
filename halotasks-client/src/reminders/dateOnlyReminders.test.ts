@@ -1066,7 +1066,7 @@ describe('the delivery retry budget is durable (persistent attempts)', () => {
     expect(() => reload([dateOnly()], failing).scheduler.runNow()).not.toThrow();
   });
 
-  it('exact-time reminders are not budgeted: they keep their once-per-session behaviour and leave no retry state', () => {
+  it('exact-time reminders are not budgeted: one attempt per claim window (Issue #69), whatever it returned, and no retry state', () => {
     const timed = makeTask({ _id: 'timed', dueDate: STORED, dueTime: '17:30' });
     at(`${DAY}T16:45:00.000Z`);
     const deliver = vi.fn(() => false);
@@ -1076,8 +1076,10 @@ describe('the delivery retry budget is durable (persistent attempts)', () => {
     first.scheduler.runNow();
     expect(deliver).toHaveBeenCalledTimes(1); // once per session, as before, whatever it returned
 
-    reload([timed], deliver).scheduler.runNow(); // a new session re-sends, as before
-    expect(deliver).toHaveBeenCalledTimes(2);
+    // Issue #69: a new session inside the reminder's window no longer re-sends it (the browser-wide claim survives the reload,
+    // even though this delivery failed: no retry, no takeover). It used to re-send because only a per-tab store existed.
+    reload([timed], deliver).scheduler.runNow();
+    expect(deliver).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(ATTEMPTS_KEY)).toBeNull();
   });
 

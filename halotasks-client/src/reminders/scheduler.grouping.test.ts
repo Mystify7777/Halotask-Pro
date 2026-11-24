@@ -92,6 +92,7 @@ describe('one notification per task per poll', () => {
     const forward = setup(tasks);
     forward.scheduler.runNow();
     sessionStorage.clear();
+    localStorage.clear(); // two independent browsers: the shared claims (Issue #69) of the first must not hide the second
     const backward = setup([...tasks].reverse());
     backward.scheduler.runNow();
     const byId = (list: Sent[]) => Object.fromEntries(list.map((s) => [s.id, s]));

@@ -3,6 +3,7 @@ import { dueDayKey } from '../utils/deadline';
 import { dateKeyInZone, dateKeyOffsetInZone, getEffectiveTimeZone } from '../utils/timeZone';
 import {
   getDateOnlyTasksInPhase,
+  getDeadlineMs,
   getSmartStartWindows,
   getTasksDueInNextHour,
   getTasksOverdueNow,
@@ -37,6 +38,65 @@ type ReminderSchedulerOptions = {
 };
 
 const SESSION_KEY = 'halotask_notified';
+
+// Timed reminders across the tabs of one browser (Issue #69). `sessionStorage` is private to a tab, so it can never tell tab B
+// what tab A already sent. Delivery of a timed reminder therefore goes through a CLAIM kept in `localStorage`, which every
+// same-origin tab shares: the claim is checked, written and only then delivered (notification AND server relay, both live in
+// `onReminder`) inside one Web Lock. Rules:
+//  - The shared store is the authority at claim time. A scheduler's own fired set never GRANTS delivery, it only suppresses
+//    (it is read once at construction, so by itself it is stale the moment another tab claims something).
+//  - A claim lasts for the reminder's own eligibility window (`until`: the deadline for "due soon", deadline + the 24 h bound
+//    for "overdue", the end of the start window for the two start reminders) and NOT longer: it is not once-ever. A reload or a
+//    new tab inside the window does not announce it again. A reschedule changes the key, so it is a new reminder.
+//  - A failed delivery does not release the claim, and no other tab takes over: delivery is two coupled effects, and a second
+//    tab repeating a half-done one would send the server push twice. (Timed reminders were never retried, see dispatchGrouped.)
+//  - A record is self-validating: it carries when it was claimed and when it expires, so nothing depends on a cleanup pass.
+//    Malformed, expired or implausible records count as "not claimed" and are dropped on the next write (so by the time the
+//    size cap applies, only LIVE claims are left in the store).
+//  - The cap (500 live claims, newest kept) is a bounded-storage tradeoff, an explicit exception to "at most one delivery": only
+//    with more than 500 simultaneously live timed reminders in one browser could the oldest one be claimed a second time.
+const TIMED_CLAIMS_KEY = 'halotask_timed_claims';
+/** The Web Lock that serialises claim check, write and delivery for timed reminders (not the day-reminder lock). */
+const TIMED_LOCK_NAME = 'halotask-timed-reminders';
+/** No claim is trusted for longer than this, whatever it says: the longest real window is the 24 h overdue bound. */
+const TIMED_CLAIM_MAX_MS = 48 * 60 * 60 * 1000;
+const TIMED_CLAIM_MAX_ENTRIES = 500;
+
+type TimedClaims = Record<string, { at: number; until: number }>;
+
+/** The claims still in force at `now`. Never throws; anything unreadable is simply "no claims". */
+const readTimedClaims = (now: number): TimedClaims => {
+  const claims: TimedClaims = {};
+  try {
+    const raw = localStorage.getItem(TIMED_CLAIMS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return claims;
+    }
+    for (const [key, entry] of Object.entries(parsed as Record<string, unknown>)) {
+      const { at, until } = (entry ?? {}) as { at?: unknown; until?: unknown };
+      // the whole record must be coherent: claimed in the past (never the future), not after it ends, still in force, not implausibly long
+      if (typeof at === 'number' && typeof until === 'number' && Number.isFinite(at) && Number.isFinite(until) && at >= 0 && at <= now && at <= until && until > now && until <= now + TIMED_CLAIM_MAX_MS) {
+        claims[key] = { at, until };
+      }
+    }
+  } catch {
+    // unreadable storage or malformed JSON: treated as no claims, delivery must not break
+  }
+  return claims;
+};
+
+const writeTimedClaims = (claims: TimedClaims): void => {
+  try {
+    const keys = Object.keys(claims);
+    if (keys.length > TIMED_CLAIM_MAX_ENTRIES) {
+      keys.sort((a, b) => claims[a].at - claims[b].at).slice(0, keys.length - TIMED_CLAIM_MAX_ENTRIES).forEach((key) => delete claims[key]);
+    }
+    localStorage.setItem(TIMED_CLAIMS_KEY, JSON.stringify(claims));
+  } catch {
+    // ignore storage failures: this tab still delivers, as it did before claims existed
+  }
+};
 
 // Calendar-day reminders of date-only tasks (Issue #42) are remembered across restarts, not just for the session: they
 // are tied to a calendar day, so opening the app again the same day must not repeat them. A receipt records the due
@@ -287,19 +347,84 @@ export const createReminderScheduler = ({
    * now" windows are open together is announced once. Every reminder a notification stands for is marked as fired, so
    * none of them is sent again later on its own. A reminder already fired earlier is not part of a later group.
    */
-  const collectIfNeeded = (pending: TimedReminderEvent[], task: Task, type: ReminderType) => {
-    if (!notifiedInSession.has(makeKey(task, type))) {
+  const collectIfNeeded = (pending: TimedReminderEvent[], task: Task, type: ReminderType, until: number) => {
+    const key = makeKey(task, type);
+    if (!notifiedInSession.has(key)) {
       pending.push({ task, type });
+      windowEnds.set(key, until);
+    }
+  };
+
+  /** When each collected reminder stops being eligible: how long its claim lasts (Issue #69). Rebuilt on every poll. */
+  const windowEnds = new Map<string, number>();
+
+  /**
+   * The claim-and-deliver step (Issue #69), run inside the timed Web Lock where there is one. For every group: the types
+   * another tab (or this one) already claimed are dropped, the rest are claimed and written to the shared store BEFORE
+   * `onReminder` is called, then delivered as one notification that stands for exactly those types. A group with nothing
+   * left to send is skipped. Delivery failures are swallowed on purpose: the claim stays (no retry, no takeover) and one
+   * task's failure must not stop the other groups of the poll.
+   */
+  const deliverGroups = (groups: ReturnType<typeof groupTimedEvents>) => {
+    const now = Date.now();
+    const claims = readTimedClaims(now); // read here, inside the critical section: never a snapshot from construction
+    for (const group of groups) {
+      const free: ReminderType[] = [];
+      for (const type of group.merged) {
+        const key = makeKey(group.task, type);
+        if (notifiedInSession.has(key)) {
+          continue; // this tab already sent it (or saw it claimed): also covers a second poll queued on the lock
+        }
+        notifiedInSession.add(key);
+        if (!claims[key]) {
+          free.push(type);
+          claims[key] = { at: now, until: Math.min(Math.max(windowEnds.get(key) ?? 0, now + 1), now + TIMED_CLAIM_MAX_MS) };
+        }
+      }
+      saveFiredKeys(notifiedInSession);
+      if (free.length === 0) {
+        continue;
+      }
+      writeTimedClaims(claims); // the claim is durable before anything is sent
+      try {
+        onReminder({ task: group.task, type: free[0], merged: free });
+      } catch {
+        // claimed, not delivered: not retried and not taken over by another tab (see the comment at TIMED_CLAIMS_KEY)
+      }
     }
   };
 
   const dispatchGrouped = (pending: TimedReminderEvent[]) => {
-    for (const group of groupTimedEvents(pending)) {
-      for (const type of group.merged) {
-        notifiedInSession.add(makeKey(group.task, type));
+    const groups = groupTimedEvents(pending);
+    if (groups.length === 0) {
+      return;
+    }
+    const section = () => deliverGroups(groups);
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+
+    // Without Web Locks (or if requesting one fails) the same steps run directly: best-effort across tabs, two tabs polling in
+    // the same instant can both pass the check, exactly like the day reminders. The notification tag still collapses the
+    // pair on screen; only the server relay could repeat. There is no hard cross-tab guarantee without Web Locks.
+    if (!locks || typeof locks.request !== 'function') {
+      section();
+      return;
+    }
+
+    let ran = false;
+    const run = () => {
+      ran = true;
+      section();
+    };
+    try {
+      locks.request(TIMED_LOCK_NAME, run).catch(() => {
+        if (!ran) {
+          section();
+        }
+      });
+    } catch {
+      if (!ran) {
+        section();
       }
-      saveFiredKeys(notifiedInSession);
-      onReminder({ task: group.task, type: group.type, merged: group.merged });
     }
   };
 
@@ -440,15 +565,16 @@ export const createReminderScheduler = ({
     const smartStartWindows = getSmartStartWindows(tasks, nowTime, settings.bufferMinutes);
 
     const pending: TimedReminderEvent[] = [];
-    dueSoon.forEach((task) => collectIfNeeded(pending, task, 'due-soon'));
-    overdue.forEach((task) => collectIfNeeded(pending, task, 'overdue'));
+    windowEnds.clear();
+    dueSoon.forEach((task) => collectIfNeeded(pending, task, 'due-soon', getDeadlineMs(task) ?? nowTime));
+    overdue.forEach((task) => collectIfNeeded(pending, task, 'overdue', (getDeadlineMs(task) ?? nowTime) + OVERDUE_NOTIFICATION_WINDOW_MS));
     smartStartWindows.forEach(({ task, latestStartTime, notifyAtTime, windowEndTime }) => {
       if (settings.workSessionSoonEnabled && nowTime >= notifyAtTime && nowTime < latestStartTime) {
-        collectIfNeeded(pending, task, 'work-session-soon');
+        collectIfNeeded(pending, task, 'work-session-soon', windowEndTime);
       }
 
       if (settings.startNowEnabled && nowTime >= latestStartTime && nowTime < windowEndTime) {
-        collectIfNeeded(pending, task, 'start-now');
+        collectIfNeeded(pending, task, 'start-now', windowEndTime);
       }
     });
     dispatchGrouped(pending);
