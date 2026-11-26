@@ -22,7 +22,7 @@ const resetEmailSubject = 'Reset your HaloTaskPro password';
 // `tokenVersion` must come from the SAME document read that authenticated the caller (the password
 // check at login), never from a second read: a reset bumps the version in the same atomic write as
 // the password, so a login that straddles a reset signs the old version and is refused by requireAuth.
-const createAuthToken = (userId: string, email: string, name: string, tokenVersion: number) => {
+export const createAuthToken = (userId: string, email: string, name: string, tokenVersion: number) => {
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!jwtSecret) {
@@ -34,7 +34,7 @@ const createAuthToken = (userId: string, email: string, name: string, tokenVersi
 
 // `timeZone` is the saved IANA preference (Issue #41), or null when the account has none (including every account
 // that predates it). It is returned so the client can restore it after login and register; it is never in the JWT.
-const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string; timeZone?: string | null }) => ({
+export const sanitizeUser = (user: { _id: { toString(): string }; name: string; email: string; timeZone?: string | null }) => ({
   id: user._id.toString(),
   name: user.name,
   email: user.email,

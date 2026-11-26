@@ -40,10 +40,19 @@ export type EmailReminderPreferences = {
 /** What PUT /api/user/email-reminders accepts: any subset of the editable fields. `timeZone: null` clears the override. */
 export type EmailReminderUpdate = Partial<Omit<EmailReminderPreferences, 'accountTimeZone' | 'effectiveTimeZone' | 'available'>>;
 
+/** What PUT /api/user/password accepts (Issue #46). */
+export type ChangePasswordPayload = {
+  currentPassword: string;
+  newPassword: string;
+};
+
 export type AuthResponse = {
   token: string;
   user: AuthUser;
 };
+
+/** What PUT /api/user/password answers: a token for the NEW session generation, the user, and a message. */
+export type ChangePasswordResponse = AuthResponse & { message: string };
 
 export type LoginPayload = {
   email: string;

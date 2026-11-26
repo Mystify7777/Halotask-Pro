@@ -103,7 +103,7 @@ Time zone section (Issue #41, `components/settings/TimeZoneSetting.tsx`):
 
 Account section:
 - Displays user name and email from the auth store
-- Includes a Change password button that navigates to `/forgot-password`
+- Includes a Change password form (current, new, confirm; Issue #46, section "Changing the Password While Signed In"). It used to be a button to `/forgot-password`, which redirects a signed-in user to the dashboard, so it did nothing useful
 
 ## Dashboard and Growth Tree UX
 
@@ -1207,6 +1207,8 @@ IPs. Because freed capacity is noticed by a throttled sweep, it can be seen up t
 | `POST /api/ai/parse-tasks` | user (after auth) | user id | 20 / 10 min |
 | | IP | client IP | 60 / 10 min |
 | `POST /api/push/relay` | user (after auth) | user id | 60 / 5 min |
+| `PUT /api/user/password` | user (after auth, refund on success) | user id | 5 / 15 min |
+| | IP | client IP | 30 / 15 min |
 
 Why these dimensions: IP-only limits are bypassed by spreading requests over IPs; account-only limits let an
 attacker lock a victim out. Login therefore combines a per-IP limit (credential spraying), a per-(account, IP)
@@ -1469,8 +1471,8 @@ filter that could be forgotten.
   being queued unowned.
 - Express is 5.x (5.2.1), so a rejected promise from the async `requireAuth` is forwarded to the error handler
   (500) rather than hanging; `requireAuth` also handles its own lookup errors explicitly.
-- Settings -> "Change password" sends a signed-in user to `/forgot-password`, which redirects authenticated
-  users to the dashboard (unchanged, out of scope).
+- Settings -> "Change password" used to send a signed-in user to `/forgot-password`, which redirects authenticated
+  users to the dashboard (so the control did nothing useful). Replaced by the real flow in Issue #46 (section below).
 
 **Tests.** `tests/sessionInvalidation.test.ts` (Mongo-independent, real app, in-memory `User` double with
 snapshot reads, an atomic conditional `updateOne`, and gates for the double-reset and login-straddles-reset
@@ -1483,6 +1485,35 @@ flight, sends nothing as the wrong account) and `offline/syncQueue.test.ts` (sto
 legacy purge). The history, AI, push and rate-limit route
 suites mint legacy-shape tokens (no `tv`) and stub the version lookup at 0, which doubles as coverage that
 legacy tokens keep working.
+
+## Changing the Password While Signed In (Issue #46)
+
+A signed-in user can change their own password. Before this the Settings button led to `/forgot-password`, which redirects authenticated users to the dashboard, so the only way was to sign out and use the email reset. The reset flow is unchanged. Decisions D1-D12 of `claude/audit-issue-46.md` (implemented with the recommended values; D5, D7 and D8 were open questions, see the record `claude/design-issue-46.md`).
+
+**Server: `PUT /api/user/password`** (`controllers/user.controller.ts`, behind `requireAuth` + `changePasswordLimiter`). Body `{ currentPassword, newPassword }`, strings. The account is the authenticated one.
+
+| Case | Answer |
+|---|---|
+| no / stale token | `401` (as everywhere) |
+| body not an object, field missing, empty or not a string | `400` |
+| new password shorter than `PASSWORD_MIN_LENGTH` | `400 PASSWORD_TOO_SHORT` |
+| wrong current password | **`403 INVALID_CURRENT_PASSWORD`**, never 401: the client signs out on ANY 401 |
+| new password equals the current one (`bcrypt.compare`, so passwords sharing bcrypt's first 72 bytes count as equal) | `400 PASSWORD_UNCHANGED` |
+| a concurrent change or reset replaced the hash first | `409 PASSWORD_CHANGED_ELSEWHERE`, nothing written |
+| too many failures | `429` |
+| success | `200 { token, user, message }` |
+
+**The write.** One `findOneAndUpdate` filtered on `{ _id, passwordHash: <the hash just verified>, tokenVersion: <the version read with it> }` (both pinned, locked D3; a legacy account whose `tokenVersion` is absent is matched with `$in: [0, null]`, because a plain `0` would not match a missing field). Every change and reset replaces the hash (fresh salt) today, so the hash alone would already serialise writers; the version is pinned as well so the session generation this endpoint moves is an explicit part of the guard and stays safe if a future operation bumps it without replacing the hash. A concurrent writer makes this write match nothing. The same update sets the new hash, `$inc`s `tokenVersion` (every other session, and this device's old token, are refused from now on), `$unset`s any outstanding reset code and empties `pushSubscriptions` (devices that were signed out must not keep receiving reminders; this one registers again). The returned token is signed with the `tokenVersion` of the document the write returned, never a second read, so this device stays signed in. bcrypt hashing happens before the write.
+
+**Notice.** After the commit a "password changed" mail goes to the account's own address through the shared email service with the `definite-only` policy, best effort: failure never changes the answer, and neither passwords nor tokens are in it or in a log.
+
+**Rate limit.** Per user 5 failures per 15 minutes (a success is refunded) plus 30 per IP per 15 minutes; process-local like every limiter. Login's own limits do not see these guesses, hence a separate limit. The limiter runs before the password is checked.
+
+**Client** (`components/settings/ChangePasswordForm.tsx`, `services/api.ts`). Three fields (`PasswordInput`), validated locally (required, minimum length, different, matching) with the server as authority; online only: offline the button is disabled and nothing is queued, cached or retried; the fields live only in component state and are cleared after every attempt. On success the session is replaced (`setAuth` with the returned token and user, `sessionGeneration` +1) and, when notification permission is granted, `subscribePush()` registers the device again. `runSessionSwap` wraps the request and the swap: the server revokes the old token the moment it commits, the client only swaps when the answer arrives, so a stray request of the old session in between is answered 401; while a swap is in flight such a 401 neither signs out nor tells the launch provider the session is invalid (the change request itself, marked `sessionSwap`, keeps the normal rule, so a genuinely dead session still signs out). After the swap, old requests are stale by session generation. Queued offline work is bound to the old token and refused before sending (`SessionChangedError`, entries kept); the next drain uses the new token. If the answer never arrives the old token is dead anyway: the message says to sign in with the new password. A person who forgot the current password is told to sign out and use "Forgot password" (a link would bounce a signed-in user to the dashboard).
+
+**Not changed (D11).** 2FA, a session list or "sign out other devices", account deletion, email change, strength meter, a password maximum (bcrypt's 72-byte truncation is pre-existing in register and reset too), a server logout, cross-tab token sync (other tabs of this browser sign out at their next request).
+
+**Evidence.** Server `tests/changePassword.routes.test.ts` (30 tests, real app with an in-memory `User` double that throws on any unexpected operator, field or filter key); `tests/changePassword.realmongo.test.ts` (6 tests: the write against real MongoDB, a non-zero tokenVersion matched exactly, 8 simultaneous changes apply exactly once, reset vs change races): NOT run here (typechecked only), CI is the gate. Client `ChangePasswordForm.test.tsx` (26, incl. label association), `api.passwordChange.test.ts` (7). Mutation checks: twelve server and twelve client mutants, all caught (wrong password as 401, filter not pinned, tokenVersion dropped from the filter, no tokenVersion bump, token of the old generation, reset code or subscriptions kept, plaintext "unchanged" check, notice failure propagating or logging secrets, no refund, wrong email policy; logout, invalid report or sticky guard during a swap, the change's own 401 suppressed, no `setAuth`, fields kept, offline not blocked, unconditional push, form outside the swap, 403 mapped to "session ended", same-password check dropped, input id not forwarded so the labels point at nothing). NOT proven: real-browser behaviour of the token swap across tabs, real push re-registration, real SMTP/Brevo delivery of the notice.
 
 ## API Security Headers (Issue #28)
 

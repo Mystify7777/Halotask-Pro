@@ -22,6 +22,12 @@ export const resetPasswordLimiter = createRateLimiter([
   { ...RATE_LIMITS.resetAccount, key: emailKey, refundOnSuccess: true },
 ]);
 
+// Mounted AFTER requireAuth so the user id is available (Issue #46). Only rejected attempts stay counted for the user.
+export const changePasswordLimiter = createRateLimiter([
+  { ...RATE_LIMITS.changePasswordUser, key: userKey, refundOnSuccess: true },
+  { ...RATE_LIMITS.changePasswordIp, key: ipKey },
+]);
+
 // Mounted AFTER requireAuth so the user id is available; unauthenticated requests never reach it.
 export const aiLimiter = createRateLimiter([
   { ...RATE_LIMITS.aiUser, key: userKey },

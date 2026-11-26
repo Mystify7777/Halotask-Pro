@@ -34,6 +34,12 @@ export const RATE_LIMITS = {
   resetIp: { windowMs: 15 * MINUTE, max: 10 },
   resetAccount: { windowMs: 15 * MINUTE, max: 5 },
 
+  // Changing the password while signed in (Issue #46) checks the CURRENT password, so a stolen token could be used to guess
+  // it. Per user: only failures count (refundOnSuccess), a handful per window. The IP bucket stops one source working through
+  // many stolen tokens. Login's own buckets do not see these guesses, so this is a separate limit.
+  changePasswordUser: { windowMs: 15 * MINUTE, max: 5 },
+  changePasswordIp: { windowMs: 15 * MINUTE, max: 30 },
+
   // AI parsing spends a paid provider quota. Per user is the real limit; per IP stops one machine
   // rotating through accounts. Prompt length, max_completion_tokens and the timeout (Issue #22) still apply.
   aiUser: { windowMs: 10 * MINUTE, max: 20 },

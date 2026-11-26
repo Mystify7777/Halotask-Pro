@@ -1,7 +1,16 @@
 import { apiClient } from './api';
-import type { EmailReminderPreferences, EmailReminderUpdate, UserPreferences } from '../types/auth';
+import type { ChangePasswordPayload, ChangePasswordResponse, EmailReminderPreferences, EmailReminderUpdate, UserPreferences } from '../types/auth';
 
 export const userService = {
+  /**
+   * Changes the signed-in user's password (Issue #46). Online only, never queued. The answer carries the token of the NEW
+   * session generation; the old one (and every other device's) is already revoked. The caller must replace the session with it,
+   * inside `runSessionSwap`. A wrong current password is a 403, not a 401, so it never signs the user out.
+   */
+  changePassword: async (payload: ChangePasswordPayload) => {
+    const response = await apiClient.put<ChangePasswordResponse>('/api/user/password', payload, { sessionSwap: true });
+    return response.data;
+  },
   /** The saved preferences of the signed-in account (`timeZone: null` when none is saved). */
   getPreferences: async () => {
     const response = await apiClient.get<UserPreferences>('/api/user/preferences');

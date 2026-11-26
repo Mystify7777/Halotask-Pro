@@ -1,11 +1,10 @@
-import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../App';
 import { useAuthStore } from '../store/authStore';
 import type { CSSProperties } from 'react';
 import TimeZoneSetting from '../components/settings/TimeZoneSetting';
+import ChangePasswordForm from '../components/settings/ChangePasswordForm';
 
 export default function SettingsPage() {
-  const navigate = useNavigate();
   const { theme, isOverridden, isAdaptive, setThemeOverride, setAdaptive, themes } = useTheme();
   const user = useAuthStore((s) => s.user);
 
@@ -119,12 +118,8 @@ export default function SettingsPage() {
 
         <hr className="setting-divider" />
 
-        <div className="setting-row">
-          <span className="setting-label">Password</span>
-          <button type="button" className="ghost-btn btn-sm" onClick={() => navigate('/forgot-password')}>
-            Change password
-          </button>
-        </div>
+        <h3 className="setting-label">Password</h3>
+        <ChangePasswordForm />
       </section>
     </div>
   );

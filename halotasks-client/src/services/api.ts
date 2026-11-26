@@ -27,10 +27,31 @@ export type SessionRequestConfig = AxiosRequestConfig & { session?: BoundSession
 
 declare module 'axios' {
   interface AxiosRequestConfig {
+    /** Marks the request that replaces this session's token (a password change, Issue #46); see `runSessionSwap`. */
+    sessionSwap?: boolean;
     /** In-memory marker set by the request interceptor: the auth store's sessionGeneration when the request was issued. */
     sessionGeneration?: number;
   }
 }
+
+// A password change revokes the token this tab is using at the moment the server commits it, and the client only swaps to the
+// new token when the answer arrives. A request of this tab that reaches the server in between is refused 401 although
+// nothing is wrong with the session, and must not sign the user out (nor tell the launch provider the session is invalid).
+let sessionSwapsInFlight = 0;
+
+/**
+ * Runs an operation that ends by REPLACING the session (the operation itself calls `setAuth`). While it runs, a 401 for any
+ * OTHER request of the old session is ignored; the operation's own request (`sessionSwap: true`) keeps the normal rule, so a
+ * genuinely dead session still signs out. Once `setAuth` has run, those old requests are stale by session generation anyway.
+ */
+export const runSessionSwap = async <T>(operation: () => Promise<T>): Promise<T> => {
+  sessionSwapsInFlight += 1;
+  try {
+    return await operation();
+  } finally {
+    sessionSwapsInFlight -= 1;
+  }
+};
 
 /** The signed-in account and its token right now; null unless both exist. */
 export const captureSession = (): BoundSession | null => {
@@ -146,7 +167,8 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error?.response?.status === 401) reportAnswer(error.config, 'invalid');
+    const duringSwap = sessionSwapsInFlight > 0 && error?.config?.sessionSwap !== true;
+    if (error?.response?.status === 401 && !duringSwap) reportAnswer(error.config, 'invalid');
     // An authenticated request that failed like an unreachable server only asks the launch provider for a fresh readiness
     // probe; it never decides anything itself (Issue #49). Public auth calls are not part of a session.
     if (
@@ -159,7 +181,7 @@ apiClient.interceptors.response.use(
 
     // A 401 only ends the session that issued the request. A late 401 for a previous account (logged out,
     // then another account signed in while the request was in flight) says nothing about the current one.
-    if (error?.response?.status === 401 && issuedByActiveSession(error.config)) {
+    if (error?.response?.status === 401 && !duringSwap && issuedByActiveSession(error.config)) {
       useAuthStore.getState().clearAuth();
       authRedirect.toLogin();
     }

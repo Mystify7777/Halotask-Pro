@@ -2,6 +2,8 @@ import { useState, type ChangeEvent } from 'react';
 import styles from './PasswordInput.module.css';
 
 type PasswordInputProps = {
+  /** Lets a visible <label htmlFor> point at the input. */
+  id?: string;
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   placeholder?: string;
@@ -12,6 +14,7 @@ type PasswordInputProps = {
 };
 
 export default function PasswordInput({
+  id,
   value,
   onChange,
   placeholder,
@@ -25,6 +28,7 @@ export default function PasswordInput({
   return (
     <span className={styles.wrapper}>
       <input
+        id={id}
         type={visible ? 'text' : 'password'}
         value={value}
         onChange={onChange}
