@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Server typecheck and concurrency test fixes after dependency refresh
+
+**2026-11-27 · Bugfix · completed · Priority: medium**
+
+Aligned the password-change concurrency test with the per-user limit of five requests, narrowed `ParsedTaskBody.priority` to `TaskPriority`, and preserved literal enum types in the completion migration fixture. Verification: server typecheck passed, full server suite passed (81 files; 3,005 tests passed, one todo), and server build passed.
+
 #### Refreshed dependency lockfiles
 
 **2026-11-27 · Config · completed · Priority: medium**

@@ -31,6 +31,7 @@ import {
   parseStartTime,
   parseSubtasks,
   type Subtask,
+  type TaskPriority,
 } from '../utils/taskValidators';
 
 // Task mutation services (Issue #60). The create / update / delete rules used to live inside the Express handlers; they
@@ -129,7 +130,7 @@ type ParsedTaskBody = {
    * `completed` is true, a revocation when it is false. Absent for clients that predate it (legacy path).
    */
   completionEvent?: TaskCompletionEvent;
-  priority?: string;
+  priority?: TaskPriority;
   tags?: string[];
   /** Replaces the whole list when present (null already parsed to []); absent means "leave the stored subtasks alone". */
   subtasks?: Subtask[];

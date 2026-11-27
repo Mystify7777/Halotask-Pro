@@ -103,12 +103,12 @@ describe('the write', () => {
 });
 
 describe('concurrency', () => {
-  it('of 8 simultaneous changes from the same state exactly one applies, with one tokenVersion bump', async () => {
+  it('of 5 simultaneous changes from the same state exactly one applies, with one tokenVersion bump', async () => {
     const { id, token } = await makeUser();
-    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => change(token, OLD, `concurrent-new-${i}-pass`)));
+    const results = await Promise.all(Array.from({ length: 5 }, (_, i) => change(token, OLD, `concurrent-new-${i}-pass`)));
     const statuses = results.map((r) => r.status);
     expect(statuses.filter((s) => s === 200)).toHaveLength(1);
-    expect(statuses.filter((s) => s === 409 || s === 401)).toHaveLength(7); // 409 from the write, or 401 once the bump is visible to requireAuth
+    expect(statuses.filter((s) => s === 409 || s === 401)).toHaveLength(4); // 409 from the write, or 401 once the bump is visible to requireAuth
     expect((await stored(id)).tokenVersion).toBe(1);
     const winner = results.find((r) => r.status === 200)!;
     const index = results.indexOf(winner);

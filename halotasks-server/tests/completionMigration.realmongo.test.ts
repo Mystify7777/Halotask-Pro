@@ -114,7 +114,7 @@ describe('real MongoDB: migrating DayHistory', () => {
     await legacyDay(owner.id, OLD, [{ taskId: 'x', title: 'Snapshot', estimatedMinutes: 5 }]);
     await legacyDay(owner.id, REVOKED_DAY, [{ taskId: 'a', title: 'A', estimatedMinutes: 5 }, { taskId: 'b', title: 'B', estimatedMinutes: 5 }]);
     await legacyDay(owner.id, addDays(today, -2), [{ taskId: 'y', title: 'Recent', estimatedMinutes: 5 }]);
-    const base = { userId: owner.id, titleSnapshot: 'Live', estimatedMinutesSnapshot: 1, receivedAt: new Date(), source: 'live', completedAtSource: 'client', utcOffsetMinutes: 0 };
+    const base = { userId: owner.id, titleSnapshot: 'Live', estimatedMinutesSnapshot: 1, receivedAt: new Date(), source: 'live' as const, completedAtSource: 'client' as const, utcOffsetMinutes: 0 };
     await CompletionRecord.create({ ...base, completionId: 'live-old', taskId: 'z', completedAt: new Date(`${OLD}T05:00:00Z`), localDate: OLD, status: 'active' });
     await CompletionRecord.create({
       ...base, completionId: 'rev-1', taskId: 'a', completedAt: new Date(`${REVOKED_DAY}T05:00:00Z`), localDate: REVOKED_DAY,
