@@ -43,6 +43,12 @@ Entries are listed newest first. Each update has its own heading; date, category
 
 ### November 2026
 
+#### Refreshed dependency lockfiles
+
+**2026-11-27 · Config · completed · Priority: medium**
+
+Updated the client and server package-lock files while leaving package.json declarations unchanged. Notable resolved versions include client Vite 8.0.8 to 8.4.0, Vitest 5.0.2 to 5.1.2, React Router 7.14.1 to 7.18.7 and Axios 1.15.0 to 1.21.1; server Mongoose 9.4.1 to 9.13.1, MongoDB driver 7.1.1 to 7.9.1 and Vitest 4.1.4 to 4.1.12. This records the refreshed dependency graph so installs remain reproducible under the existing declared version ranges. Verification: client tests (107 files / 2,134 tests) and build passed. Server tests: 80 files / 3,004 passed, one failed, one todo. The failure is the real-MongoDB password-change concurrency test: it sends 8 simultaneous requests through a per-user limiter capped at 5, so over-limit requests return 429 rather than the expected CAS 409/401. Server typecheck and build also fail under the refreshed lock because Mongoose 9.13.1's inferred schema enum types reject broad strings for task priority and completion source; the task._id errors cascade from the failed Task.create overload. Test typecheck reports these source issues plus two completion-migration fixtures with broad string source values. Changelog formatting tests passed.
+
 #### Email reminders and digest as a server delivery channel (Issue #29)
 
 **2026-11-17 · Feature · completed · Priority: high**
