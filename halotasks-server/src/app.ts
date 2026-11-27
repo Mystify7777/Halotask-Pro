@@ -11,7 +11,7 @@ import historyRoutes from './routes/history.routes';
 import internalRoutes from './routes/internal.routes';
 import completionEventRoutes from './routes/completionEvent.routes';
 import { resolveOrigin } from './config/cors';
-import { getTrustProxyHops } from './config/env';
+import { getTrustProxyHops, isMcpEnabled } from './config/env';
 import { securityHeaders } from './middleware/securityHeaders';
 import { isMalformedJsonBodyError, isPayloadTooLargeError } from './utils/httpErrors';
 
@@ -51,6 +51,21 @@ app.use('/api/history', historyRoutes);
 app.use('/api/completion-events', completionEventRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/internal', internalRoutes);
+
+// MCP Phase 1 (Issue #66): authenticated, read-only Model Context Protocol endpoint, OPT-IN (MCP_ENABLED=true).
+// Authentication remains the existing HaloTask JWT/session-generation check; MCP has no shared server secret.
+// Loaded lazily so a deployment that has not enabled it (or runs a Node too old to require() the ESM-only SDK) never
+// touches the SDK and cannot be broken by it.
+if (isMcpEnabled()) {
+  const loadMcp = import('./routes/mcp.routes.js').then((module) => module.mcpRouter);
+  loadMcp.catch((error: unknown) => {
+    // Visible at startup; every /mcp request then fails closed with the generic 500 below, and the rest of the API is unaffected.
+    console.error('[MCP] The MCP endpoint could not be loaded:', error instanceof Error ? error.message : error);
+  });
+  app.use('/mcp', (req, res, next) => {
+    loadMcp.then((router) => router(req, res, next), next);
+  });
+}
 
 // ── 404 handler ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

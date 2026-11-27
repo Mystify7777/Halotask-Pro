@@ -1515,6 +1515,23 @@ A signed-in user can change their own password. Before this the Settings button 
 
 **Evidence.** Server `tests/changePassword.routes.test.ts` (30 tests, real app with an in-memory `User` double that throws on any unexpected operator, field or filter key); `tests/changePassword.realmongo.test.ts` (6 tests: the write against real MongoDB, a non-zero tokenVersion matched exactly, 8 simultaneous changes apply exactly once, reset vs change races): NOT run here (typechecked only), CI is the gate. Client `ChangePasswordForm.test.tsx` (26, incl. label association), `api.passwordChange.test.ts` (7). Mutation checks: twelve server and twelve client mutants, all caught (wrong password as 401, filter not pinned, tokenVersion dropped from the filter, no tokenVersion bump, token of the old generation, reset code or subscriptions kept, plaintext "unchanged" check, notice failure propagating or logging secrets, no refund, wrong email policy; logout, invalid report or sticky guard during a swap, the change's own 401 suppressed, no `setAuth`, fields kept, offline not blocked, unconditional push, form outside the swap, 403 mapped to "session ended", same-password check dropped, input id not forwarded so the labels point at nothing). NOT proven: real-browser behaviour of the token swap across tabs, real push re-registration, real SMTP/Brevo delivery of the notice.
 
+## MCP Phase 1: Read-Only Model Context Protocol Endpoint (Issue #66)
+
+`POST /mcp` (Streamable HTTP, stateless) lets an MCP client read the signed-in user's tasks. Full description, limits and the
+open authentication decision: `halotasks-server/docs/mcp.md`. What matters for the rest of the code base:
+
+- **Opt-in.** Mounted only when `MCP_ENABLED` is exactly `true` (`config/env.ts isMcpEnabled`); lazily `import()`ed from `app.ts`, so
+  with the flag off the route module and the ESM-only SDK are never loaded (the CommonJS build loads the SDK with a native dynamic
+  `import()`, so it needs only the SDK's own floor, Node >= 20; verified on 20.20.2 and 22.23.5, CI runs 22). A load failure is logged once and `/mcp` fails closed; the rest of the API is unaffected.
+- **Order**: `requireAuth` (existing JWT + `tokenVersion`) -> `mcpLimiter` (per user 120/min, per IP 300/min, `mcpUser`/`mcpIp` in
+  `config/rateLimits.ts`) -> handler. The authentication is the login JWT (interim, see the doc): a leaked token is the whole session.
+- **Scope**: `mcp/scope.ts personalScope(userId)` is built from the authenticated identity; tool input can never name an owner. Tool handlers
+  (`mcp/server.ts`, the route) import no model; `mcp/readService.ts` is the only database access, read-only, every query carrying the owner,
+  with an allow-list `select` (never `userId`, `completionId`, `appliedMutations`, `clientKey`, `reminderSent`).
+- **Summary dates** follow #41/#42: day in the account's zone (UTC if unset), timed tasks by exact deadline; never `dueDate < now` as instants.
+- **Not built**: write tools, project scopes, per-client revocable credentials/OAuth, dependencies/comments (no such models).
+- **Tests**: `tests/mcp.routes.test.ts` (33), `tests/mcp.flag.test.ts` (17; the opt-in, isolated per case) with 19 mutants caught and `tests/mcp.readService.realmongo.test.ts` (CI gate).
+
 ## API Security Headers (Issue #28)
 
 The API sends a small, deliberate set of browser-hardening headers from `src/middleware/securityHeaders.ts`

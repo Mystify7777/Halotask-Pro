@@ -211,3 +211,12 @@ export function getEmailReminderDailyCap(env: NodeJS.ProcessEnv = process.env): 
   }
   return parsed;
 }
+
+/**
+ * Whether the MCP endpoint (Issue #66) is mounted. Opt-in: only the exact string "true" enables it. Off by default because
+ * the endpoint takes the user's session JWT (see docs/mcp.md). With the flag off its ESM-only SDK packages (Node >= 20, loaded
+ * by a dynamic import()) are never even loaded, so the rest of the API cannot be affected.
+ */
+export function isMcpEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MCP_ENABLED === 'true';
+}

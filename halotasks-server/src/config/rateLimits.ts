@@ -53,6 +53,9 @@ export const RATE_LIMITS = {
   // write. The client sends one batch per drain (a drain is triggered by a local change, a reconnect or a manual retry), so one
   // request a second on average is far above real use and well below a loop.
   taskSyncUser: { windowMs: MINUTE, max: 60 },
+  // MCP (Issue #66): an AI client can call tools in tight loops. Per user and per IP, counted per request.
+  mcpUser: { windowMs: MINUTE, max: 120 },
+  mcpIp: { windowMs: MINUTE, max: 300 },
 
   // The external scheduler's trigger (Issue #29): one call every few minutes from a fixed source. This only blunts
   // guessing of the shared secret; the secret's length and constant-time comparison are the real protection.

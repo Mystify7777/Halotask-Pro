@@ -41,3 +41,9 @@ export const pushRelayLimiter = createRateLimiter([{ ...RATE_LIMITS.pushRelayUse
 
 // Mounted BEFORE the secret check on the internal scheduler route, so wrong-secret guesses are counted per source.
 export const internalRunLimiter = createRateLimiter([{ ...RATE_LIMITS.internalRunIp, key: ipKey }]);
+
+// Mounted AFTER requireAuth so the user id is available (Issue #66).
+export const mcpLimiter = createRateLimiter([
+  { ...RATE_LIMITS.mcpUser, key: userKey },
+  { ...RATE_LIMITS.mcpIp, key: ipKey },
+]);
